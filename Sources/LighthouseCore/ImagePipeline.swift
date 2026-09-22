@@ -12,6 +12,11 @@ public enum ImagePipelineError: LocalizedError {
     case invalidDirectory(URL)
     case exportFailed(URL)
     case invalidMaskGeometry
+    case invalidMaskData(String)
+    case subjectNotFound
+    case subjectMaskFailed(String)
+    case invalidJPEGQuality
+    case invalidJPEGData
     case lutFailed(String)
 
     public var errorDescription: String? {
@@ -21,6 +26,11 @@ public enum ImagePipelineError: LocalizedError {
         case .invalidDirectory(let url): "내보내기 폴더를 사용할 수 없습니다: \(url.path)"
         case .exportFailed(let url): "JPEG 파일을 저장할 수 없습니다: \(url.path)"
         case .invalidMaskGeometry: "영역 마스크의 이미지 크기가 올바르지 않습니다."
+        case .invalidMaskData(let reason): "저장된 영역 마스크가 올바르지 않습니다: \(reason)"
+        case .subjectNotFound: "자동으로 선택할 피사체를 찾지 못했습니다."
+        case .subjectMaskFailed(let reason): "자동 피사체 마스크를 만들 수 없습니다: \(reason)"
+        case .invalidJPEGQuality: "JPEG 품질은 유한한 값이어야 합니다."
+        case .invalidJPEGData: "JPEG 데이터가 올바르지 않습니다."
         case .lutFailed(let reason): "LUT를 적용할 수 없습니다: \(reason)"
         }
     }
@@ -35,8 +45,10 @@ public final class ImagePipeline: @unchecked Sendable {
     public static func isRAW(_ url: URL) -> Bool { rawExtensions.contains(url.pathExtension.lowercased()) }
     public static var supportedCameraModels: [String] { CIRAWFilter.supportedCameraModels }
 
-    private let context: CIContext
-    private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    static let maximumMaskBytes = 8 * 1_024 * 1_024
+
+    let context: CIContext
+    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
     private let lutStore: LUTStore
 
     public init(lutDirectory: URL = LUTStore.defaultDirectory) {
@@ -135,7 +147,13 @@ public final class ImagePipeline: @unchecked Sendable {
             image = filter.outputImage ?? image
         }
         image = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
-        for adjustment in edits.localAdjustments where adjustment.isEnabled && !adjustment.strokes.isEmpty {
+        image = try RetouchProcessor.apply(to: image, strokes: edits.retouchStrokes,
+                                           context: context, colorSpace: colorSpace)
+        image = try AdvancedColorProcessor.applyColor(to: image, curves: edits.curves,
+                                                      ranges: edits.colorRanges)
+        for adjustment in edits.localAdjustments where adjustment.isEnabled &&
+            (adjustment.baseMask != nil || adjustment.isInverted || !adjustment.strokes.isEmpty) {
+            if let baseMask = adjustment.baseMask { _ = try decodedMask(baseMask) }
             guard adjustment.exposure.isFinite, adjustment.contrast.isFinite,
                   adjustment.exposure != 0 || adjustment.contrast != 1 else { continue }
             let mask = try maskImage(for: adjustment, width: Int(image.extent.width),
@@ -165,6 +183,7 @@ public final class ImagePipeline: @unchecked Sendable {
                 image = try applyLUT(lut, to: image)
             }
         }
+        image = try AdvancedColorProcessor.applyGrain(to: image, settings: edits.grain)
         image = transformedForDisplay(image, edits: edits, maxPixel: maxPixel)
         let rect = CGRect(x: 0, y: 0, width: floor(image.extent.width), height: floor(image.extent.height))
         guard rect.width > 0, rect.height > 0,
@@ -212,18 +231,14 @@ public final class ImagePipeline: @unchecked Sendable {
     public func renderMask(adjustment: LocalAdjustment, sourceWidth: Int, sourceHeight: Int,
                            edits: EditSettings, maxPixel: Int = 1600) throws -> CGImage {
         guard sourceWidth > 0, sourceHeight > 0 else { throw ImagePipelineError.invalidMaskGeometry }
-        let turns = ((edits.rotationQuarterTurns % 4) + 4) % 4
-        let rotatedWidth = Double(turns.isMultiple(of: 2) ? sourceWidth : sourceHeight)
-        let rotatedHeight = Double(turns.isMultiple(of: 2) ? sourceHeight : sourceWidth)
-        let aspect = edits.cropAspect.flatMap {
-            $0.isFinite && $0 > 0 && min(rotatedWidth, rotatedHeight * $0) > 0 &&
-                min(rotatedWidth, rotatedHeight * $0) / $0 > 0 ? $0 : nil
-        }
-        let displayedWidth = aspect.map { min(rotatedWidth, rotatedHeight * $0) } ?? rotatedWidth
-        let displayedHeight = aspect.map { displayedWidth / $0 } ?? rotatedHeight
-        let scale = min(1, Double(max(1, maxPixel)) / max(displayedWidth, displayedHeight))
-        let mask = try maskImage(for: adjustment, width: sourceWidth, height: sourceHeight, scale: scale)
-        let output = transformedForDisplay(mask, edits: edits, maxPixel: maxPixel)
+        let geometry = PhotoGeometry(sourceWidth: Double(sourceWidth),
+                                     sourceHeight: Double(sourceHeight), edits: edits)
+        let scale = min(1, Double(max(1, maxPixel)) /
+            max(geometry.outputSize.width, geometry.outputSize.height))
+        let mask = try maskImage(for: adjustment, width: sourceWidth, height: sourceHeight, scale: 1)
+        let renderLimit = max(1, Int((max(geometry.outputSize.width,
+                                         geometry.outputSize.height) * scale).rounded(.down)))
+        let output = transformedForDisplay(mask, edits: edits, maxPixel: renderLimit)
         let rect = CGRect(x: 0, y: 0, width: floor(output.extent.width), height: floor(output.extent.height))
         let gray = CGColorSpace(name: CGColorSpace.linearGray)!
         guard rect.width > 0, rect.height > 0,
@@ -243,12 +258,26 @@ public final class ImagePipeline: @unchecked Sendable {
         let scaledHeight = max(1, Int((Double(height) * scale).rounded()))
         guard let bitmap = CGContext(data: nil, width: scaledWidth, height: scaledHeight,
                                      bitsPerComponent: 8, bytesPerRow: 0,
-                                     space: CGColorSpaceCreateDeviceGray(),
+                                     space: CGColorSpace(name: CGColorSpace.linearGray)!,
                                      bitmapInfo: CGImageAlphaInfo.none.rawValue) else {
             throw ImagePipelineError.invalidMaskGeometry
         }
         bitmap.setFillColor(gray: 0, alpha: 1)
         bitmap.fill(CGRect(x: 0, y: 0, width: scaledWidth, height: scaledHeight))
+        if let baseMask = adjustment.baseMask {
+            let decoded = try decodedMask(baseMask)
+            bitmap.interpolationQuality = .high
+            bitmap.draw(decoded, in: CGRect(x: 0, y: 0, width: scaledWidth, height: scaledHeight))
+        }
+        if adjustment.isInverted, let data = bitmap.data {
+            let bytes = data.bindMemory(to: UInt8.self, capacity: bitmap.bytesPerRow * scaledHeight)
+            for row in 0..<scaledHeight {
+                for column in 0..<scaledWidth {
+                    let index = row * bitmap.bytesPerRow + column
+                    bytes[index] = 255 &- bytes[index]
+                }
+            }
+        }
         bitmap.translateBy(x: 0, y: CGFloat(scaledHeight))
         bitmap.scaleBy(x: 1, y: -1)
         for stroke in adjustment.strokes {
@@ -289,22 +318,33 @@ public final class ImagePipeline: @unchecked Sendable {
         return mask
     }
 
-    private func transformedForDisplay(_ source: CIImage, edits: EditSettings, maxPixel: Int?) -> CIImage {
-        var image = source
-        let turns = ((edits.rotationQuarterTurns % 4) + 4) % 4
-        if turns != 0 { image = image.oriented(CGImagePropertyOrientation(rawValue: UInt32([1, 6, 3, 8][turns]))!) }
-        image = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
-        if let aspect = edits.cropAspect, aspect > 0, aspect.isFinite,
-           min(image.extent.width, image.extent.height * aspect) > 0,
-           min(image.extent.width, image.extent.height * aspect) / aspect > 0 {
-            let bounds = image.extent
-            let cropWidth = min(bounds.width, bounds.height * aspect)
-            let cropHeight = cropWidth / aspect
-            image = image.cropped(to: CGRect(x: (bounds.width - cropWidth) / 2,
-                                            y: (bounds.height - cropHeight) / 2,
-                                            width: cropWidth, height: cropHeight))
-            image = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+    private func decodedMask(_ mask: RasterMask) throws -> CGImage {
+        let signature: [UInt8] = [137, 80, 78, 71, 13, 10, 26, 10]
+        guard mask.width > 0, mask.height > 0,
+              max(mask.width, mask.height) <= 1_536,
+              mask.pngData.count <= Self.maximumMaskBytes,
+              mask.pngData.count >= signature.count,
+              Array(mask.pngData.prefix(signature.count)) == signature,
+              let source = CGImageSourceCreateWithData(mask.pngData as CFData, nil),
+              CGImageSourceGetCount(source) == 1,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let width = properties[kCGImagePropertyPixelWidth as String] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight as String] as? NSNumber,
+              width.intValue == mask.width, height.intValue == mask.height,
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw ImagePipelineError.invalidMaskData("PNG 서명, 크기 또는 선언된 치수가 일치하지 않습니다")
         }
+        return image
+    }
+
+    private func transformedForDisplay(_ source: CIImage, edits: EditSettings, maxPixel: Int?) -> CIImage {
+        let geometry = PhotoGeometry(sourceWidth: source.extent.width,
+                                     sourceHeight: source.extent.height, edits: edits)
+        var image = source.clampedToExtent()
+            .transformed(by: geometry.ciTransform)
+            .cropped(to: geometry.ciCropBounds)
+        image = image.transformed(by: CGAffineTransform(translationX: -geometry.ciCropBounds.minX,
+                                                        y: -geometry.ciCropBounds.minY))
         if let limit = maxPixel, limit > 0 {
             let scale = min(1, CGFloat(limit) / max(image.extent.width, image.extent.height))
             if scale < 1 { image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale)) }
@@ -314,37 +354,8 @@ public final class ImagePipeline: @unchecked Sendable {
 
     public func exportJPEG(url: URL, edits: EditSettings, to directory: URL,
                            maxPixel: Int?, quality: Double) throws -> URL {
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw ImagePipelineError.invalidDirectory(directory)
-        }
-        let image = try render(url: url, edits: edits, maxPixel: maxPixel)
-        let encoded = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(encoded, UTType.jpeg.identifier as CFString, 1, nil) else {
-            throw ImagePipelineError.exportFailed(directory)
-        }
-        CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: min(1, max(0, quality))] as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else { throw ImagePipelineError.exportFailed(directory) }
-        let base = url.deletingPathExtension().lastPathComponent + "-edited"
-        for number in 1...10_000 {
-            let suffix = number == 1 ? "" : "-\(number)"
-            let output = directory.appendingPathComponent(base + suffix + ".jpg")
-            let fd = open(output.path, O_WRONLY | O_CREAT | O_EXCL, 0o644)
-            if fd < 0 {
-                if errno == EEXIST { continue }
-                throw ImagePipelineError.exportFailed(output)
-            }
-            do {
-                let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-                try handle.write(contentsOf: encoded as Data)
-                try handle.close()
-                return output
-            } catch {
-                try? FileManager.default.removeItem(at: output)
-                throw ImagePipelineError.exportFailed(output)
-            }
-        }
-        throw ImagePipelineError.exportFailed(directory)
+        let preview = try prepareJPEG(url: url, edits: edits, maxPixel: maxPixel, quality: quality)
+        return try writeJPEG(preview.data, sourceURL: url, to: directory)
     }
 }
 
