@@ -1,0 +1,4 @@
+interface:
+  display_name: "Astra · Sol Workflow"
+  short_description: "Astra 설계·검증과 Sol 구현의 작업 계약 및 인계"
+  default_prompt: "$astra-sol-workflow를 사용해 이 작업의 Astra·Sol 역할, 수정 범위, 검증 담당과 완료 조건을 정하고 진행해줘."
