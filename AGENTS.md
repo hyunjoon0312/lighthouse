@@ -26,3 +26,13 @@ macOS용 사진 정리·선별·비파괴 RAW 보정 앱. 주 사용 카메라�
 ## 장기 기억
 
 이 환경의 공유 기억은 `/Users/joon/rian/rian-obsidian`에 있다. 이전 작업을 이어갈 때 `20 Areas/AI Context/CONTEXT.md`를, 볼트에 쓸 때 해당 볼트의 `AGENTS.md`를 읽는다. 이 경로는 선택적인 세션 기억이며 앱의 빌드·실행 의존성이 아니다. 다음 세션에 필요한 결정과 남은 검증은 세션 종료 전에 `context.py save`로 기록한다.
+
+<!-- codex-harness:domain:start -->
+## 프로젝트 하네스
+
+Lighthouse의 여러 모듈에 걸친 기능 구현·통합 검증·부분 재실행에는
+[개발 팀 스킬](.agents/skills/lighthouse-development/SKILL.md)을 읽는다.
+하네스 자체의 구축·점검·동기화에는 [harness 스킬](.agents/skills/harness/SKILL.md)을 읽는다.
+팀 구성과 시작 방법은 [docs/harness.md](docs/harness.md)에 있다.
+사용자 Astra–Sol 분담이 기본 모델 상속보다 우선하며, 모델이 애매하거나 가용하지 않으면 대체 전에 묻는다.
+<!-- codex-harness:domain:end -->

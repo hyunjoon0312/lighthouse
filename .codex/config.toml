@@ -1,0 +1,5 @@
+# Project agent limit. Models and permissions of the main session stay inherited.
+# Domain agent files express the user's explicit Astra / Sol assignments.
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 3

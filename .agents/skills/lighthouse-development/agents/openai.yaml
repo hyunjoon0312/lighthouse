@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lighthouse 개발 팀"
+  short_description: "macOS 사진 앱의 UI·RAW·LUT·저장 구현과 검증을 조율합니다"
+  default_prompt: "Use $lighthouse-development to implement and verify a Lighthouse feature with the project’s Astra–Sol team."

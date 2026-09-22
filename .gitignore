@@ -2,3 +2,7 @@
 dist/
 .DS_Store
 .artifacts/
+.harness/runs/
+_workspace/communications/
+__pycache__/
+*.py[cod]
