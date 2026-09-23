@@ -36,10 +36,12 @@ struct InspectorView: View {
                 HStack(spacing: 0) {
                     panelButton("전체 보정", selected: model.adjustmentPanel == .global) { model.leaveLocalPanel() }
                     panelButton("부분 보정", selected: model.adjustmentPanel == .local) { model.enterLocalPanel() }
+                    panelButton("복구", selected: model.adjustmentPanel == .retouch) { model.enterRetouchPanel() }
                 }
                 .padding(3).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                 if model.adjustmentPanel == .global { globalControls }
-                else { localControls }
+                else if model.adjustmentPanel == .local { localControls }
+                else { RetouchControls(photo: photo) }
                 Divider()
                 section("파일 정보")
                 metadataRow("크기", "\(photo.metadata.width) × \(photo.metadata.height)")
@@ -135,23 +137,26 @@ struct InspectorView: View {
             adjustment("색온도 이동", value: edits.temperatureShift, range: -2500...2500, format: "%.0f K") { $0.temperatureShift = $1 }
             adjustment("틴트", value: edits.tintShift, range: -100...100, format: "%.0f") { $0.tintShift = $1 }
             adjustment("채도", value: edits.saturation, range: 0...2, format: "%.2f") { $0.saturation = $1 }
+            AdvancedColorControls(edits: edits)
             Divider()
             section("디테일 및 구도")
             adjustment("선명도", value: edits.sharpness, range: 0...2, format: "%.2f") { $0.sharpness = $1 }
             HStack {
-                Button { change { $0.rotationQuarterTurns = ($0.rotationQuarterTurns + 1) % 4 } } label: { Label("90° 회전", systemImage: "rotate.right") }.accessibilityLabel("시계 방향으로 90도 회전")
+                Button {
+                    change {
+                        $0.rotationQuarterTurns = ($0.rotationQuarterTurns + 1) % 4
+                        $0.cropRect = nil
+                    }
+                } label: { Label("90° 회전", systemImage: "rotate.right") }
+                    .accessibilityLabel("시계 방향으로 90도 회전")
                 Spacer()
-                Picker("중앙 크롭", selection: Binding(
-                    get: { cropTag(edits.cropAspect) },
-                    set: { tag in change { $0.cropAspect = cropValue(tag) } }
-                )) {
-                    Text("원본").tag("original")
-                    Text("1:1").tag("square")
-                    Text("4:5").tag("portrait")
-                    Text("3:2").tag("classic")
-                    Text("16:9").tag("wide")
-                }.frame(width: 128).accessibilityLabel("중앙 크롭 비율")
+                Button("자유 크롭…") { model.presentCrop() }
+                    .accessibilityLabel("자유 크롭 및 수평 보정")
             }.buttonStyle(.bordered)
+            if edits.cropRect != nil || edits.cropAspect != nil || edits.straightenDegrees != 0 {
+                Text(String(format: "크롭 적용 · 수평 %+.1f°", edits.straightenDegrees))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             HStack {
                 Button("보정 초기화") { model.updateEdits(.neutral) }.disabled(!edits.isModified)
                 Spacer()
@@ -169,6 +174,26 @@ struct InspectorView: View {
 
     private var localControls: some View {
         Group {
+            HStack {
+                Button("피사체 선택") { model.addAutomaticLocal(background: false) }
+                    .accessibilityLabel("자동 피사체 마스크 만들기")
+                Button("배경 선택") { model.addAutomaticLocal(background: true) }
+                    .accessibilityLabel("자동 배경 마스크 만들기")
+            }
+            .disabled(model.isAutoMasking)
+            if model.isAutoMasking {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("기기에서 전경을 찾는 중…").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("취소") { model.cancelAutoMask() }.accessibilityLabel("자동 마스크 선택 취소")
+                }
+            }
+            if let error = model.autoMaskError {
+                Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            }
+            Text("자동 선택은 사람뿐 아니라 전경의 다른 물체도 포함할 수 있습니다.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 section("영역")
                 Spacer()
@@ -206,6 +231,11 @@ struct InspectorView: View {
                         Button(role: .destructive) { model.deleteLocal() } label: { Image(systemName: "trash") }
                             .accessibilityLabel("선택한 영역 삭제")
                     }
+                    Toggle("마스크 반전", isOn: Binding(
+                        get: { area.isInverted },
+                        set: { inverted in model.updateLocal { $0.isInverted = inverted } }
+                    ))
+                    .font(.caption).accessibilityLabel("선택한 부분 보정 마스크 반전")
                     HStack {
                         toolButton(.brush, icon: "paintbrush.pointed")
                         toolButton(.eraser, icon: "eraser")
@@ -226,6 +256,10 @@ struct InspectorView: View {
                     )).font(.caption).accessibilityLabel("부분 보정 마스크 표시")
                     Text(model.brushTool == .eraser ? "사진 위를 드래그해 칠한 영역을 지우세요." : "사진 위를 드래그해 영역을 칠하세요.")
                         .font(.caption).foregroundStyle(.secondary)
+                    if area.baseMask != nil {
+                        Text("자동 선택 결과를 브러시와 지우개로 다듬을 수 있습니다.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                     if let error = model.maskError { Text("마스크 표시 오류: \(error)").font(.caption).foregroundStyle(.red) }
                     Button(model.isLocalEditing ? "그리기 완료" : "그리기 계속") {
                         if model.isLocalEditing { model.finishLocalDrawing() }
@@ -303,24 +337,6 @@ struct InspectorView: View {
         model.updateEdits(next)
     }
 
-    private func cropTag(_ aspect: Double?) -> String {
-        guard let aspect else { return "original" }
-        if abs(aspect - 1) < 0.001 { return "square" }
-        if abs(aspect - 0.8) < 0.001 { return "portrait" }
-        if abs(aspect - 1.5) < 0.001 { return "classic" }
-        return "wide"
-    }
-
-    private func cropValue(_ tag: String) -> Double? {
-        switch tag {
-        case "square": return 1
-        case "portrait": return 4.0 / 5.0
-        case "classic": return 3.0 / 2.0
-        case "wide": return 16.0 / 9.0
-        default: return nil
-        }
-    }
-
     private func metadataRow(_ title: String, _ value: String?) -> some View {
         HStack(alignment: .top) {
             Text(title).foregroundStyle(.secondary).frame(width: 56, alignment: .leading)
@@ -333,75 +349,5 @@ struct InspectorView: View {
         guard seconds > 0 else { return "—" }
         if seconds < 1 { return "1/\(Int((1 / seconds).rounded()))초" }
         return String(format: "%.1f초", seconds)
-    }
-}
-
-struct ExportSheet: View {
-    @EnvironmentObject private var model: LibraryModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var scope: ExportScope = .current
-    @State private var size = "original"
-    @State private var quality = 0.85
-    @State private var directory: URL?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Image(systemName: "square.and.arrow.up").font(.title2).foregroundStyle(.orange)
-                Text("JPEG 내보내기").font(.title2.weight(.semibold))
-            }
-            Picker("대상", selection: $scope) {
-                Text("현재 사진").tag(ExportScope.current)
-                Text("선택한 사진 (\(model.selectedPhotos.count)장)").tag(ExportScope.selected)
-                Text("현재 필터 결과 (\(model.visiblePhotos.count)장)").tag(ExportScope.visible)
-            }
-            Picker("긴 변", selection: $size) {
-                Text("원본 크기").tag("original")
-                Text("3840 px").tag("3840")
-                Text("2048 px").tag("2048")
-            }
-            HStack {
-                Text("JPEG 품질")
-                Slider(value: $quality, in: 0.4...1).accessibilityLabel("JPEG 품질")
-                Text("\(Int(quality * 100))%").monospacedDigit().frame(width: 44)
-            }
-            HStack {
-                Text(directory?.path ?? "저장 폴더를 선택하세요").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                Spacer()
-                Button("폴더 선택…") { chooseDirectory() }
-            }
-            if model.isExporting { ProgressView(value: model.operationProgress) }
-            if let report = model.exportReport { Text(report).font(.caption).textSelection(.enabled) }
-            HStack {
-                Spacer()
-                Button(model.exportReport == nil ? "취소" : "닫기") { dismiss() }
-                    .disabled(model.isExporting)
-                Button("내보내기") {
-                    guard let directory else { return }
-                    model.export(scope: scope, maxPixel: Int(size), quality: quality, directory: directory)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(directory == nil || model.isExporting || targetCount == 0)
-            }
-        }
-        .padding(24).frame(width: 480)
-        .onAppear { scope = model.selectedPhotos.count >= 2 ? .selected : .current }
-    }
-
-    private var targetCount: Int {
-        switch scope {
-        case .current: return model.selection == nil ? 0 : 1
-        case .selected: return model.selectedPhotos.count
-        case .visible: return model.visiblePhotos.count
-        }
-    }
-
-    private func chooseDirectory() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.prompt = "선택"
-        if panel.runModal() == .OK { directory = panel.url }
     }
 }

@@ -34,10 +34,13 @@ public struct LocalAdjustment: Identifiable, Codable, Equatable, Sendable {
     public var contrast: Double
     public var feather: Double
     public var strokes: [MaskStroke]
+    public var baseMask: RasterMask?
+    public var isInverted: Bool
 
     public init(id: UUID = UUID(), name: String = "영역 1", isEnabled: Bool = true,
                 exposure: Double = 0, contrast: Double = 1, feather: Double = 0.01,
-                strokes: [MaskStroke] = []) {
+                strokes: [MaskStroke] = [], baseMask: RasterMask? = nil,
+                isInverted: Bool = false) {
         self.id = id
         self.name = name
         self.isEnabled = isEnabled
@@ -45,6 +48,26 @@ public struct LocalAdjustment: Identifiable, Codable, Equatable, Sendable {
         self.contrast = contrast
         self.feather = feather
         self.strokes = strokes
+        self.baseMask = baseMask
+        self.isInverted = isInverted
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, isEnabled, exposure, contrast, feather, strokes, baseMask, isInverted
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        exposure = try container.decode(Double.self, forKey: .exposure)
+        contrast = try container.decode(Double.self, forKey: .contrast)
+        feather = try container.decode(Double.self, forKey: .feather)
+        strokes = try container.decode([MaskStroke].self, forKey: .strokes)
+        baseMask = try container.decodeIfPresent(RasterMask.self, forKey: .baseMask)
+        isInverted = try container.contains(.isInverted)
+            ? container.decode(Bool.self, forKey: .isInverted) : false
     }
 }
 
@@ -75,12 +98,21 @@ public struct EditSettings: Codable, Equatable, Sendable {
     public var cropAspect: Double?
     public var localAdjustments: [LocalAdjustment]
     public var lut: LUTAdjustment?
+    public var curves: ToneCurves
+    public var colorRanges: [ColorRangeAdjustment]
+    public var grain: GrainSettings
+    public var straightenDegrees: Double
+    public var cropRect: NormalizedCrop?
+    public var retouchStrokes: [RetouchStroke]
 
     public init(exposure: Double = 0, contrast: Double = 1, saturation: Double = 1,
                 temperatureShift: Double = 0, tintShift: Double = 0, highlights: Double = 1,
                 shadows: Double = 0, sharpness: Double = 0, rotationQuarterTurns: Int = 0,
                 cropAspect: Double? = nil, localAdjustments: [LocalAdjustment] = [],
-                lut: LUTAdjustment? = nil) {
+                lut: LUTAdjustment? = nil, curves: ToneCurves = .identity,
+                colorRanges: [ColorRangeAdjustment] = [], grain: GrainSettings = GrainSettings(),
+                straightenDegrees: Double = 0, cropRect: NormalizedCrop? = nil,
+                retouchStrokes: [RetouchStroke] = []) {
         self.exposure = exposure
         self.contrast = contrast
         self.saturation = saturation
@@ -93,6 +125,12 @@ public struct EditSettings: Codable, Equatable, Sendable {
         self.cropAspect = cropAspect
         self.localAdjustments = localAdjustments
         self.lut = lut
+        self.curves = curves
+        self.colorRanges = colorRanges
+        self.grain = grain
+        self.straightenDegrees = straightenDegrees
+        self.cropRect = cropRect
+        self.retouchStrokes = retouchStrokes
     }
 
     public static let neutral = EditSettings()
@@ -101,6 +139,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case exposure, contrast, saturation, temperatureShift, tintShift, highlights, shadows
         case sharpness, rotationQuarterTurns, cropAspect, localAdjustments, lut
+        case curves, colorRanges, grain, straightenDegrees, cropRect, retouchStrokes
     }
 
     public init(from decoder: Decoder) throws {
@@ -118,6 +157,17 @@ public struct EditSettings: Codable, Equatable, Sendable {
         localAdjustments = try container.contains(.localAdjustments)
             ? container.decode([LocalAdjustment].self, forKey: .localAdjustments) : []
         lut = try container.decodeIfPresent(LUTAdjustment.self, forKey: .lut)
+        curves = try container.contains(.curves)
+            ? container.decode(ToneCurves.self, forKey: .curves) : .identity
+        colorRanges = try container.contains(.colorRanges)
+            ? container.decode([ColorRangeAdjustment].self, forKey: .colorRanges) : []
+        grain = try container.contains(.grain)
+            ? container.decode(GrainSettings.self, forKey: .grain) : GrainSettings()
+        straightenDegrees = try container.contains(.straightenDegrees)
+            ? container.decode(Double.self, forKey: .straightenDegrees) : 0
+        cropRect = try container.decodeIfPresent(NormalizedCrop.self, forKey: .cropRect)
+        retouchStrokes = try container.contains(.retouchStrokes)
+            ? container.decode([RetouchStroke].self, forKey: .retouchStrokes) : []
     }
 }
 

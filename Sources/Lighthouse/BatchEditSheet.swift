@@ -20,6 +20,7 @@ struct BatchEditSheet: View {
     @State private var copyLUT = true
     @State private var copyGeometry = false
     @State private var copyLocal = false
+    @State private var copyRetouch = false
 
     private var components: EditComponents {
         var result: EditComponents = []
@@ -27,6 +28,7 @@ struct BatchEditSheet: View {
         if copyLUT { result.insert(.lut) }
         if copyGeometry { result.insert(.geometry) }
         if copyLocal { result.insert(.local) }
+        if copyRetouch { result.insert(.retouch) }
         return result
     }
 
@@ -38,7 +40,7 @@ struct BatchEditSheet: View {
                 Text("선택한 \(snapshot.targets.count)장의 사진에 원하는 보정 항목을 복사합니다.")
                     .font(.caption).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 9) {
-                    Toggle("빛·색상·선명도", isOn: $copyGlobal)
+                    Toggle("빛·색상·곡선·HSL·선명도·입자", isOn: $copyGlobal)
                     Toggle("LUT", isOn: $copyLUT)
                     if snapshot.edits.lut == nil {
                         Text("LUT를 포함하면 대상 사진의 LUT가 해제됩니다.")
@@ -46,7 +48,8 @@ struct BatchEditSheet: View {
                     }
                     Toggle("회전·크롭", isOn: $copyGeometry)
                     Toggle("부분 보정 영역", isOn: $copyLocal)
-                    Text("부분 보정은 사진의 같은 정규화 위치에 복사됩니다.")
+                    Toggle("복구 작업", isOn: $copyRetouch)
+                    Text("자동 마스크와 복구 위치는 대상 사진에서 다시 인식되지 않고 같은 정규화 위치에 복사됩니다.")
                         .font(.caption2).foregroundStyle(.secondary).padding(.leading, 20)
                 }
                 .toggleStyle(.checkbox)

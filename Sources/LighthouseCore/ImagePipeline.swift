@@ -231,14 +231,8 @@ public final class ImagePipeline: @unchecked Sendable {
     public func renderMask(adjustment: LocalAdjustment, sourceWidth: Int, sourceHeight: Int,
                            edits: EditSettings, maxPixel: Int = 1600) throws -> CGImage {
         guard sourceWidth > 0, sourceHeight > 0 else { throw ImagePipelineError.invalidMaskGeometry }
-        let geometry = PhotoGeometry(sourceWidth: Double(sourceWidth),
-                                     sourceHeight: Double(sourceHeight), edits: edits)
-        let scale = min(1, Double(max(1, maxPixel)) /
-            max(geometry.outputSize.width, geometry.outputSize.height))
         let mask = try maskImage(for: adjustment, width: sourceWidth, height: sourceHeight, scale: 1)
-        let renderLimit = max(1, Int((max(geometry.outputSize.width,
-                                         geometry.outputSize.height) * scale).rounded(.down)))
-        let output = transformedForDisplay(mask, edits: edits, maxPixel: renderLimit)
+        let output = transformedForDisplay(mask, edits: edits, maxPixel: maxPixel)
         let rect = CGRect(x: 0, y: 0, width: floor(output.extent.width), height: floor(output.extent.height))
         let gray = CGColorSpace(name: CGColorSpace.linearGray)!
         guard rect.width > 0, rect.height > 0,
@@ -340,16 +334,27 @@ public final class ImagePipeline: @unchecked Sendable {
     private func transformedForDisplay(_ source: CIImage, edits: EditSettings, maxPixel: Int?) -> CIImage {
         let geometry = PhotoGeometry(sourceWidth: source.extent.width,
                                      sourceHeight: source.extent.height, edits: edits)
+        let longestSide = max(geometry.outputSize.width, geometry.outputSize.height)
+        let scale: CGFloat
+        if let limit = maxPixel, limit > 0 {
+            scale = min(1, CGFloat(limit) / longestSide)
+        } else {
+            scale = 1
+        }
+        let outputBounds = CGRect(
+            x: 0,
+            y: 0,
+            width: floor(geometry.outputSize.width * scale),
+            height: floor(geometry.outputSize.height * scale)
+        )
         var image = source.clampedToExtent()
             .transformed(by: geometry.ciTransform)
-            .cropped(to: geometry.ciCropBounds)
         image = image.transformed(by: CGAffineTransform(translationX: -geometry.ciCropBounds.minX,
                                                         y: -geometry.ciCropBounds.minY))
-        if let limit = maxPixel, limit > 0 {
-            let scale = min(1, CGFloat(limit) / max(image.extent.width, image.extent.height))
-            if scale < 1 { image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale)) }
+        if scale < 1 {
+            image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         }
-        return image
+        return image.cropped(to: outputBounds)
     }
 
     public func exportJPEG(url: URL, edits: EditSettings, to directory: URL,

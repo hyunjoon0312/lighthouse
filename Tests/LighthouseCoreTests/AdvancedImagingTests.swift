@@ -154,6 +154,42 @@ final class AdvancedImagingTests: XCTestCase {
         }
     }
 
+    func testGeometryUsesFloorDimensionsAndOpaqueSingleFinalCrop() throws {
+        let input = try temporaryPNG(width: 81, height: 53) { x, y in
+            (UInt8(x * 3), UInt8(y * 4), UInt8(x + y), 255)
+        }
+        defer { try? FileManager.default.removeItem(at: input) }
+        let pipeline = ImagePipeline()
+
+        let neutral = try pipeline.render(url: input, edits: .neutral, maxPixel: 40)
+        XCTAssertEqual(neutral.width, 40)
+        XCTAssertEqual(neutral.height, 26)
+        try assertOpaque(neutral)
+
+        let straightenEdits = EditSettings(straightenDegrees: 13)
+        let straightened = try pipeline.render(url: input, edits: straightenEdits, maxPixel: nil)
+        let straightenGeometry = PhotoGeometry(sourceWidth: 81, sourceHeight: 53,
+                                               edits: straightenEdits)
+        XCTAssertEqual(straightened.width, Int(floor(straightenGeometry.outputSize.width)))
+        XCTAssertEqual(straightened.height, Int(floor(straightenGeometry.outputSize.height)))
+        try assertOpaque(straightened)
+
+        let cropEdits = EditSettings(
+            straightenDegrees: -7,
+            cropRect: NormalizedCrop(x: 0.137, y: 0.083, width: 0.613, height: 0.727)
+        )
+        let cropped = try pipeline.render(url: input, edits: cropEdits, maxPixel: 31)
+        let cropGeometry = PhotoGeometry(sourceWidth: 81, sourceHeight: 53, edits: cropEdits)
+        let cropScale = min(1, 31 / max(cropGeometry.outputSize.width,
+                                        cropGeometry.outputSize.height))
+        XCTAssertEqual(cropped.width, Int(floor(cropGeometry.outputSize.width * cropScale)))
+        XCTAssertEqual(cropped.height, Int(floor(cropGeometry.outputSize.height * cropScale)))
+        try assertOpaque(cropped)
+        let first = try rgba(cropped, x: 0, y: 0)
+        let last = try rgba(cropped, x: cropped.width - 1, y: cropped.height - 1)
+        XCTAssertTrue(first.0 != last.0 || first.1 != last.1 || first.2 != last.2)
+    }
+
     func testPreparedJPEGDecodesExactBytesAndWritePreservesExistingFile() throws {
         let input = try temporaryPNG(width: 48, height: 32) { x, y in
             (UInt8(x * 5), UInt8(y * 7), UInt8((x + y) * 3), 255)
@@ -234,6 +270,12 @@ final class AdvancedImagingTests: XCTestCase {
         guard (0..<image.width).contains(x), (0..<image.height).contains(y) else {
             throw TestError.pixelOutsideImage
         }
+        let bytes = try rgbaBytes(image)
+        let index = (y * image.width + x) * 4
+        return (bytes[index], bytes[index + 1], bytes[index + 2], bytes[index + 3])
+    }
+
+    private func rgbaBytes(_ image: CGImage) throws -> [UInt8] {
         var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
         guard let context = CGContext(data: &bytes, width: image.width, height: image.height,
                                       bitsPerComponent: 8, bytesPerRow: image.width * 4,
@@ -244,12 +286,19 @@ final class AdvancedImagingTests: XCTestCase {
         context.translateBy(x: 0, y: CGFloat(image.height))
         context.scaleBy(x: 1, y: -1)
         context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        let index = (y * image.width + x) * 4
-        return (bytes[index], bytes[index + 1], bytes[index + 2], bytes[index + 3])
+        return bytes
     }
 
     private func gray(_ image: CGImage, x: Int, y: Int) throws -> UInt8 {
         try rgba(image, x: x, y: y).0
+    }
+
+    private func assertOpaque(_ image: CGImage, file: StaticString = #filePath,
+                              line: UInt = #line) throws {
+        let bytes = try rgbaBytes(image)
+        for index in stride(from: 3, to: bytes.count, by: 4) {
+            XCTAssertEqual(bytes[index], 255, file: file, line: line)
+        }
     }
 
     private enum TestError: Error {

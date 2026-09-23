@@ -24,6 +24,7 @@ struct PhotoFolderSheetRequest: Identifiable {
 enum AdjustmentPanel: String {
     case global = "전체 보정"
     case local = "부분 보정"
+    case retouch = "복구"
 }
 
 enum BrushTool: String {
@@ -33,6 +34,14 @@ enum BrushTool: String {
 
 enum ExportScope: String, CaseIterable {
     case current, selected, visible
+}
+
+struct PreparedJPEGExport: @unchecked Sendable {
+    let photoID: UUID
+    let edits: EditSettings
+    let maxPixel: Int?
+    let quality: Double
+    let result: JPEGPreview
 }
 
 @MainActor
@@ -64,6 +73,7 @@ final class LibraryModel: ObservableObject {
     @Published var showExport = false
     @Published var showBatchEdit = false
     @Published var referenceMatchSource: PhotoAsset?
+    @Published var cropSource: PhotoAsset?
     @Published var exportReport: String?
     @Published var clipboard: EditSettings?
     @Published var isLUTImporting = false
@@ -81,6 +91,14 @@ final class LibraryModel: ObservableObject {
     @Published var maskError: String?
     @Published var draftPoints: [MaskPoint] = []
     @Published var brushCursor: MaskPoint?
+    @Published var isAutoMasking = false
+    @Published var autoMaskError: String?
+    @Published var retouchMode: RetouchMode = .heal
+    @Published var retouchRadius = 0.02
+    @Published var isPickingCloneSource = false
+    @Published var cloneSource: MaskPoint?
+    @Published var retouchDraftPoints: [MaskPoint] = []
+    @Published var retouchCursor: MaskPoint?
 
     private let pipeline = ImagePipeline()
     private let lutStore = LUTStore()
@@ -90,6 +108,7 @@ final class LibraryModel: ObservableObject {
     private let thumbnailQueue = DispatchQueue(label: "com.rian.lighthouse.thumbnails", qos: .utility)
     private let batchQueue = DispatchQueue(label: "com.rian.lighthouse.batch", qos: .userInitiated)
     private let maskQueue = DispatchQueue(label: "com.rian.lighthouse.mask", qos: .userInitiated)
+    private let autoMaskQueue = DispatchQueue(label: "com.rian.lighthouse.automask", qos: .userInitiated)
     private let lutQueue = DispatchQueue(label: "com.rian.lighthouse.lut", qos: .userInitiated)
     private let saveQueue = DispatchQueue(label: "com.rian.lighthouse.catalog", qos: .utility)
     private var saveDelay: DispatchWorkItem?
@@ -98,6 +117,7 @@ final class LibraryModel: ObservableObject {
     private var renderedSource: String?
     private var maskGeneration = 0
     private var selectionGeneration = 0
+    private var autoMaskGeneration = 0
     private var lutLibraryGeneration = 0
     private var maskSource: String?
     private var draftPhotoID: UUID?
@@ -120,12 +140,19 @@ final class LibraryModel: ObservableObject {
     var canUndo: Bool { editHistory.canUndo }
     var canRedo: Bool { editHistory.canRedo }
     var hasModalPresentation: Bool {
-        showBatchEdit || showExport || referenceMatchSource != nil || folderSheetRequest != nil
+        showBatchEdit || showExport || referenceMatchSource != nil || folderSheetRequest != nil || cropSource != nil
     }
     var selectedLocal: LocalAdjustment? { selection?.edits.localAdjustments.first { $0.id == selectedLocalID } }
     var canDrawLocal: Bool {
         adjustmentPanel == .local && isLocalEditing && selectedLocal != nil &&
         mode == .edit && !isOriginal && !actualSize && !rendering && rendered != nil && imageError == nil
+    }
+    var canUseRetouchCanvas: Bool {
+        adjustmentPanel == .retouch && mode == .edit && !isOriginal && !actualSize &&
+        !rendering && rendered != nil && imageError == nil
+    }
+    var canDrawRetouch: Bool {
+        canUseRetouchCanvas && !isPickingCloneSource && (retouchMode == .heal || cloneSource != nil)
     }
 
     var folders: [String] {
@@ -303,6 +330,8 @@ final class LibraryModel: ObservableObject {
         cancelDraft()
         guard previousActive != selectedID else { objectWillChange.send(); return }
         selectionGeneration += 1
+        cancelAutoMask()
+        cancelRetouchDraft(clearSource: true)
         isLocalEditing = false
         lutError = nil
         reconcileLocalSelection()
@@ -326,7 +355,7 @@ final class LibraryModel: ObservableObject {
 
     func setMode(_ newMode: WorkspaceMode) {
         NSApp.keyWindow?.makeFirstResponder(nil)
-        if newMode != .edit { cancelDraft(); isLocalEditing = false }
+        if newMode != .edit { cancelDraft(); cancelRetouchDraft(); isLocalEditing = false }
         if newMode == .compare && mode != .compare {
             pinnedID = selectedID
             pinnedImage = nil
@@ -338,12 +367,14 @@ final class LibraryModel: ObservableObject {
 
     func toggleOriginal() {
         cancelDraft()
+        cancelRetouchDraft()
         isOriginal.toggle()
         if isOriginal { isLocalEditing = false }
         requestRender()
     }
     func toggleActualSize() {
         cancelDraft()
+        cancelRetouchDraft()
         actualSize.toggle()
         if actualSize { isLocalEditing = false }
         requestRender()
@@ -369,12 +400,14 @@ final class LibraryModel: ObservableObject {
 
     func undo() {
         cancelDraft()
+        cancelRetouchDraft()
         guard let changes = editHistory.undo() else { return }
         applyEditChanges(changes, useAfter: false, record: false)
     }
 
     func redo() {
         cancelDraft()
+        cancelRetouchDraft()
         guard let changes = editHistory.redo() else { return }
         applyEditChanges(changes, useAfter: true, record: false)
     }
@@ -397,6 +430,8 @@ final class LibraryModel: ObservableObject {
         guard !actual.isEmpty else { return }
         if record { editHistory.record(actual) }
         cancelDraft()
+        cancelRetouchDraft()
+        cancelAutoMask()
         photos = updated
         let previous = selectedID
         photoSelection.reconcile(with: visiblePhotos.map(\.id))
@@ -597,6 +632,7 @@ final class LibraryModel: ObservableObject {
         NSApp.keyWindow?.makeFirstResponder(nil)
         adjustmentPanel = .local
         cancelDraft()
+        cancelRetouchDraft()
         isOriginal = false
         actualSize = false
         mode = .edit
@@ -605,8 +641,23 @@ final class LibraryModel: ObservableObject {
         requestRender()
     }
 
+    func enterRetouchPanel() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        adjustmentPanel = .retouch
+        cancelDraft()
+        cancelRetouchDraft()
+        isLocalEditing = false
+        isOriginal = false
+        actualSize = false
+        mode = .edit
+        maskImage = nil
+        maskGeneration += 1
+        requestRender()
+    }
+
     func leaveLocalPanel() {
         cancelDraft()
+        cancelRetouchDraft()
         isLocalEditing = false
         adjustmentPanel = .global
         maskImage = nil
@@ -629,6 +680,50 @@ final class LibraryModel: ObservableObject {
         selectedLocalID = adjustment.id
         isLocalEditing = true
         updateEdits(edits)
+    }
+
+    func addAutomaticLocal(background: Bool) {
+        guard !isAutoMasking, let photo = selection else { return }
+        enterLocalPanel()
+        autoMaskGeneration += 1
+        let token = autoMaskGeneration
+        let photoID = photo.id
+        let editsSnapshot = photo.edits
+        let selectionToken = selectionGeneration
+        isAutoMasking = true
+        autoMaskError = nil
+        autoMaskQueue.async { [pipeline] in
+            let result = Result { try pipeline.subjectMask(url: photo.url) }
+            DispatchQueue.main.async {
+                guard token == self.autoMaskGeneration else { return }
+                self.isAutoMasking = false
+                guard self.selectedID == photoID, self.selectionGeneration == selectionToken,
+                      let current = self.selection, current.edits == editsSnapshot else {
+                    self.autoMaskError = "사진이나 보정이 바뀌어 자동 선택 결과를 적용하지 않았습니다."
+                    return
+                }
+                switch result {
+                case .success(let mask):
+                    var edits = current.edits
+                    let adjustment = LocalAdjustment(
+                        name: background ? "자동 배경" : "자동 피사체",
+                        baseMask: mask,
+                        isInverted: background
+                    )
+                    edits.localAdjustments.append(adjustment)
+                    self.selectedLocalID = adjustment.id
+                    self.isLocalEditing = true
+                    self.updateEdits(edits)
+                case .failure(let error):
+                    self.autoMaskError = "자동 선택 실패: \(error.localizedDescription) 브러시로 영역을 직접 추가할 수 있습니다."
+                }
+            }
+        }
+    }
+
+    func cancelAutoMask() {
+        autoMaskGeneration += 1
+        isAutoMasking = false
     }
 
     func updateLocal(_ change: (inout LocalAdjustment) -> Void) {
@@ -678,8 +773,7 @@ final class LibraryModel: ObservableObject {
         }
         let geometry = LocalMaskGeometry(sourceWidth: Double(selected.metadata.width),
                                          sourceHeight: Double(selected.metadata.height),
-                                         rotationQuarterTurns: selected.edits.rotationQuarterTurns,
-                                         cropAspect: selected.edits.cropAspect)
+                                         edits: selected.edits)
         let points = draftPoints.map { geometry.sourcePoint(fromDisplay: $0) }
         let stroke = MaskStroke(points: points, radius: brushRadius, isErasing: brushTool == .eraser)
         var edits = selected.edits
@@ -712,7 +806,7 @@ final class LibraryModel: ObservableObject {
               photo.metadata.width > 0, photo.metadata.height > 0 else {
             maskImage = nil; maskError = nil; maskSource = nil; return
         }
-        let source = "\(photo.id):\(adjustment.id):\(photo.edits.rotationQuarterTurns):\(photo.edits.cropAspect ?? 0)"
+        let source = "\(photo.id):\(adjustment.id):\(photo.edits.rotationQuarterTurns):\(photo.edits.straightenDegrees):\(String(describing: photo.edits.cropRect)): \(photo.edits.cropAspect ?? 0)"
         if source != maskSource { maskImage = nil; maskSource = source }
         maskQueue.async { [pipeline] in
             let result = Result {
@@ -739,6 +833,113 @@ final class LibraryModel: ObservableObject {
         guard let edits = clipboard else { return }
         move(1)
         updateEdits(edits)
+    }
+
+    func presentCrop() {
+        guard cropSource == nil, let source = selection else { return }
+        cancelDraft()
+        cancelRetouchDraft()
+        isLocalEditing = false
+        cropSource = source
+    }
+
+    func applyCrop(source: PhotoAsset, crop: NormalizedCrop, straightenDegrees: Double) {
+        guard let current = selection, current.id == source.id, current.edits == source.edits else {
+            operationMessage = "사진이나 보정이 바뀌어 크롭을 적용하지 않았습니다."
+            return
+        }
+        var edits = current.edits
+        let clamped = crop.clamped
+        edits.cropRect = clamped == .full ? nil : clamped
+        edits.cropAspect = nil
+        edits.straightenDegrees = min(20, max(-20, straightenDegrees.isFinite ? straightenDegrees : 0))
+        updateEdits(edits)
+    }
+
+    func beginRetouch(at displayPoint: MaskPoint) {
+        guard canUseRetouchCanvas else { return }
+        if retouchMode == .clone && isPickingCloneSource {
+            cloneSource = sourcePoint(fromDisplay: displayPoint)
+            isPickingCloneSource = false
+            retouchCursor = displayPoint
+            return
+        }
+        guard canDrawRetouch else { return }
+        retouchDraftPoints = [displayPoint]
+        retouchCursor = displayPoint
+    }
+
+    func extendRetouch(to displayPoint: MaskPoint, shortSide: CGFloat) {
+        guard canDrawRetouch, let last = retouchDraftPoints.last else { return }
+        retouchCursor = displayPoint
+        let dx = (displayPoint.x - last.x) * Double(shortSide)
+        let dy = (displayPoint.y - last.y) * Double(shortSide)
+        if hypot(dx, dy) >= max(1, retouchRadius * Double(shortSide) * 0.2) {
+            retouchDraftPoints.append(displayPoint)
+        }
+    }
+
+    func commitRetouch() {
+        guard canDrawRetouch, let selected = selection, !retouchDraftPoints.isEmpty else {
+            cancelRetouchDraft(); return
+        }
+        let geometry = PhotoGeometry(sourceWidth: Double(selected.metadata.width),
+                                     sourceHeight: Double(selected.metadata.height), edits: selected.edits)
+        let points = retouchDraftPoints.map { geometry.sourcePoint(fromDisplay: $0) }
+        let offset: MaskPoint?
+        if retouchMode == .clone, let source = cloneSource, let destination = points.first {
+            offset = MaskPoint(x: source.x - destination.x, y: source.y - destination.y)
+        } else {
+            offset = nil
+        }
+        var edits = selected.edits
+        edits.retouchStrokes.append(RetouchStroke(mode: retouchMode, points: points,
+                                                  radius: retouchRadius, sourceOffset: offset))
+        cancelRetouchDraft()
+        updateEdits(edits)
+    }
+
+    func cancelRetouchDraft(clearSource: Bool = false) {
+        retouchDraftPoints = []
+        retouchCursor = nil
+        isPickingCloneSource = false
+        if clearSource { cloneSource = nil }
+    }
+
+    func setRetouchStrokeEnabled(_ id: UUID, enabled: Bool) {
+        guard let selected = selection,
+              let index = selected.edits.retouchStrokes.firstIndex(where: { $0.id == id }) else { return }
+        var edits = selected.edits
+        edits.retouchStrokes[index].isEnabled = enabled
+        updateEdits(edits)
+    }
+
+    func deleteRetouchStroke(_ id: UUID) {
+        guard let selected = selection else { return }
+        var edits = selected.edits
+        edits.retouchStrokes.removeAll { $0.id == id }
+        updateEdits(edits)
+    }
+
+    func clearRetouchStrokes() {
+        guard let selected = selection, !selected.edits.retouchStrokes.isEmpty else { return }
+        var edits = selected.edits
+        edits.retouchStrokes = []
+        updateEdits(edits)
+    }
+
+    func displayPoint(fromSource point: MaskPoint) -> MaskPoint? {
+        guard let selected = selection, selected.metadata.width > 0, selected.metadata.height > 0 else { return nil }
+        return PhotoGeometry(sourceWidth: Double(selected.metadata.width),
+                             sourceHeight: Double(selected.metadata.height), edits: selected.edits)
+            .displayPoint(fromSource: point)
+    }
+
+    private func sourcePoint(fromDisplay point: MaskPoint) -> MaskPoint {
+        guard let selected = selection else { return point }
+        return PhotoGeometry(sourceWidth: Double(selected.metadata.width),
+                             sourceHeight: Double(selected.metadata.height), edits: selected.edits)
+            .sourcePoint(fromDisplay: point)
     }
 
     func scheduleSave(debounce: Bool = false) {
@@ -902,14 +1103,18 @@ final class LibraryModel: ObservableObject {
         }
     }
 
-    func export(scope: ExportScope, maxPixel: Int?, quality: Double, directory: URL) {
-        guard !isExporting, catalogLoaded, loadError == nil else { return }
-        let targets: [PhotoAsset]
+    func exportTargets(for scope: ExportScope) -> [PhotoAsset] {
         switch scope {
-        case .current: targets = selection.map { [$0] } ?? []
-        case .selected: targets = selectedPhotos
-        case .visible: targets = visiblePhotos
+        case .current: selection.map { [$0] } ?? []
+        case .selected: selectedPhotos
+        case .visible: visiblePhotos
         }
+    }
+
+    func export(scope: ExportScope, maxPixel: Int?, quality: Double, directory: URL,
+                prepared: PreparedJPEGExport? = nil) {
+        guard !isExporting, catalogLoaded, loadError == nil else { return }
+        let targets = exportTargets(for: scope)
         guard !targets.isEmpty else { return }
         isExporting = true
         operationProgress = 0
@@ -918,7 +1123,16 @@ final class LibraryModel: ObservableObject {
             var successes = 0
             var failures: [String] = []
             for (index, photo) in targets.enumerated() {
-                do { _ = try pipeline.exportJPEG(url: photo.url, edits: photo.edits, to: directory, maxPixel: maxPixel, quality: quality); successes += 1 }
+                do {
+                    if let prepared, prepared.photoID == photo.id, prepared.edits == photo.edits,
+                       prepared.maxPixel == maxPixel, prepared.quality == quality {
+                        _ = try pipeline.writeJPEG(prepared.result.data, sourceURL: photo.url, to: directory)
+                    } else {
+                        _ = try pipeline.exportJPEG(url: photo.url, edits: photo.edits, to: directory,
+                                                    maxPixel: maxPixel, quality: quality)
+                    }
+                    successes += 1
+                }
                 catch { failures.append("\(photo.filename): \(error.localizedDescription)") }
                 let progress = Double(index + 1) / Double(targets.count)
                 DispatchQueue.main.async { self.operationProgress = progress }

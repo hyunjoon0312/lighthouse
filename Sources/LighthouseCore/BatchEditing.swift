@@ -11,7 +11,8 @@ public struct EditComponents: OptionSet, Sendable {
     public static let lut = EditComponents(rawValue: 2)
     public static let geometry = EditComponents(rawValue: 4)
     public static let local = EditComponents(rawValue: 8)
-    public static let all: EditComponents = [.global, .lut, .geometry, .local]
+    public static let retouch = EditComponents(rawValue: 16)
+    public static let all: EditComponents = [.global, .lut, .geometry, .local, .retouch]
 }
 
 public extension EditSettings {
@@ -26,6 +27,9 @@ public extension EditSettings {
             result.highlights = source.highlights
             result.shadows = source.shadows
             result.sharpness = source.sharpness
+            result.curves = source.curves
+            result.colorRanges = source.colorRanges
+            result.grain = source.grain
         }
         if components.contains(.lut) {
             result.lut = source.lut
@@ -33,9 +37,14 @@ public extension EditSettings {
         if components.contains(.geometry) {
             result.rotationQuarterTurns = source.rotationQuarterTurns
             result.cropAspect = source.cropAspect
+            result.straightenDegrees = source.straightenDegrees
+            result.cropRect = source.cropRect
         }
         if components.contains(.local) {
             result.localAdjustments = source.localAdjustments
+        }
+        if components.contains(.retouch) {
+            result.retouchStrokes = source.retouchStrokes
         }
         return result
     }

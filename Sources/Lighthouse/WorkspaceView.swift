@@ -34,6 +34,7 @@ struct WorkspaceView: View {
         .tint(Palette.accent)
         .sheet(isPresented: $model.showExport) { ExportSheet() }
         .sheet(isPresented: $model.showBatchEdit) { BatchEditSheet() }
+        .sheet(item: $model.cropSource) { source in CropSheet(source: source) }
         .sheet(item: $model.referenceMatchSource) { source in
             ReferenceMatchSheet(source: source) { adjustment, apply in
                 model.finishReferenceMatch(adjustment, apply: apply, source: source)
@@ -60,6 +61,9 @@ struct WorkspaceView: View {
         .onChange(of: model.filter) { _, _ in model.ensureSelectionVisible() }
         .onChange(of: model.search) { _, _ in model.ensureSelectionVisible() }
         .onChange(of: model.minimumRating) { _, _ in model.ensureSelectionVisible() }
+        .onChange(of: model.hasModalPresentation) { _, presented in
+            if presented { model.cancelDraft(); model.cancelRetouchDraft() }
+        }
     }
 
     private var sidebar: some View {
@@ -357,7 +361,7 @@ struct WorkspaceView: View {
     private func installKeys() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if NSApp.modalWindow != nil || model.showExport || model.showBatchEdit || model.referenceMatchSource != nil || model.folderSheetRequest != nil { return event }
+            if NSApp.modalWindow != nil || model.hasModalPresentation { return event }
             if event.keyCode == 53, NSApp.keyWindow?.firstResponder is NSTextView {
                 NSApp.keyWindow?.makeFirstResponder(nil)
                 return nil
