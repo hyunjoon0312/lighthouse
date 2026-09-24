@@ -407,6 +407,17 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertLessThan(try gray(small, x: 20, y: 180), 10, "원형 바깥")
     }
 
+    func testPreviewApproximationOnlyAppliesToCachedRAWDevelopment() throws {
+        let input = try temporaryPNG(width: 40, height: 30) { x, _ in (UInt8(x * 6), 120, 90, 255) }
+        defer { try? FileManager.default.removeItem(at: input) }
+        let preview = ImagePipeline(cachesDevelopment: true)
+        _ = try preview.renderPreview(url: input, edits: .neutral, maxPixel: nil, allowApproximation: false)
+        let edits = EditSettings(exposure: 0.4, temperatureShift: 500)
+        let result = try preview.renderPreview(url: input, edits: edits, maxPixel: nil, allowApproximation: true)
+        XCTAssertFalse(result.isApproximate, "RAW가 아니면 현상 없이 바로 정확히 그린다")
+        XCTAssertEqual(try rgbaBytes(result.image), try rgbaBytes(ImagePipeline().render(url: input, edits: edits, maxPixel: nil)))
+    }
+
     func testGradientHandlesMoveInSourceSpace() {
         let linear = MaskGradient.linear(start: MaskPoint(x: 0.2, y: 0.2), end: MaskPoint(x: 0.4, y: 0.6))
         guard case .linear(let movedStart, let movedEnd) = linear.moving(.center, to: MaskPoint(x: 0.5, y: 0.5)) else {

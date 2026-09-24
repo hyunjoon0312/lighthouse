@@ -60,7 +60,27 @@ public final class ImagePipeline: @unchecked Sendable {
     private let lutStore: LUTStore
     private let cachesDevelopment: Bool
     private let developmentLock = NSLock()
-    private var developedSources: [(key: String, image: CIImage)] = []
+    private var developedSources: [DevelopedSource] = []
+
+    private struct DevelopedSource {
+        let key: String
+        /// 같은 파일·RAW 현상 설정이면 같다. 노출·색온도·틴트만 다른 결과를 근사에 쓸 수 있다.
+        let base: String
+        let exposure: Double
+        let temperature: Double
+        let tint: Double
+        /// 이 결과를 현상할 때 쓴 RAW 중립 색온도(K).
+        let neutralTemperature: Double?
+        let image: CIImage
+    }
+
+    /// 근사 미리보기에서 RAW 현상 대신 덧씌운 노출·색온도·틴트 차이.
+    private struct DevelopmentDelta {
+        let exposure: Double
+        let temperature: Double
+        let tint: Double
+        let neutralTemperature: Double?
+    }
     private let maskLock = NSLock()
     private var cachedMasks: [(definition: LocalMaskDefinition, width: Int, height: Int, image: CIImage)] = []
 
@@ -171,7 +191,20 @@ public final class ImagePipeline: @unchecked Sendable {
     }
 
     public func render(url: URL, edits: EditSettings, maxPixel: Int? = 2200) throws -> CGImage {
-        var image = try developed(url: url, edits: edits)
+        try render(url: url, edits: edits, maxPixel: maxPixel, allowApproximation: false).image
+    }
+
+    /// 편집 미리보기용. `allowApproximation`이면 RAW 노출·색온도·틴트만 바뀐 경우 최근 현상 결과에 차이를 덧씌워
+    /// RAW를 다시 현상하지 않고 그린다(슬라이더를 끄는 동안). 근사 결과인지 함께 돌려주므로 끝난 뒤 정확히 다시 그린다.
+    public func renderPreview(url: URL, edits: EditSettings, maxPixel: Int?,
+                              allowApproximation: Bool) throws -> (image: CGImage, isApproximate: Bool) {
+        try render(url: url, edits: edits, maxPixel: maxPixel, allowApproximation: allowApproximation)
+    }
+
+    private func render(url: URL, edits: EditSettings, maxPixel: Int?,
+                        allowApproximation: Bool) throws -> (image: CGImage, isApproximate: Bool) {
+        let development = try developed(url: url, edits: edits, allowApproximation: allowApproximation)
+        var image = development.image
         image = try RetouchProcessor.apply(to: image, strokes: edits.retouchStrokes,
                                            context: context, colorSpace: colorSpace)
         image = try AdvancedColorProcessor.applyColor(to: image, curves: edits.curves,
@@ -226,12 +259,12 @@ public final class ImagePipeline: @unchecked Sendable {
               let result = context.createCGImage(image, from: rect, format: .RGBA8, colorSpace: colorSpace) else {
             throw ImagePipelineError.renderFailed(url)
         }
-        return result
+        return (result, development.isApproximate)
     }
 
     /// 새 스팟 복구의 패치 위치를 한 번 찾는다. 결과를 stroke에 저장하면 렌더마다 다시 찾지 않는다.
     public func healingSourceOffset(url: URL, edits: EditSettings, stroke: RetouchStroke) throws -> MaskPoint {
-        let base = try developed(url: url, edits: edits)
+        let base = try developed(url: url, edits: edits, allowApproximation: false).image
         let retouched = try RetouchProcessor.apply(to: base, strokes: edits.retouchStrokes,
                                                    context: context, colorSpace: colorSpace)
         return try RetouchProcessor.healingSourceOffset(for: stroke, in: retouched,
@@ -257,33 +290,45 @@ public final class ImagePipeline: @unchecked Sendable {
         return output
     }
 
-    private func developedSource(url: URL, edits: EditSettings) throws -> CIImage {
-        guard cachesDevelopment else { return try makeDevelopedSource(url: url, edits: edits) }
+    private func developedSource(url: URL, edits: EditSettings,
+                                 allowApproximation: Bool) throws -> (image: CIImage, delta: DevelopmentDelta?) {
+        guard cachesDevelopment else { return (try makeDevelopedSource(url: url, edits: edits).image, nil) }
         let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
-        var key = "\(url.path)|\(modified?.timeIntervalSinceReferenceDate ?? 0)"
+        var base = "\(url.path)|\(modified?.timeIntervalSinceReferenceDate ?? 0)"
+        var key = base
         if Self.isRAW(url) {
-            key += "|\(edits.exposure)|\(edits.temperatureShift)|\(edits.tintShift)|\(edits.rawDevelop)"
+            base += "|\(edits.rawDevelop)"
+            key = base + "|\(edits.exposure)|\(edits.temperatureShift)|\(edits.tintShift)"
         }
         developmentLock.lock()
         if let index = developedSources.firstIndex(where: { $0.key == key }) {
             let hit = developedSources.remove(at: index)
             developedSources.append(hit)
             developmentLock.unlock()
-            return hit.image
+            return (hit.image, nil)
+        }
+        if allowApproximation, Self.isRAW(url), let near = developedSources.last(where: { $0.base == base }) {
+            developmentLock.unlock()
+            return (near.image, DevelopmentDelta(exposure: edits.exposure - near.exposure,
+                                                 temperature: edits.temperatureShift - near.temperature,
+                                                 tint: edits.tintShift - near.tint,
+                                                 neutralTemperature: near.neutralTemperature))
         }
         developmentLock.unlock()
-        let image = try makeDevelopedSource(url: url, edits: edits)
+        let (image, neutralTemperature) = try makeDevelopedSource(url: url, edits: edits)
         developmentLock.lock()
         developedSources.removeAll { $0.key == key }
-        developedSources.append((key, image))
+        developedSources.append(DevelopedSource(key: key, base: base, exposure: edits.exposure,
+                                                temperature: edits.temperatureShift, tint: edits.tintShift,
+                                                neutralTemperature: neutralTemperature, image: image))
         let evicted = developedSources.count > 2
         if evicted { developedSources.removeFirst(developedSources.count - 2) }
         developmentLock.unlock()
         if evicted { context.clearCaches() }
-        return image
+        return (image, nil)
     }
 
-    private func makeDevelopedSource(url: URL, edits: EditSettings) throws -> CIImage {
+    private func makeDevelopedSource(url: URL, edits: EditSettings) throws -> (image: CIImage, neutralTemperature: Double?) {
         if Self.isRAW(url) {
             guard let raw = CIRAWFilter(imageURL: url) else { throw ImagePipelineError.unreadable(url) }
             let originalExposure = raw.exposure
@@ -306,16 +351,21 @@ public final class ImagePipeline: @unchecked Sendable {
                 raw.isHighlightRecoveryEnabled = enabled
             }
             guard let output = raw.outputImage else { throw ImagePipelineError.renderFailed(url) }
-            return output
+            return (output, Double(raw.neutralTemperature))
         }
         guard let source = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
             throw ImagePipelineError.unreadable(url)
         }
-        return source
+        return (source, nil)
     }
 
-    private func developed(url: URL, edits: EditSettings) throws -> CIImage {
-        var image = try developedSource(url: url, edits: edits)
+    private func developed(url: URL, edits: EditSettings,
+                           allowApproximation: Bool) throws -> (image: CIImage, isApproximate: Bool) {
+        let source = try developedSource(url: url, edits: edits, allowApproximation: allowApproximation)
+        var image = source.image
+        if let delta = source.delta {
+            image = Self.approximated(image, by: delta)
+        }
         if !Self.isRAW(url) {
             if edits.exposure != 0 {
                 let filter = CIFilter.exposureAdjust()
@@ -360,8 +410,39 @@ public final class ImagePipeline: @unchecked Sendable {
             filter.sharpness = Float(edits.sharpness)
             image = filter.outputImage ?? image
         }
-        return image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+        return (image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY)),
+                source.delta != nil)
     }
+
+    /// RAW 현상 결과에 노출·색온도·틴트 차이를 덧씌운 근사. 색온도는 켈빈이 아니라 미레드(1/K) 차이로 옮긴다.
+    /// RAW 중립 색온도를 T에서 T+Δ로 바꾸는 것과 같은 미레드만큼 6500K 기준 필터를 움직인다.
+    private static func approximated(_ image: CIImage, by delta: DevelopmentDelta) -> CIImage {
+        var result = image
+        if delta.exposure != 0, delta.exposure.isFinite {
+            let filter = CIFilter.exposureAdjust()
+            filter.inputImage = result
+            filter.ev = Float(delta.exposure)
+            result = filter.outputImage ?? result
+        }
+        if (delta.temperature != 0 || delta.tint != 0), delta.temperature.isFinite, delta.tint.isFinite {
+            let filter = CIFilter.temperatureAndTint()
+            filter.inputImage = result
+            filter.neutral = CIVector(x: 6500, y: 0)
+            var target = 6500.0
+            if let used = delta.neutralTemperature, used > 0, delta.temperature != 0 {
+                let moved = min(50_000, max(2_000, used + delta.temperature))
+                let mired = 1_000_000 / used - 1_000_000 / moved
+                target = 1_000_000 / max(20, 1_000_000 / 6500 + mired * approximateMiredGain)
+            }
+            filter.targetNeutral = CIVector(x: target, y: -delta.tint * approximateTintGain)
+            result = filter.outputImage ?? result
+        }
+        return result
+    }
+
+    /// S9 표본에서 RAW 현상은 같은 미레드·틴트 변화의 일반 필터보다 색이 약 1.35배·1.4배 더 움직였다.
+    static let approximateMiredGain = 1.35
+    static let approximateTintGain = 1.4
 
     private func applyLUT(_ adjustment: LUTAdjustment, to image: CIImage) throws -> CIImage {
         let cube = try lutStore.load(id: adjustment.id)

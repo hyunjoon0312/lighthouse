@@ -235,6 +235,11 @@ final class LibraryModel: ObservableObject {
     private var retouchGeneration = 0
     private var renderJob: DispatchWorkItem?
     private var displayedToken = 0
+    /// 슬라이더를 끄는 동안에는 RAW 노출·색온도·틴트를 근사로 그린다. 끝나면 정확히 다시 그린다.
+    private var editDragActive = false
+    private var showingApproximation = false
+    private var requestedApproximation = false
+    private var exactRenderFollowUp: DispatchWorkItem?
     private var lastRenderDispatch = Date.distantPast
     private var recentRenders: [(key: String, edits: EditSettings, image: NSImage, histogram: ImageHistogram?)] = []
     private var overlayToken = 0
@@ -557,6 +562,7 @@ final class LibraryModel: ObservableObject {
         cancelDraft()
         guard previousActive != selectedID else { objectWillChange.send(); return }
         selectionGeneration += 1
+        editDragActive = false
         cancelAutoMask()
         cancelRetouchDraft(clearSource: true)
         retouchError = nil
@@ -635,6 +641,9 @@ final class LibraryModel: ObservableObject {
 
     func endContinuousEdit() {
         editHistory.commitContinuous()
+        editDragActive = false
+        // 근사로 그리는 중이던 결과가 아직 도착하지 않았어도 정확한 렌더를 바로 시작한다.
+        if showingApproximation || (rendering && requestedApproximation) { requestRender() }
         objectWillChange.send()
     }
 
@@ -681,6 +690,7 @@ final class LibraryModel: ObservableObject {
         if record {
             if continuous, actual.count == 1 { editHistory.recordContinuous(actual[0]) }
             else { editHistory.record(actual) }
+            editDragActive = continuous
         }
         cancelDraft()
         cancelRetouchDraft()
@@ -1687,11 +1697,17 @@ final class LibraryModel: ObservableObject {
             }
         }
         rendering = true
+        exactRenderFollowUp?.cancel()
+        let approximate = editDragActive && !isOriginal && !actualSize
+        requestedApproximation = approximate
         let thumbnailSize = renderCurrent && !isOriginal && edits.isModified ? Self.thumbnailPixels : nil
         let job = DispatchWorkItem { [previewPipeline, pipeline] in
-            let current = renderCurrent
-                ? Result { try previewPipeline.render(url: photo.url, edits: edits, maxPixel: maxPixel) } : nil
-            let thumbnail = thumbnailSize.flatMap { size in
+            let preview = renderCurrent
+                ? Result { try previewPipeline.renderPreview(url: photo.url, edits: edits, maxPixel: maxPixel,
+                                                             allowApproximation: approximate) } : nil
+            let current = preview.map { result in result.map(\.image) }
+            let isApproximate = (try? preview?.get())?.isApproximate ?? false
+            let thumbnail = isApproximate ? nil : thumbnailSize.flatMap { size in
                 (try? current?.get()).flatMap { Self.downscaled($0, maxPixel: size) }
             }
             let histogram = (try? current?.get()).flatMap { ImageHistogram.make(from: $0) }
@@ -1716,7 +1732,17 @@ final class LibraryModel: ObservableObject {
                     self.displayedToken = token
                     self.histogram = histogram
                     self.refreshClippingOverlay()
-                    if let recentKey {
+                    self.showingApproximation = isApproximate
+                    if isApproximate {
+                        // 끝을 알리지 않는 입력(키보드로 슬라이더 조절 등)도 잠시 멈추면 정확히 다시 그린다.
+                        let followUp = DispatchWorkItem { [weak self] in
+                            guard let self, token == self.generation, self.showingApproximation else { return }
+                            self.editDragActive = false
+                            self.requestRender()
+                        }
+                        self.exactRenderFollowUp = followUp
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: followUp)
+                    } else if let recentKey {
                         self.rememberRender(image, key: recentKey, edits: edits, histogram: histogram)
                     }
                 case .failure(let error)?:
