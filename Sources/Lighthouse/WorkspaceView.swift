@@ -14,6 +14,7 @@ struct WorkspaceView: View {
     @EnvironmentObject private var model: LibraryModel
     @State private var keyMonitor: Any?
     @State private var folderToDelete: PhotoFolder?
+    @State private var zoomPosition = ScrollPosition(edge: .top)
 
     var body: some View {
         HStack(spacing: 0) {
@@ -206,6 +207,10 @@ struct WorkspaceView: View {
             Button("전체 선택") { model.selectAllVisible() }
                 .accessibilityLabel("보이는 사진 전체 선택")
                 .disabled(model.visiblePhotos.isEmpty)
+            Toggle("표시 후 다음 사진", isOn: $model.autoAdvance)
+                .toggleStyle(.checkbox)
+                .help("P·X·U·0–5 키로 표시하면 다음 사진으로 넘어갑니다")
+                .accessibilityLabel("표시 후 자동으로 다음 사진")
             Button("선택 해제") { model.clearPhotoSelection() }
                 .accessibilityLabel("사진 선택 해제")
                 .disabled(model.selectedPhotoIDs.isEmpty)
@@ -313,33 +318,41 @@ struct WorkspaceView: View {
             .buttonStyle(.borderless).padding(.horizontal, 20).frame(height: 44)
             HStack(spacing: 1) {
                 if model.mode == .compare {
-                    imagePane(model.pinnedImage, error: model.pinnedError, caption: "기준 · 원본", overlay: nil)
+                    imagePane(model.pinnedImage, error: model.pinnedError, caption: "기준 · 원본", overlay: nil,
+                              zoomable: false)
                 }
                 imagePane(model.rendered, error: model.imageError, caption: model.isOriginal ? "현재 · 원본" : "현재 · 보정",
-                          overlay: model.showsClipping ? model.clippingOverlay : nil)
+                          overlay: model.showsClipping ? model.clippingOverlay : nil, zoomable: true)
             }
             .background(Palette.canvas)
         }
     }
 
-    private func imagePane(_ image: NSImage?, error: String?, caption: String, overlay: NSImage?) -> some View {
+    private func imagePane(_ image: NSImage?, error: String?, caption: String, overlay: NSImage?,
+                           zoomable: Bool) -> some View {
         GeometryReader { geometry in
             ZStack {
                 if let image {
                     if model.actualSize {
                         let scale = NSApp.keyWindow?.backingScaleFactor ?? 1
-                        ScrollView([.horizontal, .vertical]) {
-                            ZStack {
-                                Image(nsImage: image).resizable().interpolation(.high)
-                                if let overlay {
-                                    Image(nsImage: overlay).resizable().interpolation(.none).allowsHitTesting(false)
-                                }
-                            }
-                            .frame(width: image.size.width / scale, height: image.size.height / scale)
-                            .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
+                        let content = CGSize(width: image.size.width / scale, height: image.size.height / scale)
+                        if zoomable {
+                            actualSizeScroll(image, overlay: overlay, content: content, viewport: geometry.size)
+                                .scrollPosition($zoomPosition)
+                                .onAppear { scrollToZoomAnchor(content: content, viewport: geometry.size) }
+                                .onChange(of: content) { _, size in scrollToZoomAnchor(content: size, viewport: geometry.size) }
+                        } else {
+                            actualSizeScroll(image, overlay: overlay, content: content, viewport: geometry.size)
                         }
                     } else {
                         Image(nsImage: image).resizable().interpolation(.high).scaledToFit().padding(20)
+                        if zoomable {
+                            Color.clear.contentShape(Rectangle())
+                                .onTapGesture(coordinateSpace: .local) { location in
+                                    zoomIn(at: location, imageSize: image.size, available: geometry.size)
+                                }
+                                .accessibilityLabel("클릭한 위치를 100%로 확대")
+                        }
                         if let overlay {
                             Image(nsImage: overlay).resizable().interpolation(.none).scaledToFit().padding(20)
                                 .allowsHitTesting(false)
@@ -366,6 +379,40 @@ struct WorkspaceView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.canvas)
         }
+    }
+
+    private func actualSizeScroll(_ image: NSImage, overlay: NSImage?, content: CGSize,
+                                  viewport: CGSize) -> some View {
+        ScrollView([.horizontal, .vertical]) {
+            ZStack {
+                Image(nsImage: image).resizable().interpolation(.high)
+                if let overlay {
+                    Image(nsImage: overlay).resizable().interpolation(.none).allowsHitTesting(false)
+                }
+            }
+            .frame(width: content.width, height: content.height)
+            .frame(minWidth: viewport.width, minHeight: viewport.height)
+            .contentShape(Rectangle())
+            .onTapGesture { model.toggleActualSize() }
+        }
+    }
+
+    /// 화면 맞춤 사진의 클릭 위치를 사진 안의 0…1 좌표로 바꿔 그 위치를 100%로 연다.
+    private func zoomIn(at location: CGPoint, imageSize: NSSize, available: CGSize) {
+        let width = max(1, available.width - 40), height = max(1, available.height - 40)
+        let scale = min(width / max(1, imageSize.width), height / max(1, imageSize.height))
+        let fitted = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let origin = CGPoint(x: (available.width - fitted.width) / 2, y: (available.height - fitted.height) / 2)
+        let anchor = CGPoint(x: (location.x - origin.x) / fitted.width, y: (location.y - origin.y) / fitted.height)
+        guard (0...1).contains(anchor.x), (0...1).contains(anchor.y) else { return }
+        model.toggleActualSize(at: anchor)
+    }
+
+    private func scrollToZoomAnchor(content: CGSize, viewport: CGSize) {
+        zoomPosition.scrollTo(point: CGPoint(
+            x: max(0, min(content.width - viewport.width, model.zoomAnchor.x * content.width - viewport.width / 2)),
+            y: max(0, min(content.height - viewport.height, model.zoomAnchor.y * content.height - viewport.height / 2))
+        ))
     }
 
     private var filmstrip: some View {
@@ -427,10 +474,12 @@ struct WorkspaceView: View {
             }
             if event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
                 switch event.charactersIgnoringModifiers?.lowercased() {
-                case "0", "1", "2", "3", "4", "5": model.setRating(Int(event.charactersIgnoringModifiers!)!); return nil
-                case "p": model.setFlag(.pick); return nil
-                case "x": model.setFlag(.reject); return nil
-                case "u": model.setFlag(.none); return nil
+                case "0", "1", "2", "3", "4", "5":
+                    model.markFromKeyboard(rating: Int(event.charactersIgnoringModifiers!)!); return nil
+                case "p": model.markFromKeyboard(flag: .pick); return nil
+                case "x": model.markFromKeyboard(flag: .reject); return nil
+                case "u": model.markFromKeyboard(flag: PhotoFlag.none); return nil
+                case "z" where model.mode != .grid: model.toggleActualSize(); return nil
                 case "g": model.setMode(.grid); return nil
                 case "e": model.setMode(.edit); return nil
                 case "c": model.setMode(.compare); return nil

@@ -145,6 +145,10 @@ final class LibraryModel: ObservableObject {
     @Published var histogram: ImageHistogram?
     @Published var showsClipping = false { didSet { refreshClippingOverlay() } }
     @Published var clippingOverlay: NSImage?
+    @Published var zoomAnchor = CGPoint(x: 0.5, y: 0.5)
+    @Published var autoAdvance = UserDefaults.standard.bool(forKey: "autoAdvanceAfterMark") {
+        didSet { UserDefaults.standard.set(autoAdvance, forKey: "autoAdvanceAfterMark") }
+    }
     let canvas = CanvasStrokeState()
     var gridColumnCount = 1
 
@@ -526,9 +530,11 @@ final class LibraryModel: ObservableObject {
         if isOriginal { isLocalEditing = false }
         requestRender()
     }
-    func toggleActualSize() {
+    /// `anchor`는 화면 맞춤 사진에서 클릭한 위치(0…1). 100%로 들어갈 때 그 위치를 가운데에 둔다.
+    func toggleActualSize(at anchor: CGPoint? = nil) {
         cancelDraft()
         cancelRetouchDraft()
+        if !actualSize { zoomAnchor = anchor ?? CGPoint(x: 0.5, y: 0.5) }
         actualSize.toggle()
         if actualSize { isLocalEditing = false }
         requestRender()
@@ -646,6 +652,24 @@ final class LibraryModel: ObservableObject {
     func setFlag(_ flag: PhotoFlag) {
         guard let id = selectedID else { return }
         changeMarks(of: id) { $0.flag = flag }
+    }
+
+    /// 키보드로 별점·표시를 바꾼다. 자동 다음 사진이 켜져 있으면 바꾸기 전에 정한 다음 사진으로 넘어가므로
+    /// 필터 때문에 방금 표시한 사진이 목록에서 빠져도 한 장을 건너뛰지 않는다.
+    func markFromKeyboard(rating: Int? = nil, flag: PhotoFlag? = nil) {
+        guard let id = selectedID else { return }
+        let visible = visiblePhotos
+        let next = autoAdvance ? visible.firstIndex(where: { $0.id == id }).flatMap { index in
+            visible.indices.contains(index + 1) ? visible[index + 1].id : nil
+        } : nil
+        changeMarks(of: id) { marks in
+            if let rating { marks.rating = rating }
+            if let flag { marks.flag = flag }
+        }
+        if let next, let photo = visiblePhotos.first(where: { $0.id == next }) {
+            moveDirection = 1
+            focusPhoto(photo)
+        }
     }
 
     private func changeMarks(of id: UUID, _ change: (inout PhotoMarks) -> Void) {
