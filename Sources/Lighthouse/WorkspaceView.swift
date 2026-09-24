@@ -36,6 +36,7 @@ struct WorkspaceView: View {
         .sheet(isPresented: $model.showExport) { ExportSheet() }
         .sheet(isPresented: $model.showBatchEdit) { BatchEditSheet() }
         .sheet(isPresented: $model.showCardImport) { CardImportSheet() }
+        .sheet(item: $model.presetSheet) { request in PresetSheet(request: request) }
         .sheet(item: $model.cropSource) { source in CropSheet(source: source) }
         .sheet(item: $model.referenceMatchSource) { source in
             ReferenceMatchSheet(source: source) { adjustment, apply in

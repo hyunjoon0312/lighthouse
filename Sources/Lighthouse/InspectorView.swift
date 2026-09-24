@@ -72,6 +72,8 @@ struct InspectorView: View {
 
     private var globalControls: some View {
         Group {
+            presetControls
+            Divider()
             HStack {
                 section("LUT")
                 Spacer()
@@ -169,6 +171,51 @@ struct InspectorView: View {
                     .disabled(model.clipboard == nil || model.visiblePhotos.last?.id == photo.id)
                     .help("전체 보정과 LUT만 붙여넣습니다. 크롭·부분 보정·복구는 사진마다 달라 제외합니다.")
             }.buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder private var presetControls: some View {
+        HStack {
+            section("프리셋")
+            Spacer()
+            Button("현재 보정 저장…") {
+                model.presetSheet = PresetSheetRequest(kind: .save, initialName: "")
+            }
+            .font(.caption).buttonStyle(.borderless)
+            .disabled(model.presetLoadError != nil)
+            .accessibilityLabel("현재 보정을 프리셋으로 저장")
+        }
+        if let error = model.presetLoadError {
+            Text("프리셋 파일 오류: \(error)").font(.caption).foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if model.presets.isEmpty {
+            Text("자주 쓰는 보정을 저장해 두면 다른 사진이나 가져오는 사진에 한 번에 적용할 수 있습니다.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        } else {
+            ForEach(model.presets) { preset in
+                HStack {
+                    Button(preset.name) { model.applyPreset(preset) }
+                        .buttonStyle(.borderless).lineLimit(1)
+                        .help(model.selectedPhotoIDs.count >= 2 ? "선택한 \(model.selectedPhotoIDs.count)장에 적용" : "현재 사진에 적용")
+                        .accessibilityLabel("프리셋 \(preset.name) 적용")
+                    Spacer()
+                    Menu {
+                        Button("이름 변경…") {
+                            model.presetSheet = PresetSheetRequest(kind: .rename(preset.id), initialName: preset.name)
+                        }
+                        Button("삭제", role: .destructive) { model.deletePreset(preset.id) }
+                    } label: { Image(systemName: "ellipsis") }
+                    .menuStyle(.borderlessButton).frame(width: 24)
+                    .accessibilityLabel("\(preset.name) 관리")
+                }
+                .font(.caption)
+            }
+            Picker("가져올 때 적용", selection: $model.importPresetID) {
+                Text("없음").tag(UUID?.none)
+                ForEach(model.presets) { Text($0.name).tag(Optional($0.id)) }
+            }
+            .font(.caption)
+            .accessibilityLabel("가져오는 사진에 자동으로 적용할 프리셋")
         }
     }
 

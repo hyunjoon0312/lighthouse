@@ -13,6 +13,13 @@ enum LibraryFilter: Hashable {
     case all, picks, rejects, edited, folder(String), collection(UUID)
 }
 
+struct PresetSheetRequest: Identifiable {
+    enum Kind { case save, rename(UUID) }
+    let id = UUID()
+    let kind: Kind
+    let initialName: String
+}
+
 struct PhotoFolderSheetRequest: Identifiable {
     enum Kind { case create, rename(UUID) }
     let id = UUID()
@@ -115,6 +122,12 @@ final class LibraryModel: ObservableObject {
     @Published var showExport = false
     @Published var showBatchEdit = false
     @Published var showCardImport = false
+    @Published var presets: [EditPreset] = []
+    @Published var presetLoadError: String?
+    @Published var presetSheet: PresetSheetRequest?
+    @Published var importPresetID: UUID? = UserDefaults.standard.string(forKey: "importPresetID").flatMap(UUID.init) {
+        didSet { UserDefaults.standard.set(importPresetID?.uuidString, forKey: "importPresetID") }
+    }
     @Published var isCancellingImport = false
     @Published var referenceMatchSource: PhotoAsset?
     @Published var cropSource: PhotoAsset?
@@ -175,6 +188,7 @@ final class LibraryModel: ObservableObject {
     private let lutStore = LUTStore()
     private let catalog = CatalogStore(url: CatalogStore.defaultURL)
     private let folderStore = PhotoFolderStore(url: PhotoFolderStore.defaultURL)
+    private let presetStore = EditPresetStore(url: EditPresetStore.defaultURL)
     private let previewQueue = DispatchQueue(label: "com.rian.lighthouse.preview", qos: .userInitiated)
     private let thumbnailQueue = DispatchQueue(label: "com.rian.lighthouse.thumbnails", qos: .utility)
     private let placeholderQueue = DispatchQueue(label: "com.rian.lighthouse.placeholder", qos: .userInitiated)
@@ -236,7 +250,7 @@ final class LibraryModel: ObservableObject {
     var canUndo: Bool { editHistory.canUndo }
     var canRedo: Bool { editHistory.canRedo }
     var hasModalPresentation: Bool {
-        showBatchEdit || showExport || showCardImport || referenceMatchSource != nil || folderSheetRequest != nil ||
+        showBatchEdit || showExport || showCardImport || presetSheet != nil || referenceMatchSource != nil || folderSheetRequest != nil ||
             cropSource != nil
     }
     var selectedLocal: LocalAdjustment? { selection?.edits.localAdjustments.first { $0.id == selectedLocalID } }
@@ -395,9 +409,10 @@ final class LibraryModel: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
-        batchQueue.async { [catalog, folderStore] in
+        batchQueue.async { [catalog, folderStore, presetStore] in
             let result = Result { try catalog.load() }
             let folders = Result { try folderStore.load() }
+            let presets = Result { try presetStore.load() }
             DispatchQueue.main.async {
                 switch result {
                 case .success(let photos):
@@ -406,6 +421,11 @@ final class LibraryModel: ObservableObject {
                     switch folders {
                     case .success(let loaded): self.photoFolders = loaded; self.foldersLoaded = true
                     case .failure(let error): self.folderLoadError = error.localizedDescription
+                    }
+                    switch presets {
+                    case .success(let loaded):
+                        self.presets = loaded.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                    case .failure(let error): self.presetLoadError = error.localizedDescription
                     }
                     if let first = photos.first {
                         self.photoSelection.select(first.id, in: photos.map(\.id))
@@ -1546,6 +1566,9 @@ final class LibraryModel: ObservableObject {
                 DispatchQueue.main.async { self.operationProgress = progress; self.operationMessage = "가져오는 중 \(index + 1)/\(candidates.count)" }
             }
             DispatchQueue.main.async {
+                if let preset = self.importPreset {
+                    for index in added.indices { added[index].edits = preset.applied(to: added[index].edits) }
+                }
                 self.photos.append(contentsOf: added)
                 self.photos.sort { ($0.metadata.capturedAt ?? $0.importedAt) < ($1.metadata.capturedAt ?? $1.importedAt) }
                 if self.selectedID == nil, let first = added.first {
@@ -1554,6 +1577,7 @@ final class LibraryModel: ObservableObject {
                 self.isImporting = false
                 let onExternalVolume = added.contains { $0.path.hasPrefix("/Volumes/") }
                 self.operationMessage = (summaryPrefix.map { $0 + " · " } ?? "") +
+                    (self.importPreset.map { "프리셋 ‘\($0.name)’ 적용 · " } ?? "") +
                     "\(added.count)장 가져옴 · 중복 \(paths.count - candidates.count)장 · 실패 \(failed.count)장" +
                     (onExternalVolume ? " · 외장 볼륨의 사진은 연결을 해제하면 열 수 없습니다. 카드는 ‘카드에서 복사해 가져오기’를 쓰세요." : "") +
                     (failed.isEmpty ? "" : "\n" + failed.prefix(5).joined(separator: "\n"))
@@ -1563,6 +1587,49 @@ final class LibraryModel: ObservableObject {
     }
 
     var canCancelImport: Bool { importCancellation != nil }
+
+    var importPreset: EditPreset? { importPresetID.flatMap { id in presets.first { $0.id == id } } }
+
+    /// 현재 사진의 보정에서 고른 항목만 새 프리셋으로 저장한다. 실패하면 이유를 돌려준다.
+    func savePreset(name: String, components: EditComponents) -> String? {
+        guard presetLoadError == nil else { return "프리셋 파일을 읽지 못해 저장할 수 없습니다." }
+        guard let current = selection else { return "사진을 선택하세요." }
+        let preset = EditPreset(name: name, source: current.edits, components: components)
+        return writePresets(presets + [preset], message: "프리셋 ‘\(preset.name)’을 저장했습니다.")
+    }
+
+    func renamePreset(_ id: UUID, to name: String) -> String? {
+        guard presetLoadError == nil, let index = presets.firstIndex(where: { $0.id == id }) else { return nil }
+        var updated = presets
+        updated[index].name = name
+        return writePresets(updated, message: nil)
+    }
+
+    func deletePreset(_ id: UUID) {
+        guard presetLoadError == nil else { return }
+        if importPresetID == id { importPresetID = nil }
+        _ = writePresets(presets.filter { $0.id != id }, message: "프리셋을 삭제했습니다. 이미 적용한 사진의 보정은 그대로입니다.")
+    }
+
+    private func writePresets(_ updated: [EditPreset], message: String?) -> String? {
+        do {
+            let normalized = try EditPresetStore.validated(updated)
+            try saveQueue.sync { try presetStore.save(normalized) }
+            presets = normalized.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            if let message { operationMessage = message }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// 여러 장이 선택되어 있으면 선택한 사진 전체에, 아니면 현재 사진에 적용한다. 한 번에 실행 취소된다.
+    func applyPreset(_ preset: EditPreset) {
+        let targets = selectedPhotoIDs.count >= 2 ? selectedPhotos.map(\.id) : selectedID.map { [$0] } ?? []
+        guard !targets.isEmpty else { return }
+        applyBatchEdits(source: preset.settings, to: targets, components: preset.components)
+        operationMessage = "프리셋 ‘\(preset.name)’ 적용 · " + (operationMessage ?? "")
+    }
 
     /// 카드의 사진을 `root`로 복사한 뒤 복사본을 가져온다. 카드의 원본은 읽기만 한다.
     func importByCopying(from source: URL, to root: URL, organizeByDate: Bool) {
