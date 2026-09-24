@@ -239,6 +239,8 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
     public var rating: Int
     public var flag: PhotoFlag
     public var edits: EditSettings
+    /// 가상 사본의 이름("사본 1"). nil이면 가져온 원래 항목이다. 사본은 같은 원본 파일을 가리키고 보정만 따로 가진다.
+    public var copyName: String?
 
     public init(id: UUID = UUID(), url: URL, metadata: PhotoMetadata = PhotoMetadata(),
                 importedAt: Date = Date()) {
@@ -254,4 +256,23 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
     public var url: URL { URL(fileURLWithPath: path) }
     public var filename: String { url.lastPathComponent }
     public var isRAW: Bool { ImagePipeline.isRAW(url) }
+    public var isVirtualCopy: Bool { copyName != nil }
+    /// 화면에 보이는 이름. 사본은 파일 이름 뒤에 사본 이름을 붙인다.
+    public var displayName: String { copyName.map { "\(filename) · \($0)" } ?? filename }
+
+    /// 같은 파일의 새 가상 사본. 보정·별점·표시를 그대로 가져오고 ID와 가져온 시각만 새로 정한다.
+    /// 이름은 `existing` 중 같은 파일의 사본 번호 다음 번호다.
+    public func virtualCopy(among existing: [PhotoAsset], at date: Date = Date()) -> PhotoAsset {
+        let used = Set(existing.filter { $0.path == path }.compactMap { photo -> Int? in
+            guard let name = photo.copyName, name.hasPrefix("사본 ") else { return nil }
+            return Int(name.dropFirst(3))
+        })
+        var number = 1
+        while used.contains(number) { number += 1 }
+        var copy = self
+        copy.id = UUID()
+        copy.importedAt = date
+        copy.copyName = "사본 \(number)"
+        return copy
+    }
 }

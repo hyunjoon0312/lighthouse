@@ -16,8 +16,12 @@ struct InspectorView: View {
                         Text("보정").font(.title3.weight(.semibold))
                         Spacer()
                         if photo.isRAW { Text("RAW").font(.caption2.weight(.bold)).foregroundStyle(.orange) }
+                        Button { model.createVirtualCopy() } label: { Image(systemName: "plus.square.on.square") }
+                            .buttonStyle(.borderless)
+                            .help("가상 사본 만들기 (⌘')  같은 원본에 다른 보정을 따로 저장합니다")
+                            .accessibilityLabel("가상 사본 만들기")
                     }
-                    Text(photo.filename).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Text(photo.displayName).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 HistogramView()
                 ratingRow

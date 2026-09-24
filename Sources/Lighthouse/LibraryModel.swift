@@ -248,6 +248,8 @@ final class LibraryModel: ObservableObject {
     @Published private(set) var isAnalyzingBursts = false
     @Published private(set) var burstAnalysisProgress = 0.0
     @Published var burstMessage: String?
+    /// 삭제를 확인받는 중인 가상 사본.
+    @Published var copyDeletionRequest: [PhotoAsset]?
     private var rawCapabilitiesPath: String?
     private var rawCapabilitiesByPath: [String: RAWCapabilities?] = [:]
     private static let renderInterval = 0.1
@@ -280,7 +282,7 @@ final class LibraryModel: ObservableObject {
     var canRedo: Bool { editHistory.canRedo }
     var hasModalPresentation: Bool {
         showBatchEdit || showExport || showCardImport || presetSheet != nil || referenceMatchSource != nil || folderSheetRequest != nil ||
-            cropSource != nil
+            cropSource != nil || copyDeletionRequest != nil
     }
     var selectedLocal: LocalAdjustment? { selection?.edits.localAdjustments.first { $0.id == selectedLocalID } }
     var canDrawLocal: Bool {
@@ -907,6 +909,63 @@ final class LibraryModel: ObservableObject {
         burstMessage = "추천 \(picks)장 선택 · \(changes.count - picks)장 제외로 표시했습니다. ⌘Z로 되돌릴 수 있습니다."
     }
 
+    // MARK: 가상 사본
+
+    /// 현재 사진의 가상 사본을 원래 항목 바로 뒤에 만들고 선택한다. 원본 파일은 복제하지 않는다.
+    /// 지금 내 폴더를 보고 있으면 사본도 그 폴더에 넣어 목록에서 사라지지 않게 한다.
+    func createVirtualCopy() {
+        guard catalogLoaded, loadError == nil, let source = selection else { return }
+        let copy = source.virtualCopy(among: photos)
+        let insertAt = (photos.lastIndex { $0.path == source.path } ?? photos.count - 1) + 1
+        photos.insert(copy, at: insertAt)
+        if case .collection(let folderID) = filter, foldersLoaded, folderLoadError == nil,
+           let index = photoFolders.firstIndex(where: { $0.id == folderID }) {
+            photoFolders[index].add([copy.id])
+        }
+        scheduleSave()
+        focusPhoto(copy)
+        operationMessage = "\(copy.displayName)을 만들었습니다. 원본 파일은 하나이며 보정·별점만 따로 저장됩니다."
+    }
+
+    /// 선택한 사진 중 가상 사본만 카탈로그에서 뺀다. 원본 파일과 원래 항목은 그대로다. 실행 취소할 수 없다.
+    var selectedVirtualCopies: [PhotoAsset] {
+        let targets = selectedPhotos.isEmpty ? selection.map { [$0] } ?? [] : selectedPhotos
+        return targets.filter(\.isVirtualCopy)
+    }
+
+    func requestDeleteVirtualCopies() {
+        let copies = selectedVirtualCopies
+        guard !copies.isEmpty else { return }
+        copyDeletionRequest = copies
+    }
+
+    func deleteVirtualCopies(_ ids: Set<UUID>) {
+        guard catalogLoaded, loadError == nil else { return }
+        let removed = photos.filter { ids.contains($0.id) && $0.isVirtualCopy }
+        guard !removed.isEmpty else { return }
+        let removedIDs = Set(removed.map(\.id))
+        let fallbackPath = selection.flatMap { removedIDs.contains($0.id) ? $0.path : nil }
+        photos.removeAll { removedIDs.contains($0.id) }
+        if foldersLoaded, folderLoadError == nil {
+            for index in photoFolders.indices { photoFolders[index].remove(removedIDs) }
+        }
+        for id in removedIDs {
+            burstQualities[id] = nil
+            thumbnailCache.removeObject(forKey: id.uuidString as NSString)
+        }
+        thumbnailQueue.async { [thumbnailStore] in
+            for id in removedIDs { thumbnailStore.remove(photoID: id) }
+        }
+        if pinnedID.map(removedIDs.contains) == true { pinnedID = nil }
+        scheduleSave()
+        ensureSelectionVisible()
+        // 보고 있던 사본을 지우면 같은 파일의 남은 항목으로 옮긴다.
+        if selectedID == nil, let fallbackPath, let sibling = visiblePhotos.first(where: { $0.path == fallbackPath }) {
+            focusPhoto(sibling)
+        }
+        operationMessage = "가상 사본 \(removed.count)개를 지웠습니다. 원본 파일은 그대로입니다."
+    }
+
     func copyEdits() { clipboard = selection?.edits }
 
     private func knownLUTNames() -> [String: String] {
@@ -1491,18 +1550,20 @@ final class LibraryModel: ObservableObject {
     }
 
     func thumbnail(for photo: PhotoAsset) -> NSImage? {
-        thumbnailCache.object(forKey: photo.path as NSString)?.image
+        thumbnailCache.object(forKey: photo.id.uuidString as NSString)?.image
     }
 
     /// 보정한 사진은 보정 결과로 썸네일을 만든다. 편집 화면의 사진은 미리보기 렌더가 썸네일을 갱신한다.
     /// 보정 썸네일은 디스크에도 보관해 다음 실행 때 RAW를 다시 현상하지 않는다.
     func requestThumbnail(for photo: PhotoAsset) {
         let wanted: EditSettings? = photo.edits.isModified ? photo.edits : nil
-        let entry = thumbnailCache.object(forKey: photo.path as NSString)
+        // 가상 사본은 같은 파일을 가리키므로 파일 경로가 아니라 항목 ID로 캐시한다.
+        let cacheKey = photo.id.uuidString
+        let entry = thumbnailCache.object(forKey: cacheKey as NSString)
         if let entry, entry.edits == wanted { return }
         if entry != nil, wanted != nil, photo.id == selectedID, mode != .grid, !isOriginal { return }
-        guard !loadingThumbnails.contains(photo.path) else { return }
-        loadingThumbnails.insert(photo.path)
+        guard !loadingThumbnails.contains(cacheKey) else { return }
+        loadingThumbnails.insert(cacheKey)
         let size = Self.thumbnailPixels
         thumbnailQueue.async { [pipeline, thumbnailStore] in
             var image: CGImage?
@@ -1516,8 +1577,8 @@ final class LibraryModel: ObservableObject {
             }
             image = image ?? (try? pipeline.thumbnail(for: photo.url, maxPixel: size))
             DispatchQueue.main.async {
-                self.loadingThumbnails.remove(photo.path)
-                if let image { self.storeThumbnail(image, path: photo.path, edits: wanted) }
+                self.loadingThumbnails.remove(cacheKey)
+                if let image { self.storeThumbnail(image, id: photo.id, edits: wanted) }
                 if let latest = self.photo(withID: photo.id),
                    (latest.edits.isModified ? latest.edits : nil) != wanted {
                     self.requestThumbnail(for: latest)
@@ -1526,10 +1587,10 @@ final class LibraryModel: ObservableObject {
         }
     }
 
-    private func storeThumbnail(_ image: CGImage, path: String, edits: EditSettings?) {
+    private func storeThumbnail(_ image: CGImage, id: UUID, edits: EditSettings?) {
         let entry = ThumbnailEntry(image: NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height)),
                                    edits: edits)
-        thumbnailCache.setObject(entry, forKey: path as NSString, cost: image.width * image.height * 4)
+        thumbnailCache.setObject(entry, forKey: id.uuidString as NSString, cost: image.width * image.height * 4)
         objectWillChange.send()
     }
 
@@ -1635,7 +1696,7 @@ final class LibraryModel: ObservableObject {
                     break
                 }
                 if let thumbnail, let latest = self.photo(withID: photo.id), latest.edits == edits {
-                    self.storeThumbnail(thumbnail, path: photo.path, edits: edits)
+                    self.storeThumbnail(thumbnail, id: photo.id, edits: edits)
                     self.thumbnailQueue.async { [thumbnailStore = self.thumbnailStore] in
                         if let key = ThumbnailStore.key(for: latest) {
                             thumbnailStore.store(thumbnail, photoID: latest.id, key: key)

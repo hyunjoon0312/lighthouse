@@ -42,6 +42,18 @@ struct WorkspaceView: View {
         .sheet(isPresented: $model.showCardImport) { CardImportSheet() }
         .sheet(item: $model.presetSheet) { request in PresetSheet(request: request) }
         .sheet(item: $model.cropSource) { source in CropSheet(source: source) }
+        .confirmationDialog(copyDeletionTitle, isPresented: Binding(
+            get: { model.copyDeletionRequest != nil },
+            set: { if !$0 { model.copyDeletionRequest = nil } }
+        )) {
+            Button("사본 삭제", role: .destructive) {
+                if let copies = model.copyDeletionRequest { model.deleteVirtualCopies(Set(copies.map(\.id))) }
+                model.copyDeletionRequest = nil
+            }
+            Button("취소", role: .cancel) { model.copyDeletionRequest = nil }
+        } message: {
+            Text("사본의 보정·별점만 지웁니다. 원본 파일과 원래 항목은 그대로이며 실행 취소할 수 없습니다.")
+        }
         .sheet(item: $model.referenceMatchSource) { source in
             ReferenceMatchSheet(source: source) { adjustment, apply in
                 model.finishReferenceMatch(adjustment, apply: apply, source: source)
@@ -203,11 +215,16 @@ struct WorkspaceView: View {
         .padding(.horizontal, 20).frame(height: 67).background(Palette.panel)
     }
 
+    private var copyDeletionTitle: String {
+        let copies = model.copyDeletionRequest ?? []
+        return copies.count == 1 ? "\(copies[0].displayName)을 삭제할까요?" : "가상 사본 \(copies.count)개를 삭제할까요?"
+    }
+
     private var selectionToolbar: some View {
         ScrollView(.horizontal) { HStack(spacing: 12) {
             Text("\(model.selectedPhotoIDs.count)장 선택")
                 .font(.caption.weight(.semibold)).foregroundStyle(Palette.accent)
-            if let name = model.selection?.filename {
+            if let name = model.selection?.displayName {
                 Text("기준: \(name)").font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
             }
             Button("전체 선택") { model.selectAllVisible() }
@@ -315,9 +332,9 @@ struct WorkspaceView: View {
             HStack(spacing: 12) {
                 Button { model.move(-1) } label: { Image(systemName: "chevron.left") }.accessibilityLabel("이전 사진").disabled(model.visiblePhotos.first?.id == model.selectedID)
                 Button { model.move(1) } label: { Image(systemName: "chevron.right") }.accessibilityLabel("다음 사진").disabled(model.visiblePhotos.last?.id == model.selectedID)
-                Text(model.selection?.filename ?? "").lineLimit(1).font(.subheadline.weight(.medium))
+                Text(model.selection?.displayName ?? "").lineLimit(1).font(.subheadline.weight(.medium))
                 Spacer()
-                if model.mode == .compare, let pinned = model.pinned { Text("기준: \(pinned.filename)").font(.caption).foregroundStyle(Palette.muted).lineLimit(1) }
+                if model.mode == .compare, let pinned = model.pinned { Text("기준: \(pinned.displayName)").font(.caption).foregroundStyle(Palette.muted).lineLimit(1) }
                 Button(model.actualSize ? "화면 맞춤" : "100%") { model.toggleActualSize() }
                 Button(model.isOriginal ? "보정 보기" : "원본 보기") { model.toggleOriginal() }
             }
@@ -528,6 +545,10 @@ private struct PhotoTile: View {
                     VStack {
                         HStack {
                             if photo.isRAW { Text("RAW").font(.system(size: 9, weight: .bold)).padding(5).background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 4)) }
+                            if let copyName = photo.copyName {
+                                Label(copyName, systemImage: "square.on.square").font(.system(size: 9, weight: .bold)).padding(5)
+                                    .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 4))
+                            }
                             Spacer()
                             if photo.flag != .none { Image(systemName: photo.flag == .pick ? "checkmark.circle.fill" : "xmark.circle.fill").foregroundStyle(photo.flag == .pick ? Palette.accent : .red) }
                         }
@@ -549,7 +570,7 @@ private struct PhotoTile: View {
                 }
                 .frame(height: 150)
                 HStack {
-                    Text(photo.filename).lineLimit(1).font(.system(size: 12, weight: .medium))
+                    Text(photo.displayName).lineLimit(1).font(.system(size: 12, weight: .medium))
                     if active { Text("기준").font(.caption2.weight(.bold)).foregroundStyle(Palette.accent) }
                 }
                 Text(photo.rating == 0 ? "별점 없음" : String(repeating: "★", count: photo.rating)).font(.caption).foregroundStyle(photo.rating == 0 ? Palette.muted : Palette.accent)
@@ -560,7 +581,7 @@ private struct PhotoTile: View {
             .contentShape(RoundedRectangle(cornerRadius: 10))
             .onTapGesture { tileClicked(model, photo) }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(photo.filename), 별점 \(photo.rating), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")" + burstAccessibility)
+            .accessibilityLabel("\(photo.displayName), 별점 \(photo.rating), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")" + burstAccessibility)
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction { model.focusPhoto(photo) }
             .accessibilityAction(named: Text("선택 토글")) { model.togglePhotoSelection(photo) }
@@ -608,7 +629,7 @@ private struct FilmstripTile: View {
             .contentShape(RoundedRectangle(cornerRadius: 5))
             .onTapGesture { tileClicked(model, photo) }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(photo.filename), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")")
+            .accessibilityLabel("\(photo.displayName), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")")
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction { model.focusPhoto(photo) }
             .accessibilityAction(named: Text("선택 토글")) { model.togglePhotoSelection(photo) }
@@ -621,7 +642,7 @@ private struct FilmstripTile: View {
             .accessibilityLabel("\(photo.filename) 다중 선택 토글")
             .padding(3)
         }
-        .help(photo.filename)
+        .help(photo.displayName)
         .onAppear { model.requestThumbnail(for: photo) }
         .onChange(of: photo.edits) { _, _ in model.requestThumbnail(for: photo) }
     }

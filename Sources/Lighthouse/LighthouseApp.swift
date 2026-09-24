@@ -37,6 +37,13 @@ struct LighthouseApp: App {
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                     .disabled(library.selection == nil || library.isExporting || library.hasModalPresentation)
             }
+            CommandMenu("사진") {
+                Button("가상 사본 만들기") { library.createVirtualCopy() }
+                    .keyboardShortcut("'", modifiers: .command)
+                    .disabled(library.selection == nil || !library.catalogLoaded || library.hasModalPresentation)
+                Button("가상 사본 삭제…") { library.requestDeleteVirtualCopies() }
+                    .disabled(library.selectedVirtualCopies.isEmpty || library.hasModalPresentation)
+            }
             CommandGroup(replacing: .undoRedo) {
                 Button("실행 취소") { library.undo() }
                     .keyboardShortcut("z", modifiers: .command)

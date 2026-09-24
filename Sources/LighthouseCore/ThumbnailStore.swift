@@ -54,6 +54,11 @@ public struct ThumbnailStore: Sendable {
         }
     }
 
+    /// 카탈로그에서 뺀 항목(가상 사본)의 보정 썸네일을 지운다.
+    public func remove(photoID: UUID) {
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent(photoID.uuidString, isDirectory: true))
+    }
+
     private func file(photoID: UUID, key: String) -> URL {
         directory.appendingPathComponent(photoID.uuidString, isDirectory: true)
             .appendingPathComponent(key + ".jpg")
