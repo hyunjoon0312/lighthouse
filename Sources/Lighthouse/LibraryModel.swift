@@ -19,6 +19,15 @@ struct BurstIndex {
     var positions: [UUID: (group: Int, shot: Int)] = [:]
 }
 
+private struct MaskRequestKey: Equatable {
+    let photoID: UUID
+    let definition: LocalMaskDefinition
+    let rotationQuarterTurns: Int
+    let straightenDegrees: Double
+    let cropRect: NormalizedCrop?
+    let cropAspect: Double?
+}
+
 struct BurstBadge: Equatable {
     var shot: Int
     var count: Int
@@ -259,6 +268,11 @@ final class LibraryModel: ObservableObject {
     private var autoMaskGeneration = 0
     private var lutLibraryGeneration = 0
     private var maskSource: String?
+    /// 화면의 마스크가 어떤 모양·구도로 그려졌는지. 같으면 효과 값만 바뀐 것이므로 다시 그리지 않는다.
+    private var displayedMaskKey: MaskRequestKey?
+    /// 마스크는 한 번에 하나만 그리고, 그리는 동안 들어온 요청은 가장 마지막 것만 남긴다.
+    private var maskInFlight = false
+    private var pendingMaskJob: (() -> Void)?
     private var draftPhotoID: UUID?
     private var draftLocalID: UUID?
     private var started = false
@@ -1326,38 +1340,56 @@ final class LibraryModel: ObservableObject {
             selectedLocalID = areas.first?.id
             if selectedLocalID == nil { isLocalEditing = false }
         }
-        requestMask()
     }
 
+    /// 선택한 영역의 마스크 표시를 새로 그린다. 모양·구도가 그대로면 건너뛰고, 그리는 중에 들어온 요청은
+    /// 마지막 것만 이어서 그려 조절점을 끄는 동안 작업이 쌓이지 않게 한다.
     func requestMask() {
         maskGeneration += 1
         let token = maskGeneration
         guard adjustmentPanel == .local, showsMask, mode == .edit, !isOriginal, !actualSize,
               let photo = selection, let adjustment = selectedLocal,
               photo.metadata.width > 0, photo.metadata.height > 0 else {
-            maskImage = nil; maskError = nil; maskSource = nil; return
+            maskImage = nil; maskError = nil; maskSource = nil; displayedMaskKey = nil; pendingMaskJob = nil; return
         }
         let source = "\(photo.id):\(adjustment.id):\(photo.edits.rotationQuarterTurns):\(photo.edits.straightenDegrees):\(String(describing: photo.edits.cropRect)): \(photo.edits.cropAspect ?? 0)"
         if source != maskSource { maskImage = nil; maskSource = source }
-        maskQueue.async { [pipeline] in
-            let result = Result {
-                try pipeline.renderMask(adjustment: adjustment,
-                                        sourceWidth: photo.metadata.width,
-                                        sourceHeight: photo.metadata.height,
-                                        edits: photo.edits, maxPixel: 1600)
-            }
-            DispatchQueue.main.async {
-                guard token == self.maskGeneration else { return }
-                switch result {
-                case .success(let cg):
-                    self.maskError = nil
-                    self.maskImage = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
-                case .failure(let error):
-                    self.maskImage = nil
-                    self.maskError = error.localizedDescription
+        let key = MaskRequestKey(photoID: photo.id, definition: adjustment.maskDefinition,
+                                 rotationQuarterTurns: photo.edits.rotationQuarterTurns,
+                                 straightenDegrees: photo.edits.straightenDegrees,
+                                 cropRect: photo.edits.cropRect, cropAspect: photo.edits.cropAspect)
+        if key == displayedMaskKey, maskImage != nil { pendingMaskJob = nil; return }
+        let job = { [pipeline] in
+            self.maskQueue.async {
+                let result = Result {
+                    try pipeline.renderMask(adjustment: adjustment,
+                                            sourceWidth: photo.metadata.width,
+                                            sourceHeight: photo.metadata.height,
+                                            edits: photo.edits, maxPixel: 1600)
+                }
+                DispatchQueue.main.async {
+                    self.maskInFlight = false
+                    if token == self.maskGeneration {
+                        switch result {
+                        case .success(let cg):
+                            self.maskError = nil
+                            self.maskImage = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                            self.displayedMaskKey = key
+                        case .failure(let error):
+                            self.maskImage = nil
+                            self.maskError = error.localizedDescription
+                            self.displayedMaskKey = nil
+                        }
+                    }
+                    if let next = self.pendingMaskJob {
+                        self.pendingMaskJob = nil
+                        self.maskInFlight = true
+                        next()
+                    }
                 }
             }
         }
+        if maskInFlight { pendingMaskJob = job } else { maskInFlight = true; job() }
     }
 
     func pasteToNext() {
