@@ -11,4 +11,4 @@
 
 모든 편집은 **비파괴 방식**입니다. 노출·색상·마스크·LUT·참조 색감의 보정값을 별도로 자동 저장하고 원본 RW2/JPEG는 그대로 둡니다. **원본 보기**로 보정 전 모습을 비교하고, **보정 초기화**로 현재 사진을 원래 상태로 되돌릴 수 있습니다. 초기화도 ⌘Z로 취소할 수 있습니다. 편집 결과는 **JPEG 내보내기**로 별도 저장하세요.
 
-백업 대상은 `~/Library/Application Support/Lighthouse/`의 `catalog.json`, `folders.json`, `LUTs` 폴더와 실제 원본 사진입니다. 원본 파일을 Finder에서 이동하면 앱에서 읽을 수 없으므로 원래 위치로 복원해야 합니다.
+백업 대상은 `~/Library/Application Support/Lighthouse/`의 `catalog.json`, `folders.json`, `LUTs`·`Masks` 폴더와 실제 원본 사진입니다. `Masks`에는 자동 선택 마스크가 들어 있으며, 이 폴더 없이 `catalog.json`만 옮기면 카탈로그를 열 수 없습니다. 원본 파일을 Finder에서 이동하면 앱에서 읽을 수 없으므로 원래 위치로 복원해야 합니다.

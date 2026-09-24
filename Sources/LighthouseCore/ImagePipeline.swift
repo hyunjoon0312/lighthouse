@@ -85,16 +85,99 @@ public final class ImagePipeline: @unchecked Sendable {
     }
 
     public func thumbnail(for url: URL, maxPixel: Int = 360) throws -> CGImage {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+            throw ImagePipelineError.unreadable(url)
+        }
+        let size = max(1, maxPixel)
+        func thumbnail(fromImageAlways: Bool) -> CGImage? {
+            let mode = fromImageAlways ? kCGImageSourceCreateThumbnailFromImageAlways
+                : kCGImageSourceCreateThumbnailFromImageIfAbsent
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                mode: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixel)
-              ] as CFDictionary) else { throw ImagePipelineError.unreadable(url) }
+                kCGImageSourceThumbnailMaxPixelSize: size
+            ] as CFDictionary)
+        }
+        // RAW 파일에 든 큰 JPEG 미리보기를 쓰면 센서 데이터 전체를 디코딩하지 않는다.
+        if let embedded = thumbnail(fromImageAlways: false),
+           Self.embeddedThumbnail(embedded, isUsableFor: source, maxPixel: size) {
+            return embedded
+        }
+        guard let image = thumbnail(fromImageAlways: true) else { throw ImagePipelineError.unreadable(url) }
         return image
     }
 
+    private static func embeddedThumbnail(_ image: CGImage, isUsableFor source: CGImageSource,
+                                          maxPixel: Int) -> Bool {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any],
+              let width = (properties[kCGImagePropertyPixelWidth as String] as? NSNumber)?.intValue,
+              let height = (properties[kCGImagePropertyPixelHeight as String] as? NSNumber)?.intValue,
+              width > 0, height > 0, image.width > 0, image.height > 0 else { return false }
+        let neededSide = min(maxPixel, max(width, height))
+        guard max(image.width, image.height) >= neededSide - 1 else { return false }
+        let sourceRatio = Double(min(width, height)) / Double(max(width, height))
+        let imageRatio = Double(min(image.width, image.height)) / Double(max(image.width, image.height))
+        return abs(sourceRatio - imageRatio) <= 0.02
+    }
+
     public func render(url: URL, edits: EditSettings, maxPixel: Int? = 2200) throws -> CGImage {
+        var image = try developed(url: url, edits: edits)
+        image = try RetouchProcessor.apply(to: image, strokes: edits.retouchStrokes,
+                                           context: context, colorSpace: colorSpace)
+        image = try AdvancedColorProcessor.applyColor(to: image, curves: edits.curves,
+                                                      ranges: edits.colorRanges)
+        for adjustment in edits.localAdjustments where adjustment.isEnabled &&
+            (adjustment.baseMask != nil || adjustment.isInverted || !adjustment.strokes.isEmpty) {
+            if let baseMask = adjustment.baseMask { _ = try decodedMask(baseMask) }
+            guard adjustment.exposure.isFinite, adjustment.contrast.isFinite,
+                  adjustment.exposure != 0 || adjustment.contrast != 1 else { continue }
+            let mask = try maskImage(for: adjustment, width: Int(image.extent.width),
+                                     height: Int(image.extent.height), scale: 1)
+            var adjusted = image
+            if adjustment.exposure != 0 {
+                let filter = CIFilter.exposureAdjust()
+                filter.inputImage = adjusted
+                filter.ev = Float(adjustment.exposure)
+                adjusted = filter.outputImage ?? adjusted
+            }
+            if adjustment.contrast != 1 {
+                let filter = CIFilter.colorControls()
+                filter.inputImage = adjusted
+                filter.contrast = Float(adjustment.contrast)
+                adjusted = filter.outputImage ?? adjusted
+            }
+            let blend = CIFilter.blendWithMask()
+            blend.inputImage = adjusted
+            blend.backgroundImage = image
+            blend.maskImage = mask
+            image = (blend.outputImage ?? image).cropped(to: image.extent)
+        }
+        if let lut = edits.lut, lut.isEnabled {
+            guard lut.intensity.isFinite else { throw ImagePipelineError.lutFailed("강도가 유한한 값이 아닙니다") }
+            if lut.intensity > 0 {
+                image = try applyLUT(lut, to: image)
+            }
+        }
+        image = try AdvancedColorProcessor.applyGrain(to: image, settings: edits.grain)
+        image = transformedForDisplay(image, edits: edits, maxPixel: maxPixel)
+        let rect = CGRect(x: 0, y: 0, width: floor(image.extent.width), height: floor(image.extent.height))
+        guard rect.width > 0, rect.height > 0,
+              let result = context.createCGImage(image, from: rect, format: .RGBA8, colorSpace: colorSpace) else {
+            throw ImagePipelineError.renderFailed(url)
+        }
+        return result
+    }
+
+    /// 새 스팟 복구의 패치 위치를 한 번 찾는다. 결과를 stroke에 저장하면 렌더마다 다시 찾지 않는다.
+    public func healingSourceOffset(url: URL, edits: EditSettings, stroke: RetouchStroke) throws -> MaskPoint {
+        let base = try developed(url: url, edits: edits)
+        let retouched = try RetouchProcessor.apply(to: base, strokes: edits.retouchStrokes,
+                                                   context: context, colorSpace: colorSpace)
+        return try RetouchProcessor.healingSourceOffset(for: stroke, in: retouched,
+                                                        context: context, colorSpace: colorSpace)
+    }
+
+    private func developed(url: URL, edits: EditSettings) throws -> CIImage {
         var image: CIImage
         if Self.isRAW(url) {
             guard let raw = CIRAWFilter(imageURL: url) else { throw ImagePipelineError.unreadable(url) }
@@ -146,51 +229,7 @@ public final class ImagePipeline: @unchecked Sendable {
             filter.sharpness = Float(edits.sharpness)
             image = filter.outputImage ?? image
         }
-        image = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
-        image = try RetouchProcessor.apply(to: image, strokes: edits.retouchStrokes,
-                                           context: context, colorSpace: colorSpace)
-        image = try AdvancedColorProcessor.applyColor(to: image, curves: edits.curves,
-                                                      ranges: edits.colorRanges)
-        for adjustment in edits.localAdjustments where adjustment.isEnabled &&
-            (adjustment.baseMask != nil || adjustment.isInverted || !adjustment.strokes.isEmpty) {
-            if let baseMask = adjustment.baseMask { _ = try decodedMask(baseMask) }
-            guard adjustment.exposure.isFinite, adjustment.contrast.isFinite,
-                  adjustment.exposure != 0 || adjustment.contrast != 1 else { continue }
-            let mask = try maskImage(for: adjustment, width: Int(image.extent.width),
-                                     height: Int(image.extent.height), scale: 1)
-            var adjusted = image
-            if adjustment.exposure != 0 {
-                let filter = CIFilter.exposureAdjust()
-                filter.inputImage = adjusted
-                filter.ev = Float(adjustment.exposure)
-                adjusted = filter.outputImage ?? adjusted
-            }
-            if adjustment.contrast != 1 {
-                let filter = CIFilter.colorControls()
-                filter.inputImage = adjusted
-                filter.contrast = Float(adjustment.contrast)
-                adjusted = filter.outputImage ?? adjusted
-            }
-            let blend = CIFilter.blendWithMask()
-            blend.inputImage = adjusted
-            blend.backgroundImage = image
-            blend.maskImage = mask
-            image = (blend.outputImage ?? image).cropped(to: image.extent)
-        }
-        if let lut = edits.lut, lut.isEnabled {
-            guard lut.intensity.isFinite else { throw ImagePipelineError.lutFailed("강도가 유한한 값이 아닙니다") }
-            if lut.intensity > 0 {
-                image = try applyLUT(lut, to: image)
-            }
-        }
-        image = try AdvancedColorProcessor.applyGrain(to: image, settings: edits.grain)
-        image = transformedForDisplay(image, edits: edits, maxPixel: maxPixel)
-        let rect = CGRect(x: 0, y: 0, width: floor(image.extent.width), height: floor(image.extent.height))
-        guard rect.width > 0, rect.height > 0,
-              let result = context.createCGImage(image, from: rect, format: .RGBA8, colorSpace: colorSpace) else {
-            throw ImagePipelineError.renderFailed(url)
-        }
-        return result
+        return image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
     }
 
     private func applyLUT(_ adjustment: LUTAdjustment, to image: CIImage) throws -> CIImage {
@@ -358,8 +397,9 @@ public final class ImagePipeline: @unchecked Sendable {
     }
 
     public func exportJPEG(url: URL, edits: EditSettings, to directory: URL,
-                           maxPixel: Int?, quality: Double) throws -> URL {
-        let preview = try prepareJPEG(url: url, edits: edits, maxPixel: maxPixel, quality: quality)
+                           maxPixel: Int?, quality: Double, includeLocation: Bool = false) throws -> URL {
+        let preview = try prepareJPEG(url: url, edits: edits, maxPixel: maxPixel, quality: quality,
+                                      includeLocation: includeLocation)
         return try writeJPEG(preview.data, sourceURL: url, to: directory)
     }
 }

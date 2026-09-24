@@ -125,6 +125,35 @@ final class BatchEditingTests: XCTestCase {
         XCTAssertFalse(history.canRedo)
     }
 
+    func testContinuousChangesBecomeOneUndoStep() {
+        let photo = UUID(), other = UUID()
+        let steps = (0...20).map { EditSettings(exposure: Double($0) / 10) }
+        var history = EditHistory()
+        for index in 1..<steps.count {
+            history.recordContinuous(PhotoEditChange(id: photo, before: steps[index - 1], after: steps[index]))
+        }
+        XCTAssertTrue(history.canUndo)
+        history.commitContinuous()
+        XCTAssertEqual(history.undo(), [PhotoEditChange(id: photo, before: steps[0], after: steps[20])])
+        XCTAssertNil(history.undo())
+
+        history.recordContinuous(PhotoEditChange(id: photo, before: .neutral, after: steps[1]))
+        XCTAssertFalse(history.canRedo)
+        history.recordContinuous(PhotoEditChange(id: other, before: .neutral, after: steps[2]))
+        history.record([PhotoEditChange(id: photo, before: steps[1], after: steps[3])])
+        XCTAssertEqual(history.undo(), [PhotoEditChange(id: photo, before: steps[1], after: steps[3])])
+        XCTAssertEqual(history.undo(), [PhotoEditChange(id: other, before: .neutral, after: steps[2])])
+        XCTAssertEqual(history.undo(), [PhotoEditChange(id: photo, before: .neutral, after: steps[1])])
+
+        var returned = EditHistory()
+        returned.record([PhotoEditChange(id: photo, before: .neutral, after: steps[1])])
+        _ = returned.undo()
+        returned.recordContinuous(PhotoEditChange(id: photo, before: .neutral, after: steps[2]))
+        returned.recordContinuous(PhotoEditChange(id: photo, before: steps[2], after: .neutral))
+        XCTAssertTrue(returned.canRedo)
+        XCTAssertEqual(returned.redo(), [PhotoEditChange(id: photo, before: .neutral, after: steps[1])])
+    }
+
     func testHistoryLimit() {
         let id = UUID()
         let a = EditSettings(exposure: 1)

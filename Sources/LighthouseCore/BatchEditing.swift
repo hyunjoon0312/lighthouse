@@ -164,15 +164,40 @@ public struct EditHistory: Sendable {
     private let limit: Int
     private var undoStack: [[PhotoEditChange]] = []
     private var redoStack: [[PhotoEditChange]] = []
+    private var pendingContinuous: PhotoEditChange?
 
     public init(limit: Int = 100) {
         self.limit = max(0, limit)
     }
 
-    public var canUndo: Bool { !undoStack.isEmpty }
-    public var canRedo: Bool { !redoStack.isEmpty }
+    private var hasPendingContinuous: Bool {
+        pendingContinuous.map { $0.before != $0.after } ?? false
+    }
+    public var canUndo: Bool { !undoStack.isEmpty || (limit > 0 && hasPendingContinuous) }
+    public var canRedo: Bool { !redoStack.isEmpty && !hasPendingContinuous }
+
+    /// 슬라이더 드래그처럼 이어지는 같은 사진의 변경을 한 실행 취소 단계로 묶는다.
+    public mutating func recordContinuous(_ change: PhotoEditChange) {
+        if let pending = pendingContinuous, pending.id == change.id {
+            pendingContinuous = PhotoEditChange(id: change.id, before: pending.before, after: change.after)
+        } else {
+            commitContinuous()
+            pendingContinuous = change
+        }
+    }
+
+    public mutating func commitContinuous() {
+        guard let pending = pendingContinuous else { return }
+        pendingContinuous = nil
+        appendToUndo([pending])
+    }
 
     public mutating func record(_ changes: [PhotoEditChange]) {
+        commitContinuous()
+        appendToUndo(changes)
+    }
+
+    private mutating func appendToUndo(_ changes: [PhotoEditChange]) {
         let effective = changes.filter { $0.before != $0.after }
         guard !effective.isEmpty else { return }
         redoStack.removeAll()
@@ -184,12 +209,14 @@ public struct EditHistory: Sendable {
     }
 
     public mutating func undo() -> [PhotoEditChange]? {
+        commitContinuous()
         guard let changes = undoStack.popLast() else { return nil }
         redoStack.append(changes)
         return changes
     }
 
     public mutating func redo() -> [PhotoEditChange]? {
+        commitContinuous()
         guard let changes = redoStack.popLast() else { return nil }
         undoStack.append(changes)
         return changes

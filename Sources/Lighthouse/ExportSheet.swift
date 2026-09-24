@@ -12,6 +12,7 @@ struct ExportSheet: View {
     @State private var quality = 0.85
     @State private var directory: URL?
     @State private var actualSize = false
+    @AppStorage("exportIncludesLocation") private var includeLocation = false
 
     private var maxPixel: Int? { Int(size) }
     private var targets: [PhotoAsset] { model.exportTargets(for: scope) }
@@ -48,6 +49,10 @@ struct ExportSheet: View {
                 Text("\(Int(quality * 100))%").monospacedDigit().frame(width: 44)
             }
             .disabled(model.isExporting)
+            Toggle("위치(GPS) 정보 포함", isOn: $includeLocation)
+                .disabled(model.isExporting)
+                .help("촬영일·카메라·렌즈 정보는 항상 원본에서 옮깁니다. 위치는 켠 경우에만 포함합니다.")
+                .accessibilityLabel("내보낸 JPEG에 위치 정보 포함")
             previewPane
                 .frame(minWidth: 620, minHeight: 360)
             if targets.count > 1 {
@@ -69,7 +74,7 @@ struct ExportSheet: View {
                 Button("내보내기") {
                     guard let directory, let prepared = previewModel.preview else { return }
                     model.export(scope: scope, maxPixel: maxPixel, quality: quality,
-                                 directory: directory, prepared: prepared)
+                                 includeLocation: includeLocation, directory: directory, prepared: prepared)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(directory == nil || model.isExporting || targets.isEmpty ||
@@ -86,6 +91,7 @@ struct ExportSheet: View {
         .onChange(of: scope) { _, _ in requestPreview() }
         .onChange(of: size) { _, _ in requestPreview() }
         .onChange(of: quality) { _, _ in requestPreview() }
+        .onChange(of: includeLocation) { _, _ in requestPreview(debounce: false) }
     }
 
     @ViewBuilder private var previewPane: some View {
@@ -127,7 +133,8 @@ struct ExportSheet: View {
     }
 
     private func requestPreview(debounce: Bool = true) {
-        previewModel.request(photo: representative, maxPixel: maxPixel, quality: quality, debounce: debounce)
+        previewModel.request(photo: representative, maxPixel: maxPixel, quality: quality,
+                             includeLocation: includeLocation, debounce: debounce)
     }
 
     private func formattedBytes(_ count: Int) -> String {

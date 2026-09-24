@@ -45,14 +45,25 @@ enum RetouchProcessor {
         return image
     }
 
-    private static func apply(_ stroke: RetouchStroke, to image: CIImage,
-                              context: CIContext, colorSpace: CGColorSpace) throws -> CIImage {
+    static func healingSourceOffset(for stroke: RetouchStroke, in image: CIImage,
+                                    context: CIContext, colorSpace: CGColorSpace) throws -> MaskPoint {
+        let radius = try validatedRadius(of: stroke, in: image)
+        return try healingOffset(for: stroke, radius: radius,
+                                 image: image, context: context, colorSpace: colorSpace)
+    }
+
+    private static func validatedRadius(of stroke: RetouchStroke, in image: CIImage) throws -> CGFloat {
         guard stroke.radius.isFinite,
               stroke.points.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else {
             throw RetouchProcessingError.invalidStroke
         }
         let radiusFraction = min(0.15, max(0.002, stroke.radius))
-        let radius = radiusFraction * min(image.extent.width, image.extent.height)
+        return radiusFraction * min(image.extent.width, image.extent.height)
+    }
+
+    private static func apply(_ stroke: RetouchStroke, to image: CIImage,
+                              context: CIContext, colorSpace: CGColorSpace) throws -> CIImage {
+        let radius = try validatedRadius(of: stroke, in: image)
         let offset: MaskPoint
         switch stroke.mode {
         case .clone:
@@ -62,8 +73,13 @@ enum RetouchProcessor {
             }
             offset = requested
         case .heal:
-            offset = try healingOffset(for: stroke, radius: radius,
-                                       image: image, context: context, colorSpace: colorSpace)
+            if let stored = stroke.sourceOffset {
+                guard stored.x.isFinite, stored.y.isFinite else { throw RetouchProcessingError.invalidStroke }
+                offset = stored
+            } else {
+                offset = try healingOffset(for: stroke, radius: radius,
+                                           image: image, context: context, colorSpace: colorSpace)
+            }
         }
 
         let translation = CGAffineTransform(
@@ -102,9 +118,10 @@ enum RetouchProcessor {
         var mask = try strokeMask(stroke, width: Int(image.extent.width.rounded(.up)),
                                   height: Int(image.extent.height.rounded(.up)),
                                   radius: radius)
+        let blurRadius = max(0.5, radius * 0.25)
         let blur = CIFilter.gaussianBlur()
         blur.inputImage = mask.clampedToExtent()
-        blur.radius = Float(max(0.5, radius * 0.25))
+        blur.radius = Float(blurRadius)
         if let softened = blur.outputImage { mask = softened.cropped(to: image.extent) }
         let multiply = CIFilter.multiplyCompositing()
         multiply.inputImage = mask
@@ -112,12 +129,28 @@ enum RetouchProcessor {
         guard let supportedMask = multiply.outputImage?.cropped(to: image.extent) else {
             throw RetouchProcessingError.processingFailed
         }
+        // 마스크가 0인 곳은 원본 그대로이므로 stroke 주변만 합성해 전체 이미지 계산을 피한다.
+        let region = destinationRegion(of: stroke, margin: radius + blurRadius * 4 + 2, in: image.extent)
         let blend = CIFilter.blendWithMask()
-        blend.inputImage = patch
-        blend.backgroundImage = image
-        blend.maskImage = supportedMask
-        guard let output = blend.outputImage else { throw RetouchProcessingError.processingFailed }
-        return output.cropped(to: image.extent)
+        blend.inputImage = patch.cropped(to: region)
+        blend.backgroundImage = image.cropped(to: region)
+        blend.maskImage = supportedMask.cropped(to: region)
+        guard let output = blend.outputImage?.cropped(to: region) else {
+            throw RetouchProcessingError.processingFailed
+        }
+        return output.composited(over: image).cropped(to: image.extent)
+    }
+
+    private static func destinationRegion(of stroke: RetouchStroke, margin: CGFloat,
+                                           in extent: CGRect) -> CGRect {
+        let xs = stroke.points.map { CGFloat($0.x) * extent.width }
+        let ys = stroke.points.map { CGFloat($0.y) * extent.height }
+        guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max() else {
+            return extent
+        }
+        return CGRect(x: minX - margin, y: extent.height - maxY - margin,
+                      width: maxX - minX + margin * 2, height: maxY - minY + margin * 2)
+            .integral.intersection(extent)
     }
 
     private static func blurred(_ image: CIImage, radius: CGFloat) -> CIImage {

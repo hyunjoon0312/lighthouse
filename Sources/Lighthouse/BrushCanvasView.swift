@@ -4,6 +4,7 @@ import LighthouseCore
 
 struct BrushCanvasView: View {
     @EnvironmentObject private var model: LibraryModel
+    @ObservedObject var canvas: CanvasStrokeState
     let photo: PhotoAsset
     let imageSize: NSSize
     let availableSize: CGSize
@@ -46,7 +47,7 @@ struct BrushCanvasView: View {
             Canvas { context, _ in
                 context.clip(to: Path(imageRect))
                 let radius = displayRadius
-                let points = model.draftPoints
+                let points = canvas.draftPoints
                 if !points.isEmpty {
                     var path = Path()
                     let first = CGPoint(x: imageRect.minX + points[0].x * imageRect.width,
@@ -65,7 +66,7 @@ struct BrushCanvasView: View {
                                        style: StrokeStyle(lineWidth: radius * 2, lineCap: .round, lineJoin: .round))
                     }
                 }
-                if model.canDrawLocal, let cursor = model.brushCursor {
+                if model.canDrawLocal, let cursor = canvas.brushCursor {
                     let center = CGPoint(x: imageRect.minX + cursor.x * imageRect.width,
                                          y: imageRect.minY + cursor.y * imageRect.height)
                     var ring = Path()
@@ -75,16 +76,16 @@ struct BrushCanvasView: View {
                 }
                 if model.adjustmentPanel == .retouch {
                     let radius = retouchDisplayRadius
-                    if !model.retouchDraftPoints.isEmpty {
+                    if !canvas.retouchDraftPoints.isEmpty {
                         var path = Path()
-                        let first = canvasPoint(model.retouchDraftPoints[0])
-                        if model.retouchDraftPoints.count == 1 {
+                        let first = canvasPoint(canvas.retouchDraftPoints[0])
+                        if canvas.retouchDraftPoints.count == 1 {
                             path.addEllipse(in: CGRect(x: first.x - radius, y: first.y - radius,
                                                        width: radius * 2, height: radius * 2))
                             context.fill(path, with: .color(.orange.opacity(0.5)))
                         } else {
                             path.move(to: first)
-                            for point in model.retouchDraftPoints.dropFirst() { path.addLine(to: canvasPoint(point)) }
+                            for point in canvas.retouchDraftPoints.dropFirst() { path.addLine(to: canvasPoint(point)) }
                             context.stroke(path, with: .color(.orange.opacity(0.55)),
                                            style: StrokeStyle(lineWidth: radius * 2, lineCap: .round, lineJoin: .round))
                         }
@@ -99,7 +100,7 @@ struct BrushCanvasView: View {
                         marker.addEllipse(in: CGRect(x: center.x - 6, y: center.y - 6, width: 12, height: 12))
                         context.stroke(marker, with: .color(.cyan), lineWidth: 1.5)
                     }
-                    if model.canUseRetouchCanvas, let cursor = model.retouchCursor {
+                    if model.canUseRetouchCanvas, let cursor = canvas.retouchCursor {
                         let center = canvasPoint(cursor)
                         var ring = Path()
                         ring.addEllipse(in: CGRect(x: center.x - radius, y: center.y - radius,
@@ -115,11 +116,11 @@ struct BrushCanvasView: View {
                     .onContinuousHover { phase in
                         switch phase {
                         case .active(let point):
-                            if model.adjustmentPanel == .local { model.brushCursor = normalized(point) }
-                            else { model.retouchCursor = normalized(point) }
+                            if model.adjustmentPanel == .local { canvas.brushCursor = normalized(point) }
+                            else { canvas.retouchCursor = normalized(point) }
                         case .ended:
-                            model.brushCursor = nil
-                            model.retouchCursor = nil
+                            canvas.brushCursor = nil
+                            canvas.retouchCursor = nil
                         }
                     }
                     .gesture(DragGesture(minimumDistance: 0)

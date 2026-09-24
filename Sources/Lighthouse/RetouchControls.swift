@@ -45,6 +45,17 @@ struct RetouchControls: View {
                 Text("사진 위를 클릭하거나 짧게 드래그하세요. 주변 패치를 자동으로 찾습니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if model.isFindingHealSource {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("주변 패치를 찾는 중…").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("취소") { model.cancelRetouchDraft() }.accessibilityLabel("스팟 복구 패치 찾기 취소")
+                }
+            }
+            if let error = model.retouchError {
+                Text(error).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            }
             Divider()
             HStack {
                 Text("작업 \(photo.edits.retouchStrokes.count)개").font(.caption.weight(.bold)).foregroundStyle(.secondary)

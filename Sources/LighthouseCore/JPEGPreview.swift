@@ -19,7 +19,7 @@ public struct JPEGPreview: @unchecked Sendable {
 
 public extension ImagePipeline {
     func prepareJPEG(url: URL, edits: EditSettings, maxPixel: Int?,
-                     quality: Double) throws -> JPEGPreview {
+                     quality: Double, includeLocation: Bool = false) throws -> JPEGPreview {
         guard quality.isFinite else { throw ImagePipelineError.invalidJPEGQuality }
         let rendered = try render(url: url, edits: edits, maxPixel: maxPixel)
         let encoded = NSMutableData()
@@ -28,11 +28,10 @@ public extension ImagePipeline {
         ) else {
             throw ImagePipelineError.exportFailed(url)
         }
-        CGImageDestinationAddImage(
-            destination,
-            rendered,
-            [kCGImageDestinationLossyCompressionQuality: min(1, max(0, quality))] as CFDictionary
-        )
+        var properties = Self.exportMetadata(from: url, width: rendered.width, height: rendered.height,
+                                             includeLocation: includeLocation)
+        properties[kCGImageDestinationLossyCompressionQuality] = min(1, max(0, quality))
+        CGImageDestinationAddImage(destination, rendered, properties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {
             throw ImagePipelineError.exportFailed(url)
         }
@@ -42,6 +41,37 @@ public extension ImagePipeline {
             throw ImagePipelineError.invalidJPEGData
         }
         return JPEGPreview(data: data, image: decoded)
+    }
+
+    /// 원본의 촬영 메타데이터를 옮긴다. 픽셀은 이미 회전되어 있으므로 방향은 1로 둔다.
+    static func exportMetadata(from url: URL, width: Int, height: Int,
+                               includeLocation: Bool) -> [CFString: Any] {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let original = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return [:]
+        }
+        var metadata: [CFString: Any] = [kCGImagePropertyOrientation: 1]
+        if var exif = original[kCGImagePropertyExifDictionary] as? [CFString: Any] {
+            exif[kCGImagePropertyExifPixelXDimension] = width
+            exif[kCGImagePropertyExifPixelYDimension] = height
+            exif[kCGImagePropertyExifColorSpace] = 1
+            metadata[kCGImagePropertyExifDictionary] = exif
+        }
+        let tiffKeys = [kCGImagePropertyTIFFMake, kCGImagePropertyTIFFModel, kCGImagePropertyTIFFDateTime,
+                        kCGImagePropertyTIFFArtist, kCGImagePropertyTIFFCopyright,
+                        kCGImagePropertyTIFFImageDescription]
+        var tiff: [CFString: Any] = [kCGImagePropertyTIFFOrientation: 1]
+        if let originalTIFF = original[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
+            for key in tiffKeys { tiff[key] = originalTIFF[key] }
+        }
+        metadata[kCGImagePropertyTIFFDictionary] = tiff
+        for key in [kCGImagePropertyExifAuxDictionary, kCGImagePropertyIPTCDictionary] {
+            if let dictionary = original[key] { metadata[key] = dictionary }
+        }
+        if includeLocation, let gps = original[kCGImagePropertyGPSDictionary] {
+            metadata[kCGImagePropertyGPSDictionary] = gps
+        }
+        return metadata
     }
 
     func writeJPEG(_ data: Data, sourceURL: URL, to directory: URL) throws -> URL {

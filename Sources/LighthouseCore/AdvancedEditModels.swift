@@ -170,6 +170,37 @@ public struct RasterMask: Codable, Equatable, Sendable {
         self.height = height
         self.pngData = pngData
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case width, height, pngData, sha256
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        width = try container.decode(Int.self, forKey: .width)
+        height = try container.decode(Int.self, forKey: .height)
+        if container.contains(.pngData) {
+            pngData = try container.decode(Data.self, forKey: .pngData)
+        } else {
+            let id = try container.decode(String.self, forKey: .sha256)
+            guard let directory = decoder.userInfo[.rasterMaskDirectory] as? URL else {
+                throw DecodingError.dataCorruptedError(forKey: .sha256, in: container,
+                                                       debugDescription: "Mask file directory is unavailable")
+            }
+            pngData = try MaskFileStore(directory: directory).load(id: id)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(width, forKey: .width)
+        try container.encode(height, forKey: .height)
+        if encoder.userInfo[.rasterMaskDirectory] is URL {
+            try container.encode(MaskFileStore.contentID(pngData), forKey: .sha256)
+        } else {
+            try container.encode(pngData, forKey: .pngData)
+        }
+    }
 }
 
 public enum RetouchMode: String, Codable, CaseIterable, Sendable {

@@ -92,6 +92,50 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(CGImageSourceCreateImageAtIndex(source!, 0, nil)?.width, 40)
     }
 
+    func testCatalogStoresAutoMasksAsSeparateFiles() throws {
+        let directory = try temporaryDirectory()
+        let store = CatalogStore(url: directory.appendingPathComponent("catalog.json"))
+        let png = Data([137, 80, 78, 71, 13, 10, 26, 10] + Array(repeating: UInt8(7), count: 5_000))
+        let mask = RasterMask(width: 4, height: 3, pngData: png)
+        var photo = PhotoAsset(url: directory.appendingPathComponent("a.png"))
+        photo.edits.localAdjustments = [LocalAdjustment(name: "자동 피사체", exposure: 0.5, baseMask: mask),
+                                        LocalAdjustment(name: "자동 배경", baseMask: mask, isInverted: true)]
+        let legacy = try JSONEncoder().encode(["version": 1])
+        var legacyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: legacy) as? [String: Any])
+        legacyObject["photos"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode([photo]))
+        try JSONSerialization.data(withJSONObject: legacyObject).write(to: store.url)
+        XCTAssertEqual(try store.load(), [photo])
+
+        try store.save([photo])
+        let catalogText = try String(contentsOf: store.url, encoding: .utf8)
+        XCTAssertFalse(catalogText.contains("pngData"))
+        XCTAssertLessThan(catalogText.utf8.count, png.count)
+        let files = try FileManager.default.contentsOfDirectory(atPath: store.maskDirectory.path)
+        XCTAssertEqual(files.count, 1)
+        let maskFile = store.maskDirectory.appendingPathComponent(files[0])
+        XCTAssertEqual(try Data(contentsOf: maskFile), png)
+        XCTAssertEqual(try store.load(), [photo])
+
+        try Data(png.dropLast()).write(to: maskFile)
+        XCTAssertThrowsError(try store.load()) { error in
+            guard case .damagedMask? = error as? CatalogError else { return XCTFail("\(error)") }
+        }
+        try FileManager.default.removeItem(at: maskFile)
+        let catalogBefore = try Data(contentsOf: store.url)
+        XCTAssertThrowsError(try store.load()) { error in
+            guard case .missingMask? = error as? CatalogError else { return XCTFail("\(error)") }
+        }
+        XCTAssertEqual(try Data(contentsOf: store.url), catalogBefore)
+
+        try store.save([photo])
+        XCTAssertEqual(try store.load(), [photo])
+        let unrelated = store.maskDirectory.appendingPathComponent("notes.txt")
+        try Data("keep".utf8).write(to: unrelated)
+        photo.edits.localAdjustments = []
+        try store.save([photo])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.maskDirectory.path), ["notes.txt"])
+    }
+
     func testLegacyEditsAndNewCatalogRoundTrip() throws {
         let directory = try temporaryDirectory()
         let old = try JSONEncoder().encode(EditSettings())

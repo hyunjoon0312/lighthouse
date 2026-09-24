@@ -13,7 +13,8 @@ final class JPEGPreviewModel: ObservableObject {
     private var generation = 0
     private var workItem: DispatchWorkItem?
 
-    func request(photo: PhotoAsset?, maxPixel: Int?, quality: Double, debounce: Bool = true) {
+    func request(photo: PhotoAsset?, maxPixel: Int?, quality: Double, includeLocation: Bool,
+                 debounce: Bool = true) {
         workItem?.cancel()
         generation += 1
         let token = generation
@@ -24,7 +25,8 @@ final class JPEGPreviewModel: ObservableObject {
         let job = DispatchWorkItem { [weak self, pipeline] in
             let result = Result {
                 try pipeline.prepareJPEG(url: photo.url, edits: photo.edits,
-                                         maxPixel: maxPixel, quality: quality)
+                                         maxPixel: maxPixel, quality: quality,
+                                         includeLocation: includeLocation)
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self, token == self.generation else { return }
@@ -33,7 +35,7 @@ final class JPEGPreviewModel: ObservableObject {
                 case .success(let jpeg):
                     self.preview = PreparedJPEGExport(photoID: photo.id, edits: photo.edits,
                                                       maxPixel: maxPixel, quality: quality,
-                                                      result: jpeg)
+                                                      includeLocation: includeLocation, result: jpeg)
                 case .failure(let error):
                     self.error = error.localizedDescription
                 }

@@ -107,7 +107,7 @@ struct InspectorView: View {
                     set: { enabled in model.updateLUT { $0.isEnabled = enabled } }
                 )).font(.caption).accessibilityLabel("LUT 켜기 또는 끄기")
                 localSlider("LUT 강도", value: lut.intensity * 100, range: 0...100, format: "%.0f%%") { percent in
-                    model.updateLUT { $0.intensity = percent / 100 }
+                    model.updateLUT(continuous: true) { $0.intensity = percent / 100 }
                 }
                 Button("LUT 제거") { model.removeLUT() }
                     .accessibilityLabel("현재 사진의 LUT 제거")
@@ -161,7 +161,9 @@ struct InspectorView: View {
                 Button("보정 초기화") { model.updateEdits(.neutral) }.disabled(!edits.isModified)
                 Spacer()
                 Button("복사") { model.copyEdits() }
-                Button("다음에 붙여넣기") { model.pasteToNext() }.disabled(model.clipboard == nil || model.visiblePhotos.last?.id == photo.id)
+                Button("다음에 붙여넣기") { model.pasteToNext() }
+                    .disabled(model.clipboard == nil || model.visiblePhotos.last?.id == photo.id)
+                    .help("전체 보정과 LUT만 붙여넣습니다. 크롭·부분 보정·복구는 사진마다 달라 제외합니다.")
             }.buttonStyle(.bordered)
         }
     }
@@ -222,7 +224,7 @@ struct InspectorView: View {
                     HStack {
                         TextField("영역 이름", text: Binding(
                             get: { area.name },
-                            set: { name in model.updateLocal { $0.name = name } }
+                            set: { name in model.updateLocal(continuous: true) { $0.name = name } }
                         )).accessibilityLabel("영역 이름")
                         Toggle("활성", isOn: Binding(
                             get: { area.isEnabled },
@@ -242,13 +244,13 @@ struct InspectorView: View {
                     }
                     localSlider("브러시 크기", value: model.brushRadius * 200, range: 1...40, format: "%.0f%%") { model.brushRadius = $0 / 200 }
                     localSlider("경계 부드럽게", value: area.feather * 2000, range: 0...100, format: "%.0f") { percent in
-                        model.updateLocal { $0.feather = percent / 2000 }
+                        model.updateLocal(continuous: true) { $0.feather = percent / 2000 }
                     }
                     localSlider("영역 노출", value: area.exposure, range: -4...4, format: "%.2f EV") { exposure in
-                        model.updateLocal { $0.exposure = exposure }
+                        model.updateLocal(continuous: true) { $0.exposure = exposure }
                     }
                     localSlider("영역 대비", value: area.contrast, range: 0.5...1.5, format: "%.2f") { contrast in
-                        model.updateLocal { $0.contrast = contrast }
+                        model.updateLocal(continuous: true) { $0.contrast = contrast }
                     }
                     Toggle("마스크 표시", isOn: Binding(
                         get: { model.showsMask },
@@ -289,7 +291,10 @@ struct InspectorView: View {
                 Spacer()
                 Text(String(format: format, value)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
-            Slider(value: Binding(get: { value }, set: set), in: range).accessibilityLabel(title)
+            Slider(value: Binding(get: { value }, set: set), in: range) { editing in
+                if !editing { model.endContinuousEdit() }
+            }
+            .accessibilityLabel(title)
         }
     }
 
@@ -325,16 +330,18 @@ struct InspectorView: View {
             }
             Slider(value: Binding(
                 get: { value },
-                set: { newValue in self.change { change(&$0, newValue) } }
-            ), in: range)
+                set: { newValue in self.change(continuous: true) { change(&$0, newValue) } }
+            ), in: range) { editing in
+                if !editing { model.endContinuousEdit() }
+            }
             .accessibilityLabel(title)
         }
     }
 
-    private func change(_ body: (inout EditSettings) -> Void) {
+    private func change(continuous: Bool = false, _ body: (inout EditSettings) -> Void) {
         var next = edits
         body(&next)
-        model.updateEdits(next)
+        model.updateEdits(next, continuous: continuous)
     }
 
     private func metadataRow(_ title: String, _ value: String?) -> some View {

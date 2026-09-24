@@ -138,6 +138,113 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertEqual(distant.3, 255)
     }
 
+    func testStoredHealOffsetMatchesSearchedPatchAndSkipsSearch() throws {
+        let input = try temporaryPNG(width: 64, height: 64) { x, y in
+            (29...35).contains(x) && (29...35).contains(y)
+                ? (0, 0, 0, 255) : (UInt8(100 + x), UInt8(120 + y / 2), 150, 255)
+        }
+        defer { try? FileManager.default.removeItem(at: input) }
+        let pipeline = ImagePipeline()
+        let prior = RetouchStroke(mode: .heal, points: [MaskPoint(x: 0.15, y: 0.15)], radius: 0.03)
+        var edits = EditSettings(exposure: 0.2, retouchStrokes: [prior])
+        edits.retouchStrokes[0].sourceOffset = try pipeline.healingSourceOffset(
+            url: input, edits: EditSettings(exposure: 0.2), stroke: prior)
+        var stroke = RetouchStroke(mode: .heal, points: [MaskPoint(x: 0.5, y: 0.5)], radius: 0.055)
+        var searched = edits
+        searched.retouchStrokes.append(stroke)
+        stroke.sourceOffset = try pipeline.healingSourceOffset(url: input, edits: edits, stroke: stroke)
+        var stored = edits
+        stored.retouchStrokes.append(stroke)
+        XCTAssertEqual(try rgbaBytes(pipeline.render(url: input, edits: searched, maxPixel: nil)),
+                       try rgbaBytes(pipeline.render(url: input, edits: stored, maxPixel: nil)))
+
+        let long = RetouchStroke(mode: .heal,
+                                 points: [MaskPoint(x: 0.2, y: 0.2), MaskPoint(x: 0.8, y: 0.8)],
+                                 radius: 0.05)
+        XCTAssertThrowsError(try pipeline.healingSourceOffset(url: input, edits: .neutral, stroke: long)) { error in
+            XCTAssertEqual(error as? RetouchProcessingError, .noHealingSource)
+        }
+        var storedLong = long
+        storedLong.sourceOffset = MaskPoint(x: 0.1, y: -0.1)
+        XCTAssertNoThrow(try pipeline.render(url: input, edits: EditSettings(retouchStrokes: [storedLong]),
+                                             maxPixel: nil))
+        storedLong.sourceOffset = MaskPoint(x: .nan, y: 0)
+        XCTAssertThrowsError(try pipeline.render(url: input, edits: EditSettings(retouchStrokes: [storedLong]),
+                                                 maxPixel: nil)) { error in
+            XCTAssertEqual(error as? RetouchProcessingError, .invalidStroke)
+        }
+    }
+
+    func testThumbnailFallsBackWhenEmbeddedThumbnailIsTooSmall() throws {
+        let image = try makeImage(width: 1200, height: 800) { x, y in (UInt8(x % 256), UInt8(y % 256), 90, 255) }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, [
+            kCGImageDestinationEmbedThumbnail: true,
+            kCGImageDestinationImageMaxPixelSize: 1200
+        ] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let pipeline = ImagePipeline()
+        let thumbnail = try pipeline.thumbnail(for: url, maxPixel: 360)
+        XCTAssertEqual(max(thumbnail.width, thumbnail.height), 360)
+        XCTAssertEqual(min(thumbnail.width, thumbnail.height), 240)
+        let small = try temporaryPNG(width: 40, height: 20) { _, _ in (10, 20, 30, 255) }
+        defer { try? FileManager.default.removeItem(at: small) }
+        let smallThumbnail = try pipeline.thumbnail(for: small, maxPixel: 360)
+        XCTAssertEqual(smallThumbnail.width, 40)
+        XCTAssertEqual(smallThumbnail.height, 20)
+    }
+
+    func testPreparedJPEGKeepsCaptureMetadataAndOptionalLocation() throws {
+        let image = try makeImage(width: 48, height: 32) { x, y in (UInt8(x * 5), UInt8(y * 7), 60, 255) }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, [
+            kCGImagePropertyOrientation: 6,
+            kCGImagePropertyExifDictionary: [
+                kCGImagePropertyExifDateTimeOriginal: "2026:09:20 10:11:12",
+                kCGImagePropertyExifLensModel: "LUMIX S 20-60/F3.5-5.6",
+                kCGImagePropertyExifFNumber: 5.6
+            ],
+            kCGImagePropertyTIFFDictionary: [
+                kCGImagePropertyTIFFMake: "Panasonic",
+                kCGImagePropertyTIFFModel: "DC-S9",
+                kCGImagePropertyTIFFOrientation: 6
+            ],
+            kCGImagePropertyGPSDictionary: [
+                kCGImagePropertyGPSLatitude: 37.5,
+                kCGImagePropertyGPSLatitudeRef: "N"
+            ]
+        ] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+        let pipeline = ImagePipeline()
+        for includeLocation in [false, true] {
+            let prepared = try pipeline.prepareJPEG(url: url, edits: .neutral, maxPixel: nil,
+                                                    quality: 0.9, includeLocation: includeLocation)
+            XCTAssertEqual(prepared.width, 32)
+            XCTAssertEqual(prepared.height, 48)
+            let source = try XCTUnwrap(CGImageSourceCreateWithData(prepared.data as CFData, nil))
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+            XCTAssertEqual((properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1, 1)
+            let exif = try XCTUnwrap(properties[kCGImagePropertyExifDictionary] as? [CFString: Any])
+            XCTAssertEqual(exif[kCGImagePropertyExifDateTimeOriginal] as? String, "2026:09:20 10:11:12")
+            XCTAssertEqual(exif[kCGImagePropertyExifLensModel] as? String, "LUMIX S 20-60/F3.5-5.6")
+            XCTAssertEqual((exif[kCGImagePropertyExifPixelXDimension] as? NSNumber)?.intValue, 32)
+            XCTAssertEqual((exif[kCGImagePropertyExifPixelYDimension] as? NSNumber)?.intValue, 48)
+            let tiff = try XCTUnwrap(properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any])
+            XCTAssertEqual(tiff[kCGImagePropertyTIFFModel] as? String, "DC-S9")
+            XCTAssertEqual((tiff[kCGImagePropertyTIFFOrientation] as? NSNumber)?.intValue ?? 1, 1)
+            XCTAssertEqual(properties[kCGImagePropertyGPSDictionary] != nil, includeLocation)
+        }
+    }
+
     func testStraightenedImageHasOpaqueSafeCornersAndFinalScale() throws {
         let input = try temporaryPNG(width: 80, height: 50) { _, _ in (80, 120, 160, 255) }
         defer { try? FileManager.default.removeItem(at: input) }

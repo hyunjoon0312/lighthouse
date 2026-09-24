@@ -258,17 +258,37 @@ struct WorkspaceView: View {
     }
 
     private var grid: some View {
-        ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 14)], spacing: 14) {
-                ForEach(model.visiblePhotos) { photo in
-                    PhotoTile(photo: photo,
-                              selected: model.selectedPhotoIDs.contains(photo.id),
-                              active: model.selectedID == photo.id)
-                }
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
+                ScrollView { gridContent }
+                    .onChange(of: model.selectedID) { _, id in scroll(proxy, to: id) }
             }
-            .padding(22)
+            .onChange(of: geometry.size.width, initial: true) { _, width in
+                model.gridColumnCount = Self.gridColumns(for: width)
+            }
         }
         .background(Palette.canvas)
+    }
+
+    private var gridContent: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 14)], spacing: 14) {
+            ForEach(model.visiblePhotos) { photo in
+                PhotoTile(photo: photo,
+                          selected: model.selectedPhotoIDs.contains(photo.id),
+                          active: model.selectedID == photo.id)
+                    .id(photo.id)
+            }
+        }
+        .padding(22)
+    }
+
+    private static func gridColumns(for width: CGFloat) -> Int {
+        max(1, Int((width - 44 + 14) / (180 + 14)))
+    }
+
+    private func scroll(_ proxy: ScrollViewProxy, to id: UUID?) {
+        guard let id else { return }
+        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
     }
 
     private var editorCanvas: some View {
@@ -307,7 +327,8 @@ struct WorkspaceView: View {
                     } else {
                         Image(nsImage: image).resizable().interpolation(.high).scaledToFit().padding(20)
                         if model.mode == .edit, let photo = model.selection {
-                            BrushCanvasView(photo: photo, imageSize: image.size, availableSize: geometry.size)
+                            BrushCanvasView(canvas: model.canvas, photo: photo, imageSize: image.size,
+                                            availableSize: geometry.size)
                         }
                     }
                 } else if let error {
@@ -336,14 +357,18 @@ struct WorkspaceView: View {
                 HStack { Text(message).lineLimit(2); Spacer(); Button { model.operationMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }
                     .font(.caption).foregroundStyle(Palette.muted).padding(.horizontal, 16).padding(.top, 6)
             }
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 8) {
-                    ForEach(model.visiblePhotos) { photo in
-                        FilmstripTile(photo: photo,
-                                      selected: model.selectedPhotoIDs.contains(photo.id),
-                                      active: photo.id == model.selectedID)
-                    }
-                }.padding(.horizontal, 14).padding(.vertical, 10)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 8) {
+                        ForEach(model.visiblePhotos) { photo in
+                            FilmstripTile(photo: photo,
+                                          selected: model.selectedPhotoIDs.contains(photo.id),
+                                          active: photo.id == model.selectedID)
+                                .id(photo.id)
+                        }
+                    }.padding(.horizontal, 14).padding(.vertical, 10)
+                }
+                .onChange(of: model.selectedID) { _, id in scroll(proxy, to: id) }
             }
         }
         .frame(height: model.operationMessage == nil ? 106 : 129)
@@ -385,6 +410,8 @@ struct WorkspaceView: View {
                 }
                 if event.keyCode == 123 { model.move(-1); return nil }
                 if event.keyCode == 124 { model.move(1); return nil }
+                if model.mode == .grid, event.keyCode == 125 { model.move(model.gridColumnCount); return nil }
+                if model.mode == .grid, event.keyCode == 126 { model.move(-model.gridColumnCount); return nil }
             }
             return event
         }
@@ -449,6 +476,7 @@ private struct PhotoTile: View {
             .padding(11)
         }
         .onAppear { model.requestThumbnail(for: photo) }
+        .onChange(of: photo.edits) { _, _ in model.requestThumbnail(for: photo) }
     }
 }
 
@@ -496,5 +524,6 @@ private struct FilmstripTile: View {
         }
         .help(photo.filename)
         .onAppear { model.requestThumbnail(for: photo) }
+        .onChange(of: photo.edits) { _, _ in model.requestThumbnail(for: photo) }
     }
 }

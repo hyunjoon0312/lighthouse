@@ -41,7 +41,27 @@ struct PreparedJPEGExport: @unchecked Sendable {
     let edits: EditSettings
     let maxPixel: Int?
     let quality: Double
+    let includeLocation: Bool
     let result: JPEGPreview
+}
+
+/// 포인터를 움직일 때마다 바뀌는 브러시 상태. 작업 공간 전체가 아니라 캔버스만 다시 그리도록 분리한다.
+@MainActor
+final class CanvasStrokeState: ObservableObject {
+    @Published var draftPoints: [MaskPoint] = []
+    @Published var brushCursor: MaskPoint?
+    @Published var retouchDraftPoints: [MaskPoint] = []
+    @Published var retouchCursor: MaskPoint?
+}
+
+private final class ThumbnailEntry: NSObject {
+    let image: NSImage
+    let edits: EditSettings?
+
+    init(image: NSImage, edits: EditSettings?) {
+        self.image = image
+        self.edits = edits
+    }
 }
 
 @MainActor
@@ -89,16 +109,33 @@ final class LibraryModel: ObservableObject {
     @Published var isLocalEditing = false
     @Published var maskImage: NSImage?
     @Published var maskError: String?
-    @Published var draftPoints: [MaskPoint] = []
-    @Published var brushCursor: MaskPoint?
     @Published var isAutoMasking = false
     @Published var autoMaskError: String?
     @Published var retouchMode: RetouchMode = .heal
     @Published var retouchRadius = 0.02
     @Published var isPickingCloneSource = false
     @Published var cloneSource: MaskPoint?
-    @Published var retouchDraftPoints: [MaskPoint] = []
-    @Published var retouchCursor: MaskPoint?
+    @Published var isFindingHealSource = false
+    @Published var retouchError: String?
+    let canvas = CanvasStrokeState()
+    var gridColumnCount = 1
+
+    var draftPoints: [MaskPoint] {
+        get { canvas.draftPoints }
+        set { canvas.draftPoints = newValue }
+    }
+    var brushCursor: MaskPoint? {
+        get { canvas.brushCursor }
+        set { canvas.brushCursor = newValue }
+    }
+    var retouchDraftPoints: [MaskPoint] {
+        get { canvas.retouchDraftPoints }
+        set { canvas.retouchDraftPoints = newValue }
+    }
+    var retouchCursor: MaskPoint? {
+        get { canvas.retouchCursor }
+        set { canvas.retouchCursor = newValue }
+    }
 
     private let pipeline = ImagePipeline()
     private let lutStore = LUTStore()
@@ -110,11 +147,14 @@ final class LibraryModel: ObservableObject {
     private let maskQueue = DispatchQueue(label: "com.rian.lighthouse.mask", qos: .userInitiated)
     private let autoMaskQueue = DispatchQueue(label: "com.rian.lighthouse.automask", qos: .userInitiated)
     private let lutQueue = DispatchQueue(label: "com.rian.lighthouse.lut", qos: .userInitiated)
+    private let retouchQueue = DispatchQueue(label: "com.rian.lighthouse.retouch", qos: .userInitiated)
     private let saveQueue = DispatchQueue(label: "com.rian.lighthouse.catalog", qos: .utility)
     private var saveDelay: DispatchWorkItem?
     private var renderDelay: DispatchWorkItem?
     private var generation = 0
     private var renderedSource: String?
+    private var pinnedSource: String?
+    private var retouchGeneration = 0
     private var maskGeneration = 0
     private var selectionGeneration = 0
     private var autoMaskGeneration = 0
@@ -124,8 +164,10 @@ final class LibraryModel: ObservableObject {
     private var draftLocalID: UUID?
     private var started = false
     private var editHistory = EditHistory(limit: 100)
-    private let thumbnailCache = NSCache<NSString, NSImage>()
+    private let thumbnailCache = NSCache<NSString, ThumbnailEntry>()
     private var loadingThumbnails = Set<String>()
+    private static let thumbnailPixels = 360
+    private static let pasteComponents: EditComponents = [.global, .lut]
 
     init() {
         thumbnailCache.countLimit = 240
@@ -152,7 +194,8 @@ final class LibraryModel: ObservableObject {
         !rendering && rendered != nil && imageError == nil
     }
     var canDrawRetouch: Bool {
-        canUseRetouchCanvas && !isPickingCloneSource && (retouchMode == .heal || cloneSource != nil)
+        canUseRetouchCanvas && !isPickingCloneSource && !isFindingHealSource &&
+        (retouchMode == .heal || cloneSource != nil)
     }
 
     var folders: [String] {
@@ -332,6 +375,7 @@ final class LibraryModel: ObservableObject {
         selectionGeneration += 1
         cancelAutoMask()
         cancelRetouchDraft(clearSource: true)
+        retouchError = nil
         isLocalEditing = false
         lutError = nil
         reconcileLocalSelection()
@@ -360,6 +404,7 @@ final class LibraryModel: ObservableObject {
             pinnedID = selectedID
             pinnedImage = nil
             pinnedError = nil
+            pinnedSource = nil
         }
         mode = newMode
         requestRender()
@@ -382,20 +427,28 @@ final class LibraryModel: ObservableObject {
 
     func updatePhoto(_ id: UUID, _ change: (inout PhotoAsset) -> Void, debounce: Bool = false) {
         guard catalogLoaded, loadError == nil, let index = photos.firstIndex(where: { $0.id == id }) else { return }
+        let editsBefore = photos[index].edits
         change(&photos[index])
+        let editsChanged = photos[index].edits != editsBefore
         scheduleSave(debounce: debounce)
-        if selectedID == id { reconcileLocalSelection() }
+        if editsChanged && selectedID == id { reconcileLocalSelection() }
         let previousSelection = selectedID
         ensureSelectionVisible()
-        if previousSelection == selectedID && (selectedID == id || pinnedID == id) {
+        if editsChanged && previousSelection == selectedID && (selectedID == id || pinnedID == id) {
             requestRender(debounce: debounce)
         }
     }
 
-    func updateEdits(_ edits: EditSettings) {
+    /// `continuous`는 슬라이더 드래그처럼 이어지는 변경이다. `endContinuousEdit()`까지 한 실행 취소 단계로 묶는다.
+    func updateEdits(_ edits: EditSettings, continuous: Bool = false) {
         guard let selected = selection, selected.edits != edits else { return }
         applyEditChanges([PhotoEditChange(id: selected.id, before: selected.edits, after: edits)],
-                         useAfter: true, record: true, debounce: true)
+                         useAfter: true, record: true, continuous: continuous, debounce: true)
+    }
+
+    func endContinuousEdit() {
+        editHistory.commitContinuous()
+        objectWillChange.send()
     }
 
     func undo() {
@@ -413,7 +466,7 @@ final class LibraryModel: ObservableObject {
     }
 
     private func applyEditChanges(_ changes: [PhotoEditChange], useAfter: Bool,
-                                  record: Bool, debounce: Bool = false) {
+                                  record: Bool, continuous: Bool = false, debounce: Bool = false) {
         guard catalogLoaded, loadError == nil else { return }
         var updated = photos
         var indices: [UUID: Int] = [:]
@@ -428,7 +481,10 @@ final class LibraryModel: ObservableObject {
             actual.append(PhotoEditChange(id: change.id, before: before, after: destination))
         }
         guard !actual.isEmpty else { return }
-        if record { editHistory.record(actual) }
+        if record {
+            if continuous, actual.count == 1 { editHistory.recordContinuous(actual[0]) }
+            else { editHistory.record(actual) }
+        }
         cancelDraft()
         cancelRetouchDraft()
         cancelAutoMask()
@@ -612,12 +668,12 @@ final class LibraryModel: ObservableObject {
         setMode(.edit)
     }
 
-    func updateLUT(_ change: (inout LUTAdjustment) -> Void) {
+    func updateLUT(continuous: Bool = false, _ change: (inout LUTAdjustment) -> Void) {
         guard let current = selection, var lut = current.edits.lut else { return }
         var edits = current.edits
         change(&lut)
         edits.lut = lut
-        updateEdits(edits)
+        updateEdits(edits, continuous: continuous)
     }
 
     func removeLUT() {
@@ -726,12 +782,12 @@ final class LibraryModel: ObservableObject {
         isAutoMasking = false
     }
 
-    func updateLocal(_ change: (inout LocalAdjustment) -> Void) {
+    func updateLocal(continuous: Bool = false, _ change: (inout LocalAdjustment) -> Void) {
         guard let selected = selection,
               let index = selected.edits.localAdjustments.firstIndex(where: { $0.id == selectedLocalID }) else { return }
         var edits = selected.edits
         change(&edits.localAdjustments[index])
-        updateEdits(edits)
+        updateEdits(edits, continuous: continuous)
     }
 
     func deleteLocal() {
@@ -830,9 +886,10 @@ final class LibraryModel: ObservableObject {
     }
 
     func pasteToNext() {
-        guard let edits = clipboard else { return }
+        guard let clipboard else { return }
         move(1)
-        updateEdits(edits)
+        guard let target = selection else { return }
+        updateEdits(target.edits.merging(from: clipboard, components: Self.pasteComponents))
     }
 
     func presentCrop() {
@@ -865,6 +922,7 @@ final class LibraryModel: ObservableObject {
             return
         }
         guard canDrawRetouch else { return }
+        retouchError = nil
         retouchDraftPoints = [displayPoint]
         retouchCursor = displayPoint
     }
@@ -892,14 +950,52 @@ final class LibraryModel: ObservableObject {
         } else {
             offset = nil
         }
-        var edits = selected.edits
-        edits.retouchStrokes.append(RetouchStroke(mode: retouchMode, points: points,
-                                                  radius: retouchRadius, sourceOffset: offset))
-        cancelRetouchDraft()
-        updateEdits(edits)
+        let stroke = RetouchStroke(mode: retouchMode, points: points,
+                                   radius: retouchRadius, sourceOffset: offset)
+        guard stroke.mode == .heal else {
+            var edits = selected.edits
+            edits.retouchStrokes.append(stroke)
+            cancelRetouchDraft()
+            updateEdits(edits)
+            return
+        }
+        findHealSource(for: stroke, in: selected)
+    }
+
+    /// 패치 위치를 한 번 찾아 stroke에 저장한다. 찾는 동안 그린 경로는 화면에 남겨 둔다.
+    private func findHealSource(for stroke: RetouchStroke, in photo: PhotoAsset) {
+        retouchGeneration += 1
+        let token = retouchGeneration
+        let selectionToken = selectionGeneration
+        isFindingHealSource = true
+        retouchQueue.async { [pipeline] in
+            let result = Result { try pipeline.healingSourceOffset(url: photo.url, edits: photo.edits, stroke: stroke) }
+            DispatchQueue.main.async {
+                guard token == self.retouchGeneration else { return }
+                self.isFindingHealSource = false
+                self.retouchDraftPoints = []
+                guard self.selectedID == photo.id, self.selectionGeneration == selectionToken,
+                      let current = self.selection, current.edits == photo.edits else {
+                    self.retouchError = "사진이나 보정이 바뀌어 스팟 복구를 적용하지 않았습니다."
+                    return
+                }
+                switch result {
+                case .success(let offset):
+                    var healed = stroke
+                    healed.sourceOffset = offset
+                    var edits = current.edits
+                    edits.retouchStrokes.append(healed)
+                    self.updateEdits(edits)
+                case .failure(let error):
+                    self.retouchError = error.localizedDescription
+                }
+            }
+        }
     }
 
     func cancelRetouchDraft(clearSource: Bool = false) {
+        retouchGeneration += 1
+        isFindingHealSource = false
         retouchDraftPoints = []
         retouchCursor = nil
         isPickingCloneSource = false
@@ -977,23 +1073,49 @@ final class LibraryModel: ObservableObject {
     }
 
     func thumbnail(for photo: PhotoAsset) -> NSImage? {
-        thumbnailCache.object(forKey: photo.path as NSString)
+        thumbnailCache.object(forKey: photo.path as NSString)?.image
     }
 
+    /// 보정한 사진은 보정 결과로 썸네일을 만든다. 편집 화면의 사진은 미리보기 렌더가 썸네일을 갱신한다.
     func requestThumbnail(for photo: PhotoAsset) {
-        guard thumbnail(for: photo) == nil, !loadingThumbnails.contains(photo.path) else { return }
+        let wanted: EditSettings? = photo.edits.isModified ? photo.edits : nil
+        let entry = thumbnailCache.object(forKey: photo.path as NSString)
+        if let entry, entry.edits == wanted { return }
+        if entry != nil, wanted != nil, photo.id == selectedID, mode != .grid, !isOriginal { return }
+        guard !loadingThumbnails.contains(photo.path) else { return }
         loadingThumbnails.insert(photo.path)
+        let size = Self.thumbnailPixels
         thumbnailQueue.async { [pipeline] in
-            let result = try? pipeline.thumbnail(for: photo.url, maxPixel: 360)
+            let image = wanted.flatMap { try? pipeline.render(url: photo.url, edits: $0, maxPixel: size) }
+                ?? (try? pipeline.thumbnail(for: photo.url, maxPixel: size))
             DispatchQueue.main.async {
                 self.loadingThumbnails.remove(photo.path)
-                if let result {
-                    let image = NSImage(cgImage: result, size: NSSize(width: result.width, height: result.height))
-                    self.thumbnailCache.setObject(image, forKey: photo.path as NSString, cost: result.width * result.height * 4)
-                    self.objectWillChange.send()
+                if let image { self.storeThumbnail(image, path: photo.path, edits: wanted) }
+                if let latest = self.photos.first(where: { $0.id == photo.id }),
+                   (latest.edits.isModified ? latest.edits : nil) != wanted {
+                    self.requestThumbnail(for: latest)
                 }
             }
         }
+    }
+
+    private func storeThumbnail(_ image: CGImage, path: String, edits: EditSettings?) {
+        let entry = ThumbnailEntry(image: NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height)),
+                                   edits: edits)
+        thumbnailCache.setObject(entry, forKey: path as NSString, cost: image.width * image.height * 4)
+        objectWillChange.send()
+    }
+
+    nonisolated private static func downscaled(_ image: CGImage, maxPixel: Int) -> CGImage? {
+        let scale = min(1, Double(maxPixel) / Double(max(image.width, image.height)))
+        let width = max(1, Int((Double(image.width) * scale).rounded()))
+        let height = max(1, Int((Double(image.height) * scale).rounded()))
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
     }
 
     func requestRender(debounce: Bool = false) {
@@ -1006,16 +1128,22 @@ final class LibraryModel: ObservableObject {
             imageError = nil
             renderedSource = source
         }
-        if mode != .compare { pinnedImage = nil; pinnedError = nil }
+        if mode != .compare { pinnedImage = nil; pinnedError = nil; pinnedSource = nil }
         requestMask()
         guard mode != .grid, let photo = selection else { rendering = false; return }
         rendering = true
-        let compare = mode == .compare ? pinned : nil
         let edits = isOriginal ? EditSettings.neutral : photo.edits
         let maxPixel: Int? = actualSize ? nil : 2200
+        let compare = mode == .compare ? pinned : nil
+        let pinnedKey = compare.map { "\($0.id):\(maxPixel ?? 0)" }
+        let reference = pinnedKey != pinnedSource ? compare : nil
+        let thumbnailSize = !isOriginal && edits.isModified ? Self.thumbnailPixels : nil
         let job = DispatchWorkItem { [pipeline] in
             let current = Result { try pipeline.render(url: photo.url, edits: edits, maxPixel: maxPixel) }
-            let reference = compare.map { fixed in
+            let thumbnail = thumbnailSize.flatMap { size in
+                (try? current.get()).flatMap { Self.downscaled($0, maxPixel: size) }
+            }
+            let referenceResult = reference.map { fixed in
                 Result { try pipeline.render(url: fixed.url, edits: .neutral, maxPixel: maxPixel) }
             }
             DispatchQueue.main.async {
@@ -1029,8 +1157,11 @@ final class LibraryModel: ObservableObject {
                     self.rendered = nil
                     self.imageError = error.localizedDescription
                 }
-                if let reference {
-                    switch reference {
+                if let thumbnail, self.photos.first(where: { $0.id == photo.id })?.edits == edits {
+                    self.storeThumbnail(thumbnail, path: photo.path, edits: edits)
+                }
+                if let referenceResult {
+                    switch referenceResult {
                     case .success(let cg):
                         self.pinnedError = nil
                         self.pinnedImage = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
@@ -1038,6 +1169,7 @@ final class LibraryModel: ObservableObject {
                         self.pinnedImage = nil
                         self.pinnedError = error.localizedDescription
                     }
+                    self.pinnedSource = pinnedKey
                 }
             }
         }
@@ -1111,7 +1243,7 @@ final class LibraryModel: ObservableObject {
         }
     }
 
-    func export(scope: ExportScope, maxPixel: Int?, quality: Double, directory: URL,
+    func export(scope: ExportScope, maxPixel: Int?, quality: Double, includeLocation: Bool, directory: URL,
                 prepared: PreparedJPEGExport? = nil) {
         guard !isExporting, catalogLoaded, loadError == nil else { return }
         let targets = exportTargets(for: scope)
@@ -1125,11 +1257,13 @@ final class LibraryModel: ObservableObject {
             for (index, photo) in targets.enumerated() {
                 do {
                     if let prepared, prepared.photoID == photo.id, prepared.edits == photo.edits,
-                       prepared.maxPixel == maxPixel, prepared.quality == quality {
+                       prepared.maxPixel == maxPixel, prepared.quality == quality,
+                       prepared.includeLocation == includeLocation {
                         _ = try pipeline.writeJPEG(prepared.result.data, sourceURL: photo.url, to: directory)
                     } else {
                         _ = try pipeline.exportJPEG(url: photo.url, edits: photo.edits, to: directory,
-                                                    maxPixel: maxPixel, quality: quality)
+                                                    maxPixel: maxPixel, quality: quality,
+                                                    includeLocation: includeLocation)
                     }
                     successes += 1
                 }

@@ -22,7 +22,8 @@ struct AdvancedColorControls: View {
                 .accessibilityLabel("곡선 채널")
             }
             CurveGraph(points: points, tint: channel.color, selectedIndex: $selectedPoint,
-                       draggingIndex: $draggingPoint, update: updatePoints)
+                       draggingIndex: $draggingPoint, update: { updatePoints($0, continuous: true) },
+                       end: { model.endContinuousEdit() })
                 .frame(height: 150)
                 .accessibilityLabel("\(channel.title) 톤 곡선")
             HStack {
@@ -43,13 +44,13 @@ struct AdvancedColorControls: View {
             }
             .accessibilityLabel("HSL 색상 범위")
             advancedSlider("색조", value: rangeAdjustment.hue, range: -30...30, format: "%+.0f°") {
-                updateRange(\.hue, value: $0)
+                updateRange(\.hue, value: $0, continuous: true)
             }
             advancedSlider("채도", value: rangeAdjustment.saturation * 100, range: -100...100, format: "%+.0f%%") {
-                updateRange(\.saturation, value: $0 / 100)
+                updateRange(\.saturation, value: $0 / 100, continuous: true)
             }
             advancedSlider("명도", value: rangeAdjustment.lightness * 100, range: -100...100, format: "%+.0f%%") {
-                updateRange(\.lightness, value: $0 / 100)
+                updateRange(\.lightness, value: $0 / 100, continuous: true)
             }
             Button("이 색상 초기화") { resetRange() }
                 .disabled(rangeAdjustment == ColorRangeAdjustment(band: band))
@@ -59,11 +60,11 @@ struct AdvancedColorControls: View {
             Text("필름 입자").font(.caption.weight(.bold)).foregroundStyle(.secondary)
             advancedSlider("양", value: edits.grain.amount * 100, range: 0...100, format: "%.0f%%") {
                 let value = $0 / 100
-                updateGrain { $0.amount = value.isFinite ? min(1, max(0, value)) : 0 }
+                updateGrain(continuous: true) { $0.amount = value.isFinite ? min(1, max(0, value)) : 0 }
             }
             advancedSlider("크기", value: edits.grain.size, range: 0.5...8, format: "%.1f px") {
                 let value = $0
-                updateGrain { $0.size = value.isFinite ? min(8, max(0.5, value)) : 1.5 }
+                updateGrain(continuous: true) { $0.size = value.isFinite ? min(8, max(0.5, value)) : 1.5 }
             }
             HStack {
                 Text("패턴 \(edits.grain.seed)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
@@ -95,7 +96,7 @@ struct AdvancedColorControls: View {
         edits.colorRanges.first(where: { $0.band == band }) ?? ColorRangeAdjustment(band: band)
     }
 
-    private func updatePoints(_ newPoints: [CurvePoint]) {
+    private func updatePoints(_ newPoints: [CurvePoint], continuous: Bool = false) {
         guard newPoints.count >= 2, newPoints.count <= 16 else { return }
         var next = edits
         switch channel {
@@ -104,7 +105,7 @@ struct AdvancedColorControls: View {
         case .green: next.curves.green = newPoints
         case .blue: next.curves.blue = newPoints
         }
-        model.updateEdits(next)
+        model.updateEdits(next, continuous: continuous)
     }
 
     private func deleteSelectedPoint() {
@@ -115,7 +116,8 @@ struct AdvancedColorControls: View {
         self.selectedPoint = nil
     }
 
-    private func updateRange(_ keyPath: WritableKeyPath<ColorRangeAdjustment, Double>, value: Double) {
+    private func updateRange(_ keyPath: WritableKeyPath<ColorRangeAdjustment, Double>, value: Double,
+                             continuous: Bool) {
         var next = edits
         var adjustment = rangeAdjustment
         adjustment[keyPath: keyPath] = value
@@ -124,7 +126,7 @@ struct AdvancedColorControls: View {
             next.colorRanges.append(adjustment)
             next.colorRanges.sort { $0.band.order < $1.band.order }
         }
-        model.updateEdits(next)
+        model.updateEdits(next, continuous: continuous)
     }
 
     private func resetRange() {
@@ -133,10 +135,10 @@ struct AdvancedColorControls: View {
         model.updateEdits(next)
     }
 
-    private func updateGrain(_ change: (inout GrainSettings) -> Void) {
+    private func updateGrain(continuous: Bool = false, _ change: (inout GrainSettings) -> Void) {
         var next = edits
         change(&next.grain)
-        model.updateEdits(next)
+        model.updateEdits(next, continuous: continuous)
     }
 
     private func advancedSlider(_ title: String, value: Double, range: ClosedRange<Double>, format: String,
@@ -147,7 +149,10 @@ struct AdvancedColorControls: View {
                 Spacer()
                 Text(String(format: format, value)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
-            Slider(value: Binding(get: { value }, set: set), in: range).accessibilityLabel(title)
+            Slider(value: Binding(get: { value }, set: set), in: range) { editing in
+                if !editing { model.endContinuousEdit() }
+            }
+            .accessibilityLabel(title)
         }
     }
 }
@@ -172,6 +177,7 @@ private struct CurveGraph: View {
     @Binding var selectedIndex: Int?
     @Binding var draggingIndex: Int?
     let update: ([CurvePoint]) -> Void
+    let end: () -> Void
 
     var body: some View {
         GeometryReader { geometry in
@@ -204,7 +210,7 @@ private struct CurveGraph: View {
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { value in handle(value.location, size: size) }
-                .onEnded { _ in draggingIndex = nil })
+                .onEnded { _ in draggingIndex = nil; end() })
         }
     }
 
