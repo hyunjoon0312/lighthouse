@@ -94,7 +94,14 @@ public final class ImagePipeline: @unchecked Sendable {
             iso: (exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber])?.first?.intValue,
             aperture: (exif[kCGImagePropertyExifFNumber as String] as? NSNumber)?.doubleValue,
             shutter: (exif[kCGImagePropertyExifExposureTime as String] as? NSNumber)?.doubleValue,
-            capturedAt: dateString.flatMap { formatter.date(from: $0) }
+            capturedAt: dateString.flatMap { formatter.date(from: $0) }.map { date in
+                // 1초 미만 촬영 시각("107" → 0.107초)이 있으면 더해 같은 초의 연속 촬영 순서를 지킨다.
+                let digits = (exif[kCGImagePropertyExifSubsecTimeOriginal as String] as? String)?
+                    .trimmingCharacters(in: .whitespaces) ?? ""
+                guard !digits.isEmpty, digits.count <= 9, digits.allSatisfy(\.isASCII),
+                      digits.allSatisfy(\.isNumber), let fraction = Double("0." + digits) else { return date }
+                return date.addingTimeInterval(fraction)
+            }
         )
     }
 

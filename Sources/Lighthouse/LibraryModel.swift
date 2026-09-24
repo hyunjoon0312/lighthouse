@@ -10,7 +10,20 @@ enum WorkspaceMode: String, CaseIterable {
 }
 
 enum LibraryFilter: Hashable {
-    case all, picks, rejects, edited, folder(String), collection(UUID)
+    case all, picks, rejects, edited, bursts, folder(String), collection(UUID)
+}
+
+/// 촬영 시각으로 묶은 연속 촬영과 사진마다의 위치(몇 번째 묶음의 몇 번째 컷).
+struct BurstIndex {
+    var groups: [BurstGroup] = []
+    var positions: [UUID: (group: Int, shot: Int)] = [:]
+}
+
+struct BurstBadge: Equatable {
+    var shot: Int
+    var count: Int
+    /// nil이면 아직 분석하지 않았다.
+    var isBest: Bool?
 }
 
 struct PresetSheetRequest: Identifiable {
@@ -225,6 +238,16 @@ final class LibraryModel: ObservableObject {
     private var indexCache: [UUID: Int]?
     private var countsCache: LibraryCounts?
     private var foldersCache: [String]?
+    private var burstCache: (signature: Int, index: BurstIndex)?
+    private var burstCacheStale = true
+    private var burstRecommendationCache: [UUID: BurstRecommendation]?
+    private var burstCancellation: CancellationFlag?
+    private let burstQueue = DispatchQueue(label: "com.rian.lighthouse.burst", qos: .utility)
+    /// 이번 실행에서 분석한 원본 품질. 앱을 다시 열면 다시 분석한다.
+    @Published private(set) var burstQualities: [UUID: PhotoQuality] = [:] { didSet { burstRecommendationCache = nil } }
+    @Published private(set) var isAnalyzingBursts = false
+    @Published private(set) var burstAnalysisProgress = 0.0
+    @Published var burstMessage: String?
     private var rawCapabilitiesPath: String?
     private var rawCapabilitiesByPath: [String: RAWCapabilities?] = [:]
     private static let renderInterval = 0.1
@@ -311,6 +334,7 @@ final class LibraryModel: ObservableObject {
         indexCache = nil
         countsCache = nil
         foldersCache = nil
+        burstCacheStale = true
     }
 
     func presentCreateFolder() {
@@ -407,6 +431,7 @@ final class LibraryModel: ObservableObject {
             case .picks: matchesFilter = photo.flag == .pick
             case .rejects: matchesFilter = photo.flag == .reject
             case .edited: matchesFilter = photo.edits.isModified
+            case .bursts: matchesFilter = burstIndex.positions[photo.id] != nil
             case .folder(let path): matchesFilter = (photo.path as NSString).deletingLastPathComponent == path
             case .collection: matchesFilter = members?.contains(photo.id) ?? false
             }
@@ -718,6 +743,168 @@ final class LibraryModel: ObservableObject {
             $0.rating = marks.rating
             $0.flag = marks.flag
         }
+    }
+
+    // MARK: 연속 촬영
+
+    /// 보정·별점만 바뀐 경우는 다시 묶지 않는다. 사진 5000장에서 묶기는 약 25ms, 이 비교는 약 1ms다.
+    var burstIndex: BurstIndex {
+        if !burstCacheStale, let burstCache { return burstCache.index }
+        var hasher = Hasher()
+        for photo in photos {
+            hasher.combine(photo.id)
+            hasher.combine(photo.path)
+            hasher.combine(photo.metadata.capturedAt)
+            hasher.combine(photo.metadata.camera)
+        }
+        let signature = hasher.finalize()
+        burstCacheStale = false
+        if let burstCache, burstCache.signature == signature { return burstCache.index }
+        var index = BurstIndex(groups: BurstGrouping.groups(for: photos))
+        for (groupIndex, group) in index.groups.enumerated() {
+            for (shotIndex, shot) in group.shots.enumerated() {
+                for id in shot { index.positions[id] = (groupIndex, shotIndex) }
+            }
+        }
+        burstCache = (signature, index)
+        burstRecommendationCache = nil
+        return index
+    }
+
+    var burstRecommendations: [UUID: BurstRecommendation] {
+        if let burstRecommendationCache { return burstRecommendationCache }
+        var computed: [UUID: BurstRecommendation] = [:]
+        if !burstQualities.isEmpty {
+            for group in burstIndex.groups {
+                if let recommendation = BurstRanking.recommend(group, qualities: burstQualities) {
+                    computed[group.id] = recommendation
+                }
+            }
+        }
+        burstRecommendationCache = computed
+        return computed
+    }
+
+    func burstBadge(for photo: PhotoAsset) -> BurstBadge? {
+        guard let position = burstIndex.positions[photo.id] else { return nil }
+        let group = burstIndex.groups[position.group]
+        let recommendation = burstRecommendations[group.id]
+        return BurstBadge(shot: position.shot + 1, count: group.shots.count,
+                          isBest: recommendation.map { $0.bestShot == position.shot })
+    }
+
+    /// 지금 목록에 한 장이라도 보이는 묶음.
+    private var visibleBurstGroups: [BurstGroup] {
+        let visible = Set(visiblePhotos.map(\.id))
+        return burstIndex.groups.filter { $0.photoIDs.contains(where: visible.contains) }
+    }
+
+    /// 보이는 묶음의 컷마다 원본 미리보기 한 장(RAW+JPEG이면 RAW)을 기기 안에서 분석한다.
+    /// 선명도와 Vision 얼굴 촬영 품질만 계산하며 원본·표시·보정은 바꾸지 않는다.
+    func analyzeBursts() {
+        guard catalogLoaded, loadError == nil, !isAnalyzingBursts else { return }
+        let groups = visibleBurstGroups
+        guard !groups.isEmpty else { burstMessage = "지금 목록에 연속 촬영 묶음이 없습니다."; return }
+        let targets: [(id: UUID, url: URL)] = groups.flatMap(\.shots).compactMap { shot in
+            guard !shot.contains(where: { burstQualities[$0] != nil }) else { return nil }
+            let members = shot.compactMap { photo(withID: $0) }
+            guard let chosen = members.first(where: \.isRAW) ?? members.first else { return nil }
+            return (chosen.id, chosen.url)
+        }
+        guard !targets.isEmpty else { burstMessage = burstSummary(groups, failed: 0, cancelled: false); return }
+        isAnalyzingBursts = true
+        burstAnalysisProgress = 0
+        burstMessage = "연속 촬영 \(groups.count)묶음 분석 중…"
+        let cancellation = CancellationFlag()
+        burstCancellation = cancellation
+        burstQueue.async { [pipeline] in
+            var failed = 0
+            var cancelled = false
+            for (index, target) in targets.enumerated() {
+                if cancellation.isCancelled { cancelled = true; break }
+                let quality = try? PhotoQualityAnalyzer.analyze(url: target.url, pipeline: pipeline)
+                if quality == nil { failed += 1 }
+                let progress = Double(index + 1) / Double(targets.count)
+                DispatchQueue.main.async {
+                    guard self.burstCancellation === cancellation else { return }
+                    if let quality { self.burstQualities[target.id] = quality }
+                    self.burstAnalysisProgress = progress
+                }
+            }
+            DispatchQueue.main.async {
+                guard self.burstCancellation === cancellation else { return }
+                self.burstCancellation = nil
+                self.isAnalyzingBursts = false
+                self.burstMessage = self.burstSummary(groups, failed: failed, cancelled: cancelled)
+            }
+        }
+    }
+
+    /// 지금 분석 중인 한 장은 끝까지 하고 나머지를 건너뛴다. 이미 분석한 결과는 남긴다.
+    func cancelBurstAnalysis() {
+        burstCancellation?.cancel()
+    }
+
+    private func burstSummary(_ groups: [BurstGroup], failed: Int, cancelled: Bool) -> String {
+        let recommendations = burstRecommendations
+        let analyzed = groups.filter { recommendations[$0.id] != nil }
+        let faceGroups = analyzed.filter { recommendations[$0.id]?.usedFaces == true }.count
+        let noFaceModel = groups.flatMap(\.photoIDs).contains { burstQualities[$0].map { $0.faceQualities == nil } ?? false }
+        return "연속 촬영 \(groups.count)묶음 중 \(analyzed.count)묶음 추천 완료" +
+            (faceGroups > 0 ? " · 얼굴 반영 \(faceGroups)묶음" : "") +
+            (failed > 0 ? " · 읽지 못한 컷 \(failed)장" : "") +
+            (noFaceModel ? " · 얼굴 분석을 쓸 수 없어 선명도만 반영한 컷이 있음" : "") +
+            (cancelled ? " · 중지함" : "")
+    }
+
+    /// 보이는 묶음의 추천 컷만 선택한다. RAW+JPEG이면 두 파일을 함께 선택한다.
+    func selectBurstRecommendations() {
+        let recommendations = burstRecommendations
+        var picks = Set<UUID>()
+        for group in visibleBurstGroups {
+            guard let recommendation = recommendations[group.id] else { continue }
+            picks.formUnion(group.shots[recommendation.bestShot])
+        }
+        let ordered = visiblePhotos.map(\.id).filter(picks.contains)
+        guard !ordered.isEmpty else { burstMessage = "먼저 연속 촬영을 분석하세요."; return }
+        let previous = selectedID
+        photoSelection.selectAll(in: ordered)
+        selectionDidChange(previousActive: previous)
+        burstMessage = "추천 컷 \(ordered.count)장을 선택했습니다."
+    }
+
+    /// 분석한 묶음에서 추천 컷은 선택(P), 나머지는 제외(X)로 표시한다. 이미 표시한 사진은 그대로 둔다.
+    /// 한 번에 실행 취소된다.
+    func markBurstRecommendations() {
+        guard catalogLoaded, loadError == nil else { return }
+        let recommendations = burstRecommendations
+        let visible = Set(visiblePhotos.map(\.id))
+        var changes: [PhotoMarkChange] = []
+        for group in visibleBurstGroups {
+            guard let recommendation = recommendations[group.id] else { continue }
+            for (shotIndex, shot) in group.shots.enumerated() {
+                for id in shot where visible.contains(id) {
+                    guard let photo = photo(withID: id), photo.flag == .none else { continue }
+                    let before = PhotoMarks(rating: photo.rating, flag: photo.flag)
+                    var after = before
+                    after.flag = shotIndex == recommendation.bestShot ? .pick : .reject
+                    changes.append(PhotoMarkChange(id: id, before: before, after: after))
+                }
+            }
+        }
+        guard !changes.isEmpty else {
+            burstMessage = recommendations.isEmpty ? "먼저 연속 촬영을 분석하세요." : "새로 표시할 사진이 없습니다. 이미 표시한 사진은 바꾸지 않습니다."
+            return
+        }
+        editHistory.recordMarks(changes)
+        let flags = Dictionary(uniqueKeysWithValues: changes.map { ($0.id, $0.after.flag) })
+        var updated = photos
+        for index in updated.indices { if let flag = flags[updated[index].id] { updated[index].flag = flag } }
+        photos = updated
+        scheduleSave()
+        ensureSelectionVisible()
+        let picks = changes.filter { $0.after.flag == .pick }.count
+        burstMessage = "추천 \(picks)장 선택 · \(changes.count - picks)장 제외로 표시했습니다. ⌘Z로 되돌릴 수 있습니다."
     }
 
     func copyEdits() { clipboard = selection?.edits }

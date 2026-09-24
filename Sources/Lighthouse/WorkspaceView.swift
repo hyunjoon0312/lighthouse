@@ -25,6 +25,10 @@ struct WorkspaceView: View {
                 Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
                 selectionToolbar
                 Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                if model.filter == .bursts {
+                    BurstBar()
+                    Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                }
                 mainContent.frame(maxWidth: .infinity, maxHeight: .infinity)
                 filmstrip
             }
@@ -81,6 +85,7 @@ struct WorkspaceView: View {
             sidebarRow("선택됨", icon: "checkmark.circle", count: model.counts.picks, selected: model.filter == .picks) { model.filter = .picks }
             sidebarRow("제외됨", icon: "xmark.circle", count: model.counts.rejects, selected: model.filter == .rejects) { model.filter = .rejects }
             sidebarRow("보정됨", icon: "slider.horizontal.3", count: model.counts.edited, selected: model.filter == .edited) { model.filter = .edited }
+            sidebarRow("연속 촬영", icon: "square.stack.3d.down.right", count: model.burstIndex.positions.count, selected: model.filter == .bursts) { model.filter = .bursts }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     HStack {
@@ -527,6 +532,19 @@ private struct PhotoTile: View {
                             if photo.flag != .none { Image(systemName: photo.flag == .pick ? "checkmark.circle.fill" : "xmark.circle.fill").foregroundStyle(photo.flag == .pick ? Palette.accent : .red) }
                         }
                         Spacer()
+                        if let burst = model.burstBadge(for: photo) {
+                            HStack(spacing: 4) {
+                                Text("연속 \(burst.shot)/\(burst.count)")
+                                    .font(.system(size: 9, weight: .bold)).padding(5)
+                                    .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 4))
+                                if burst.isBest == true {
+                                    Label("추천", systemImage: "star.fill")
+                                        .font(.system(size: 9, weight: .bold)).foregroundStyle(.black).padding(5)
+                                        .background(Palette.accent, in: RoundedRectangle(cornerRadius: 4))
+                                }
+                                Spacer()
+                            }
+                        }
                     }.padding(8)
                 }
                 .frame(height: 150)
@@ -542,7 +560,7 @@ private struct PhotoTile: View {
             .contentShape(RoundedRectangle(cornerRadius: 10))
             .onTapGesture { tileClicked(model, photo) }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(photo.filename), 별점 \(photo.rating), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")")
+            .accessibilityLabel("\(photo.filename), 별점 \(photo.rating), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")" + burstAccessibility)
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction { model.focusPhoto(photo) }
             .accessibilityAction(named: Text("선택 토글")) { model.togglePhotoSelection(photo) }
@@ -558,6 +576,11 @@ private struct PhotoTile: View {
         }
         .onAppear { model.requestThumbnail(for: photo) }
         .onChange(of: photo.edits) { _, _ in model.requestThumbnail(for: photo) }
+    }
+
+    private var burstAccessibility: String {
+        guard let burst = model.burstBadge(for: photo) else { return "" }
+        return ", 연속 촬영 \(burst.count)컷 중 \(burst.shot)번째" + (burst.isBest == true ? ", 추천 컷" : "")
     }
 }
 
@@ -601,5 +624,42 @@ private struct FilmstripTile: View {
         .help(photo.filename)
         .onAppear { model.requestThumbnail(for: photo) }
         .onChange(of: photo.edits) { _, _ in model.requestThumbnail(for: photo) }
+    }
+}
+
+/// 연속 촬영 목록 위의 분석·추천 도구. 분석은 Mac 안에서만 하고 원본을 바꾸지 않는다.
+private struct BurstBar: View {
+    @EnvironmentObject private var model: LibraryModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                Text("연속 촬영 \(model.burstIndex.groups.count)묶음")
+                    .font(.caption.weight(.semibold)).foregroundStyle(Palette.accent)
+                if model.isAnalyzingBursts {
+                    ProgressView(value: model.burstAnalysisProgress).frame(width: 120)
+                    Button("중지") { model.cancelBurstAnalysis() }
+                        .accessibilityLabel("연속 촬영 분석 중지")
+                } else {
+                    Button("베스트 컷 분석") { model.analyzeBursts() }
+                        .accessibilityLabel("연속 촬영 베스트 컷 분석")
+                        .help("컷마다 초점 선명도와 얼굴 촬영 품질(눈 감음·흔들림)을 Mac 안에서 비교합니다")
+                }
+                Button("추천 컷 선택") { model.selectBurstRecommendations() }
+                    .accessibilityLabel("추천 컷만 선택")
+                    .disabled(model.isAnalyzingBursts || model.burstRecommendations.isEmpty)
+                Button("추천 P · 나머지 X 표시") { model.markBurstRecommendations() }
+                    .accessibilityLabel("추천 컷은 선택, 나머지는 제외로 표시")
+                    .help("표시가 없는 사진에만 적용하고 한 번에 실행 취소됩니다")
+                    .disabled(model.isAnalyzingBursts || model.burstRecommendations.isEmpty)
+                Spacer()
+            }
+            if let message = model.burstMessage {
+                Text(message).font(.caption).foregroundStyle(Palette.muted).lineLimit(2)
+            }
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 20).padding(.vertical, 8)
+        .background(Palette.panel)
     }
 }
