@@ -334,14 +334,21 @@ struct WorkspaceView: View {
                 Button { model.move(1) } label: { Image(systemName: "chevron.right") }.accessibilityLabel("다음 사진").disabled(model.visiblePhotos.last?.id == model.selectedID)
                 Text(model.selection?.displayName ?? "").lineLimit(1).font(.subheadline.weight(.medium))
                 Spacer()
-                if model.mode == .compare, let pinned = model.pinned { Text("기준: \(pinned.displayName)").font(.caption).foregroundStyle(Palette.muted).lineLimit(1) }
+                if model.mode == .compare, let pinned = model.pinned {
+                    Text("기준: \(pinned.displayName)").font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
+                    Button(model.compareShowsPinnedEdits ? "기준 원본 보기" : "기준 보정 보기") {
+                        model.compareShowsPinnedEdits.toggle()
+                    }
+                    .accessibilityLabel(model.compareShowsPinnedEdits ? "기준 사진을 보정 전 원본으로 보기" : "기준 사진을 보정한 모습으로 보기")
+                }
                 Button(model.actualSize ? "화면 맞춤" : "100%") { model.toggleActualSize() }
                 Button(model.isOriginal ? "보정 보기" : "원본 보기") { model.toggleOriginal() }
             }
             .buttonStyle(.borderless).padding(.horizontal, 20).frame(height: 44)
             HStack(spacing: 1) {
                 if model.mode == .compare {
-                    imagePane(model.pinnedImage, error: model.pinnedError, caption: "기준 · 원본", overlay: nil,
+                    imagePane(model.pinnedImage, error: model.pinnedError,
+                              caption: model.compareShowsPinnedEdits ? "기준 · 보정" : "기준 · 원본", overlay: nil,
                               zoomable: false)
                 }
                 imagePane(model.rendered, error: model.imageError, caption: model.isOriginal ? "현재 · 원본" : "현재 · 보정",

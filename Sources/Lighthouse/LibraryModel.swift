@@ -187,6 +187,13 @@ final class LibraryModel: ObservableObject {
     @Published var showsClipping = false { didSet { refreshClippingOverlay() } }
     @Published var clippingOverlay: NSImage?
     @Published var zoomAnchor = CGPoint(x: 0.5, y: 0.5)
+    /// 비교 모드의 기준 사진을 보정한 모습으로 보인다. 끄면 보정 전 원본이다.
+    @Published var compareShowsPinnedEdits = UserDefaults.standard.object(forKey: "comparePinnedEdits") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(compareShowsPinnedEdits, forKey: "comparePinnedEdits")
+            requestRender()
+        }
+    }
     @Published var autoAdvance = UserDefaults.standard.bool(forKey: "autoAdvanceAfterMark") {
         didSet { UserDefaults.standard.set(autoAdvance, forKey: "autoAdvanceAfterMark") }
     }
@@ -232,6 +239,7 @@ final class LibraryModel: ObservableObject {
     private var generation = 0
     private var renderedSource: String?
     private var pinnedSource: String?
+    private var pinnedRenderedEdits: EditSettings?
     private var retouchGeneration = 0
     private var renderJob: DispatchWorkItem?
     private var displayedToken = 0
@@ -598,6 +606,7 @@ final class LibraryModel: ObservableObject {
             pinnedImage = nil
             pinnedError = nil
             pinnedSource = nil
+            pinnedRenderedEdits = nil
         }
         mode = newMode
         requestRender()
@@ -1686,7 +1695,7 @@ final class LibraryModel: ObservableObject {
             histogram = nil
             clippingOverlay = nil
         }
-        if mode != .compare { pinnedImage = nil; pinnedError = nil; pinnedSource = nil }
+        if mode != .compare { pinnedImage = nil; pinnedError = nil; pinnedSource = nil; pinnedRenderedEdits = nil }
         requestMask()
         refreshRAWCapabilities()
         guard mode != .grid, let photo = selection else { rendering = false; return }
@@ -1694,7 +1703,8 @@ final class LibraryModel: ObservableObject {
         let maxPixel: Int? = actualSize ? nil : 2200
         let compare = mode == .compare ? pinned : nil
         let pinnedKey = compare.map { "\($0.id):\(maxPixel ?? 0)" }
-        let reference = pinnedKey != pinnedSource ? compare : nil
+        let pinnedEdits = compare.map { compareShowsPinnedEdits ? $0.edits : EditSettings.neutral }
+        let reference = pinnedKey != pinnedSource || pinnedEdits != pinnedRenderedEdits ? compare : nil
         let recentKey = actualSize ? nil : "\(photo.id):\(isOriginal)"
         let recent = recentKey.flatMap { key in recentRenders.last { $0.key == key } }
         let renderCurrent = recent?.edits != edits
@@ -1733,8 +1743,10 @@ final class LibraryModel: ObservableObject {
                 (try? current?.get()).flatMap { Self.downscaled($0, maxPixel: size) }
             }
             let histogram = (try? current?.get()).flatMap { ImageHistogram.make(from: $0) }
+            // 기준 사진도 편집 미리보기 파이프라인으로 그려 같은 사진을 편집하는 동안 현상을 재사용한다.
             let referenceResult = reference.map { fixed in
-                Result { try pipeline.render(url: fixed.url, edits: .neutral, maxPixel: maxPixel) }
+                Result { try previewPipeline.renderPreview(url: fixed.url, edits: pinnedEdits ?? .neutral,
+                                                           maxPixel: maxPixel, allowApproximation: approximate) }
             }
             DispatchQueue.main.async {
                 guard token == self.generation else {
@@ -1785,12 +1797,16 @@ final class LibraryModel: ObservableObject {
                 }
                 if let referenceResult {
                     switch referenceResult {
-                    case .success(let cg):
+                    case .success(let result):
                         self.pinnedError = nil
-                        self.pinnedImage = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                        self.pinnedImage = NSImage(cgImage: result.image,
+                                                   size: NSSize(width: result.image.width, height: result.image.height))
+                        // 근사로 그린 기준 사진은 다음 렌더에서 정확히 다시 그린다.
+                        self.pinnedRenderedEdits = result.isApproximate ? nil : pinnedEdits
                     case .failure(let error):
                         self.pinnedImage = nil
                         self.pinnedError = error.localizedDescription
+                        self.pinnedRenderedEdits = pinnedEdits
                     }
                     self.pinnedSource = pinnedKey
                 }
