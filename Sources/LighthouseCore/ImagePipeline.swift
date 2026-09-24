@@ -317,7 +317,8 @@ public final class ImagePipeline: @unchecked Sendable {
                 let filter = CIFilter.temperatureAndTint()
                 filter.inputImage = image
                 filter.neutral = CIVector(x: 6500, y: 0)
-                filter.targetNeutral = CIVector(x: 6500 + edits.temperatureShift, y: edits.tintShift)
+                // RAW의 neutralTemperature/neutralTint 이동과 같은 방향(+는 따뜻하게·마젠타)이 되도록 목표를 반대로 옮긴다.
+                filter.targetNeutral = CIVector(x: 6500 - edits.temperatureShift, y: -edits.tintShift)
                 image = filter.outputImage ?? image
             }
         }

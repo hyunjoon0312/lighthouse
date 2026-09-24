@@ -438,6 +438,24 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertEqual(try rgbaBytes(render { _ in }), try rgbaBytes(neutral))
     }
 
+    func testNonRAWTemperatureAndTintMatchRAWDirection() throws {
+        let input = try temporaryPNG(width: 16, height: 16) { _, _ in (128, 128, 128, 255) }
+        defer { try? FileManager.default.removeItem(at: input) }
+        let pipeline = ImagePipeline()
+        func pixel(_ edits: EditSettings) throws -> (Int, Int, Int) {
+            let value = try rgba(pipeline.render(url: input, edits: edits, maxPixel: nil), x: 8, y: 8)
+            return (Int(value.0), Int(value.1), Int(value.2))
+        }
+        let warm = try pixel(EditSettings(temperatureShift: 1000))
+        let cool = try pixel(EditSettings(temperatureShift: -1000))
+        XCTAssertGreaterThan(warm.0 - warm.2, 10)
+        XCTAssertLessThan(cool.0 - cool.2, -10)
+        let magenta = try pixel(EditSettings(tintShift: 50))
+        let green = try pixel(EditSettings(tintShift: -50))
+        XCTAssertGreaterThan((magenta.0 + magenta.2) / 2 - magenta.1, 5)
+        XCTAssertLessThan((green.0 + green.2) / 2 - green.1, -5)
+    }
+
     func testVibranceClarityAndVignetteRender() throws {
         let input = try temporaryPNG(width: 120, height: 80) { x, y in
             ((x / 10 + y / 10) % 2 == 0 ? (170, 120, 90, 255) : (110, 140, 150, 255))
