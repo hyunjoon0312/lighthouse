@@ -105,6 +105,9 @@ public struct EditSettings: Codable, Equatable, Sendable {
     public var cropRect: NormalizedCrop?
     public var retouchStrokes: [RetouchStroke]
     public var rawDevelop: RAWDevelopSettings
+    public var vibrance: Double
+    public var clarity: Double
+    public var vignette: Double
 
     public init(exposure: Double = 0, contrast: Double = 1, saturation: Double = 1,
                 temperatureShift: Double = 0, tintShift: Double = 0, highlights: Double = 1,
@@ -113,7 +116,8 @@ public struct EditSettings: Codable, Equatable, Sendable {
                 lut: LUTAdjustment? = nil, curves: ToneCurves = .identity,
                 colorRanges: [ColorRangeAdjustment] = [], grain: GrainSettings = GrainSettings(),
                 straightenDegrees: Double = 0, cropRect: NormalizedCrop? = nil,
-                retouchStrokes: [RetouchStroke] = [], rawDevelop: RAWDevelopSettings = RAWDevelopSettings()) {
+                retouchStrokes: [RetouchStroke] = [], rawDevelop: RAWDevelopSettings = RAWDevelopSettings(),
+                vibrance: Double = 0, clarity: Double = 0, vignette: Double = 0) {
         self.exposure = exposure
         self.contrast = contrast
         self.saturation = saturation
@@ -133,6 +137,9 @@ public struct EditSettings: Codable, Equatable, Sendable {
         self.cropRect = cropRect
         self.retouchStrokes = retouchStrokes
         self.rawDevelop = rawDevelop
+        self.vibrance = vibrance
+        self.clarity = clarity
+        self.vignette = vignette
     }
 
     public static let neutral = EditSettings()
@@ -142,6 +149,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
         case exposure, contrast, saturation, temperatureShift, tintShift, highlights, shadows
         case sharpness, rotationQuarterTurns, cropAspect, localAdjustments, lut
         case curves, colorRanges, grain, straightenDegrees, cropRect, retouchStrokes, rawDevelop
+        case vibrance, clarity, vignette
     }
 
     public init(from decoder: Decoder) throws {
@@ -172,6 +180,9 @@ public struct EditSettings: Codable, Equatable, Sendable {
             ? container.decode([RetouchStroke].self, forKey: .retouchStrokes) : []
         rawDevelop = try container.contains(.rawDevelop)
             ? container.decode(RAWDevelopSettings.self, forKey: .rawDevelop) : RAWDevelopSettings()
+        vibrance = try container.decodeIfPresent(Double.self, forKey: .vibrance) ?? 0
+        clarity = try container.decodeIfPresent(Double.self, forKey: .clarity) ?? 0
+        vignette = try container.decodeIfPresent(Double.self, forKey: .vignette) ?? 0
     }
 }
 

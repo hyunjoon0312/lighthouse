@@ -133,15 +133,18 @@ struct InspectorView: View {
             adjustment("대비", value: edits.contrast, range: 0.5...1.5, format: "%.2f") { $0.contrast = $1 }
             adjustment("하이라이트", value: edits.highlights, range: 0...1, format: "%.2f") { $0.highlights = $1 }
             adjustment("섀도", value: edits.shadows, range: 0...1, format: "%.2f") { $0.shadows = $1 }
+            adjustment("명료도", value: edits.clarity, range: -1...1, format: "%+.2f") { $0.clarity = $1 }
             Divider()
             section("색상")
             adjustment("색온도 이동", value: edits.temperatureShift, range: -2500...2500, format: "%.0f K") { $0.temperatureShift = $1 }
             adjustment("틴트", value: edits.tintShift, range: -100...100, format: "%.0f") { $0.tintShift = $1 }
+            adjustment("생동감", value: edits.vibrance, range: -1...1, format: "%+.2f") { $0.vibrance = $1 }
             adjustment("채도", value: edits.saturation, range: 0...2, format: "%.2f") { $0.saturation = $1 }
             AdvancedColorControls(edits: edits)
             Divider()
             section("디테일 및 구도")
             adjustment("선명도", value: edits.sharpness, range: 0...2, format: "%.2f") { $0.sharpness = $1 }
+            adjustment("비네팅", value: edits.vignette, range: -1...1, format: "%+.2f") { $0.vignette = $1 }
             HStack {
                 Button {
                     change {

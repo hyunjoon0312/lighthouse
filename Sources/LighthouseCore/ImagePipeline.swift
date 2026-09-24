@@ -46,6 +46,14 @@ public final class ImagePipeline: @unchecked Sendable {
     public static var supportedCameraModels: [String] { CIRAWFilter.supportedCameraModels }
 
     static let maximumMaskBytes = 8 * 1_024 * 1_024
+    private static let clarityKernel = CIColorKernel(source: """
+        kernel vec4 clarity(__sample image, __sample fine, __sample coarse, float amount) {
+            float luma = dot(image.rgb, vec3(0.2126, 0.7152, 0.0722));
+            float tone = pow(clamp(luma, 0.0, 1.0), 0.4545);
+            float midtones = clamp(4.0 * tone * (1.0 - tone), 0.0, 1.0);
+            return vec4(image.rgb + amount * midtones * (fine.rgb - coarse.rgb), image.a);
+        }
+        """)
 
     let context: CIContext
     let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
@@ -193,6 +201,7 @@ public final class ImagePipeline: @unchecked Sendable {
         }
         image = try AdvancedColorProcessor.applyGrain(to: image, settings: edits.grain)
         image = transformedForDisplay(image, edits: edits, maxPixel: maxPixel)
+        image = applyVignette(edits.vignette, to: image)
         let rect = CGRect(x: 0, y: 0, width: floor(image.extent.width), height: floor(image.extent.height))
         guard rect.width > 0, rect.height > 0,
               let result = context.createCGImage(image, from: rect, format: .RGBA8, colorSpace: colorSpace) else {
@@ -298,6 +307,28 @@ public final class ImagePipeline: @unchecked Sendable {
             filter.highlightAmount = Float(edits.highlights)
             filter.shadowAmount = Float(edits.shadows)
             image = filter.outputImage ?? image
+        }
+        if edits.vibrance != 0, edits.vibrance.isFinite {
+            let filter = CIFilter.vibrance()
+            filter.inputImage = image
+            filter.amount = Float(min(1, max(-1, edits.vibrance)))
+            image = filter.outputImage ?? image
+        }
+        if edits.clarity != 0, edits.clarity.isFinite, let kernel = Self.clarityKernel {
+            // 원본 짧은 변의 0.15%~1.5% 크기 대비(중간 주파수)를 중간 톤 위주로 더하거나 빼서 잔 디테일은 남긴다.
+            // 반경을 원본 크기에 맞추므로 미리보기와 내보내기가 같다.
+            let shortSide = min(image.extent.width, image.extent.height)
+            let small = CIFilter.gaussianBlur()
+            small.inputImage = image.clampedToExtent()
+            small.radius = Float(shortSide * 0.0015)
+            let large = CIFilter.gaussianBlur()
+            large.inputImage = image.clampedToExtent()
+            large.radius = Float(shortSide * 0.015)
+            if let fine = small.outputImage, let coarse = large.outputImage,
+               let output = kernel.apply(extent: image.extent,
+                                         arguments: [image, fine, coarse, Float(min(1, max(-1, edits.clarity)) * 0.5)]) {
+                image = output
+            }
         }
         if edits.sharpness != 0 {
             let filter = CIFilter.sharpenLuminance()
@@ -444,6 +475,28 @@ public final class ImagePipeline: @unchecked Sendable {
             throw ImagePipelineError.invalidMaskData("PNG 서명, 크기 또는 선언된 치수가 일치하지 않습니다")
         }
         return image
+    }
+
+    /// 크롭한 뒤의 화면 기준 비네팅. 원형 마스크로 가장자리 노출만 바꾼다. 음수는 어둡게, 양수는 밝게 한다.
+    private func applyVignette(_ amount: Double, to image: CIImage) -> CIImage {
+        guard amount != 0, amount.isFinite, image.extent.width > 0, image.extent.height > 0 else { return image }
+        let extent = image.extent
+        let halfDiagonal = hypot(extent.width, extent.height) / 2
+        let mask = CIFilter.radialGradient()
+        mask.center = CGPoint(x: extent.midX, y: extent.midY)
+        mask.radius0 = Float(halfDiagonal * 0.35)
+        mask.radius1 = Float(halfDiagonal)
+        mask.color0 = CIColor(red: 0, green: 0, blue: 0)
+        mask.color1 = CIColor(red: 1, green: 1, blue: 1)
+        let exposure = CIFilter.exposureAdjust()
+        exposure.inputImage = image
+        exposure.ev = Float(min(1, max(-1, amount)) * 2)
+        guard let gradient = mask.outputImage, let adjusted = exposure.outputImage else { return image }
+        let blend = CIFilter.blendWithMask()
+        blend.inputImage = adjusted
+        blend.backgroundImage = image
+        blend.maskImage = gradient.cropped(to: extent)
+        return (blend.outputImage ?? image).cropped(to: extent)
     }
 
     private func transformedForDisplay(_ source: CIImage, edits: EditSettings, maxPixel: Int?) -> CIImage {

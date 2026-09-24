@@ -333,6 +333,34 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertEqual(sampled.red[100], sampled.sampleCount)
     }
 
+    func testVibranceClarityAndVignetteRender() throws {
+        let input = try temporaryPNG(width: 120, height: 80) { x, y in
+            ((x / 10 + y / 10) % 2 == 0 ? (170, 120, 90, 255) : (110, 140, 150, 255))
+        }
+        defer { try? FileManager.default.removeItem(at: input) }
+        let pipeline = ImagePipeline()
+        let neutral = try pipeline.render(url: input, edits: .neutral, maxPixel: nil)
+        for edits in [EditSettings(vibrance: 0.8), EditSettings(clarity: 0.8), EditSettings(clarity: -0.8)] {
+            XCTAssertNotEqual(try rgbaBytes(pipeline.render(url: input, edits: edits, maxPixel: nil)),
+                              try rgbaBytes(neutral))
+        }
+        func brightness(_ image: CGImage, _ x: Int, _ y: Int) throws -> Int {
+            let pixel = try rgba(image, x: x, y: y)
+            return Int(pixel.0) + Int(pixel.1) + Int(pixel.2)
+        }
+        let darker = try pipeline.render(url: input, edits: EditSettings(vignette: -0.8), maxPixel: nil)
+        let lighter = try pipeline.render(url: input, edits: EditSettings(vignette: 0.8), maxPixel: nil)
+        XCTAssertLessThan(try brightness(darker, 1, 1), try brightness(neutral, 1, 1) - 30)
+        XCTAssertGreaterThan(try brightness(lighter, 1, 1), try brightness(neutral, 1, 1) + 30)
+        XCTAssertEqual(try brightness(darker, 60, 40), try brightness(neutral, 60, 40), accuracy: 2)
+        XCTAssertEqual(try brightness(lighter, 60, 40), try brightness(neutral, 60, 40), accuracy: 2)
+        let small = try pipeline.render(url: input, edits: EditSettings(vignette: -0.8), maxPixel: 60)
+        let smallNeutral = try pipeline.render(url: input, edits: .neutral, maxPixel: 60)
+        let fullDrop = try brightness(neutral, 1, 1) - brightness(darker, 1, 1)
+        let smallDrop = try brightness(smallNeutral, 0, 0) - brightness(small, 0, 0)
+        XCTAssertEqual(Double(smallDrop), Double(fullDrop), accuracy: Double(fullDrop) * 0.25)
+    }
+
     func testStraightenedImageHasOpaqueSafeCornersAndFinalScale() throws {
         let input = try temporaryPNG(width: 80, height: 50) { _, _ in (80, 120, 160, 255) }
         defer { try? FileManager.default.removeItem(at: input) }

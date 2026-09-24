@@ -31,6 +31,9 @@ public extension EditSettings {
             result.colorRanges = source.colorRanges
             result.grain = source.grain
             result.rawDevelop = source.rawDevelop
+            result.vibrance = source.vibrance
+            result.clarity = source.clarity
+            result.vignette = source.vignette
         }
         if components.contains(.lut) {
             result.lut = source.lut

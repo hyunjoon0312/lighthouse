@@ -97,9 +97,14 @@ final class AdvancedModelTests: XCTestCase {
     func testRAWDevelopSettingsDefaultRoundTripAndBatchCopy() throws {
         let encoded = try JSONEncoder().encode(EditSettings())
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
-        object.removeValue(forKey: "rawDevelop")
+        for key in ["rawDevelop", "vibrance", "clarity", "vignette"] { object.removeValue(forKey: key) }
         let legacy = try JSONDecoder().decode(EditSettings.self, from: JSONSerialization.data(withJSONObject: object))
         XCTAssertEqual(legacy.rawDevelop, RAWDevelopSettings())
+        XCTAssertEqual([legacy.vibrance, legacy.clarity, legacy.vignette], [0, 0, 0])
+        let effects = EditSettings(vibrance: 0.3, clarity: -0.2, vignette: -0.5)
+        XCTAssertTrue(effects.isModified)
+        XCTAssertEqual(try JSONDecoder().decode(EditSettings.self, from: JSONEncoder().encode(effects)), effects)
+        XCTAssertEqual(EditSettings().merging(from: effects, components: .global), effects)
         XCTAssertFalse(legacy.isModified)
 
         let develop = RAWDevelopSettings(luminanceNoiseReduction: 0.8, colorNoiseReduction: 0.2,
