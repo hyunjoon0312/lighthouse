@@ -34,6 +34,7 @@ struct WorkspaceView: View {
         .tint(Palette.accent)
         .sheet(isPresented: $model.showExport) { ExportSheet() }
         .sheet(isPresented: $model.showBatchEdit) { BatchEditSheet() }
+        .sheet(isPresented: $model.showCardImport) { CardImportSheet() }
         .sheet(item: $model.cropSource) { source in CropSheet(source: source) }
         .sheet(item: $model.referenceMatchSource) { source in
             ReferenceMatchSheet(source: source) { adjustment, apply in
@@ -125,7 +126,14 @@ struct WorkspaceView: View {
             .buttonStyle(.borderedProminent)
             .accessibilityLabel("사진 가져오기")
             .disabled(!model.catalogLoaded || model.isImporting)
-            .padding(16)
+            .padding(.horizontal, 16).padding(.top, 16)
+            Button { model.showCardImport = true } label: {
+                Label("카드에서 복사…", systemImage: "sdcard").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("카드에서 복사해 가져오기")
+            .disabled(!model.catalogLoaded || model.isImporting)
+            .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 16)
         }
         .background(Palette.panel)
     }
@@ -352,7 +360,18 @@ struct WorkspaceView: View {
 
     private var filmstrip: some View {
         VStack(spacing: 0) {
-            if model.isImporting || model.isExporting { ProgressView(value: model.operationProgress).tint(Palette.accent) }
+            if model.isImporting || model.isExporting {
+                HStack {
+                    ProgressView(value: model.operationProgress).tint(Palette.accent)
+                    if model.isImporting && model.canCancelImport {
+                        Button(model.isCancellingImport ? "중지하는 중…" : "중지") { model.cancelImport() }
+                            .disabled(model.isCancellingImport)
+                            .controlSize(.small)
+                            .accessibilityLabel("카드 복사 중지")
+                    }
+                }
+                .padding(.horizontal, 16).padding(.top, 4)
+            }
             if let message = model.operationMessage {
                 HStack { Text(message).lineLimit(2); Spacer(); Button { model.operationMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }
                     .font(.caption).foregroundStyle(Palette.muted).padding(.horizontal, 16).padding(.top, 6)
@@ -371,7 +390,7 @@ struct WorkspaceView: View {
                 .onChange(of: model.selectedID) { _, id in scroll(proxy, to: id) }
             }
         }
-        .frame(height: model.operationMessage == nil ? 106 : 129)
+        .frame(height: (model.operationMessage == nil ? 106 : 129) + (model.isImporting || model.isExporting ? 22 : 0))
         .background(Palette.panel)
     }
 

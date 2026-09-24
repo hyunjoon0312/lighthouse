@@ -24,6 +24,9 @@ struct LighthouseApp: App {
                 Button("사진 가져오기…") { library.presentImport() }
                     .keyboardShortcut("o", modifiers: .command)
                     .disabled(library.hasModalPresentation)
+                Button("카드에서 복사해 가져오기…") { library.showCardImport = true }
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
+                    .disabled(!library.catalogLoaded || library.isImporting || library.hasModalPresentation)
                 Button("LUT 추가…") { library.presentLUTImport() }
                     .disabled(!library.catalogLoaded || library.isLUTImporting || library.isLUTLibraryLoading || library.hasModalPresentation)
                 Button("참조 사진 색감 맞추기…") { library.presentReferenceMatch() }
