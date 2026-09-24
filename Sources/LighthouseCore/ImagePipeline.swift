@@ -90,6 +90,22 @@ public final class ImagePipeline: @unchecked Sendable {
         )
     }
 
+    public func rawCapabilities(for url: URL) -> RAWCapabilities? {
+        guard Self.isRAW(url), let raw = CIRAWFilter(imageURL: url) else { return nil }
+        return RAWCapabilities(
+            luminanceNoiseReduction: raw.isLuminanceNoiseReductionSupported
+                ? Double(raw.luminanceNoiseReductionAmount) : nil,
+            colorNoiseReduction: raw.isColorNoiseReductionSupported ? Double(raw.colorNoiseReductionAmount) : nil,
+            lensCorrection: raw.isLensCorrectionSupported ? raw.isLensCorrectionEnabled : nil,
+            highlightRecovery: Self.highlightRecovery(of: raw)
+        )
+    }
+
+    private static func highlightRecovery(of raw: CIRAWFilter) -> Bool? {
+        guard #available(macOS 26.0, *), raw.isHighlightRecoverySupported else { return nil }
+        return raw.isHighlightRecoveryEnabled
+    }
+
     public func thumbnail(for url: URL, maxPixel: Int = 360) throws -> CGImage {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
             throw ImagePipelineError.unreadable(url)
@@ -198,7 +214,9 @@ public final class ImagePipeline: @unchecked Sendable {
         guard cachesDevelopment else { return try makeDevelopedSource(url: url, edits: edits) }
         let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
         var key = "\(url.path)|\(modified?.timeIntervalSinceReferenceDate ?? 0)"
-        if Self.isRAW(url) { key += "|\(edits.exposure)|\(edits.temperatureShift)|\(edits.tintShift)" }
+        if Self.isRAW(url) {
+            key += "|\(edits.exposure)|\(edits.temperatureShift)|\(edits.tintShift)|\(edits.rawDevelop)"
+        }
         developmentLock.lock()
         if let index = developedSources.firstIndex(where: { $0.key == key }) {
             let hit = developedSources.remove(at: index)
@@ -227,6 +245,19 @@ public final class ImagePipeline: @unchecked Sendable {
             raw.exposure = originalExposure + Float(edits.exposure)
             raw.neutralTemperature = min(50_000, max(2_000, originalTemperature + Float(edits.temperatureShift)))
             raw.neutralTint = min(150, max(-150, originalTint + Float(edits.tintShift)))
+            let develop = edits.rawDevelop
+            if raw.isLuminanceNoiseReductionSupported, let amount = develop.luminanceNoiseReduction, amount.isFinite {
+                raw.luminanceNoiseReductionAmount = Float(min(1, max(0, amount)))
+            }
+            if raw.isColorNoiseReductionSupported, let amount = develop.colorNoiseReduction, amount.isFinite {
+                raw.colorNoiseReductionAmount = Float(min(1, max(0, amount)))
+            }
+            if raw.isLensCorrectionSupported, let enabled = develop.lensCorrection {
+                raw.isLensCorrectionEnabled = enabled
+            }
+            if #available(macOS 26.0, *), raw.isHighlightRecoverySupported, let enabled = develop.highlightRecovery {
+                raw.isHighlightRecoveryEnabled = enabled
+            }
             guard let output = raw.outputImage else { throw ImagePipelineError.renderFailed(url) }
             return output
         }

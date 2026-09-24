@@ -139,6 +139,7 @@ final class LibraryModel: ObservableObject {
     @Published var cloneSource: MaskPoint?
     @Published var isFindingHealSource = false
     @Published var retouchError: String?
+    @Published var rawCapabilities: RAWCapabilities?
     let canvas = CanvasStrokeState()
     var gridColumnCount = 1
 
@@ -193,6 +194,8 @@ final class LibraryModel: ObservableObject {
     private var indexCache: [UUID: Int]?
     private var countsCache: LibraryCounts?
     private var foldersCache: [String]?
+    private var rawCapabilitiesPath: String?
+    private var rawCapabilitiesByPath: [String: RAWCapabilities?] = [:]
     private static let renderInterval = 0.1
     private static let recentRenderLimit = 6
     private var maskGeneration = 0
@@ -1270,6 +1273,7 @@ final class LibraryModel: ObservableObject {
         }
         if mode != .compare { pinnedImage = nil; pinnedError = nil; pinnedSource = nil }
         requestMask()
+        refreshRAWCapabilities()
         guard mode != .grid, let photo = selection else { rendering = false; return }
         let edits = isOriginal ? EditSettings.neutral : photo.edits
         let maxPixel: Int? = actualSize ? nil : 2200
@@ -1359,6 +1363,24 @@ final class LibraryModel: ObservableObject {
         }
         renderDelay = dispatch
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: dispatch)
+    }
+
+    /// 선택한 RAW에서 조절할 수 있는 디코더 항목과 기본값을 읽는다. 파일마다 한 번만 읽는다.
+    private func refreshRAWCapabilities() {
+        guard let photo = selection else { rawCapabilities = nil; rawCapabilitiesPath = nil; return }
+        guard rawCapabilitiesPath != photo.path else { return }
+        rawCapabilitiesPath = photo.path
+        if let known = rawCapabilitiesByPath[photo.path] { rawCapabilities = known; return }
+        rawCapabilities = nil
+        guard photo.isRAW else { return }
+        let path = photo.path
+        placeholderQueue.async { [pipeline] in
+            let capabilities = pipeline.rawCapabilities(for: photo.url)
+            DispatchQueue.main.async {
+                self.rawCapabilitiesByPath[path] = capabilities
+                if self.rawCapabilitiesPath == path { self.rawCapabilities = capabilities }
+            }
+        }
     }
 
     private func rememberRender(_ image: NSImage, key: String, edits: EditSettings) {

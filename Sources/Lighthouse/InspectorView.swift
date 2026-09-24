@@ -126,7 +126,7 @@ struct InspectorView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Button("참조 사진 색감 맞추기…") { model.presentReferenceMatch() }
                 .accessibilityLabel("참조 사진 색감 맞추기")
-            Divider()
+            if photo.isRAW { rawDevelopControls; Divider() } else { Divider() }
             section("빛")
             adjustment("노출", value: edits.exposure, range: -4...4, format: "%.2f EV") { $0.exposure = $1 }
             adjustment("대비", value: edits.contrast, range: 0.5...1.5, format: "%.2f") { $0.contrast = $1 }
@@ -165,6 +165,68 @@ struct InspectorView: View {
                     .disabled(model.clipboard == nil || model.visiblePhotos.last?.id == photo.id)
                     .help("전체 보정과 LUT만 붙여넣습니다. 크롭·부분 보정·복구는 사진마다 달라 제외합니다.")
             }.buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder private var rawDevelopControls: some View {
+        Divider()
+        HStack {
+            section("RAW 현상")
+            Spacer()
+            if edits.rawDevelop != RAWDevelopSettings() {
+                Button("자동으로") { change { $0.rawDevelop = RAWDevelopSettings() } }
+                    .font(.caption).buttonStyle(.borderless)
+                    .accessibilityLabel("RAW 현상 설정을 카메라 기본값으로")
+            }
+        }
+        if let capabilities = model.rawCapabilities {
+            if let automatic = capabilities.luminanceNoiseReduction {
+                rawSlider("노이즈 감소", value: edits.rawDevelop.luminanceNoiseReduction,
+                          automatic: automatic) { $0.rawDevelop.luminanceNoiseReduction = $1 }
+            }
+            if let automatic = capabilities.colorNoiseReduction {
+                rawSlider("색 노이즈 감소", value: edits.rawDevelop.colorNoiseReduction,
+                          automatic: automatic) { $0.rawDevelop.colorNoiseReduction = $1 }
+            }
+            if let automatic = capabilities.lensCorrection {
+                Toggle("렌즈 보정 (왜곡·주변부)", isOn: Binding(
+                    get: { edits.rawDevelop.lensCorrection ?? automatic },
+                    set: { enabled in change { $0.rawDevelop.lensCorrection = enabled } }
+                )).font(.caption).accessibilityLabel("렌즈 보정")
+            }
+            if let automatic = capabilities.highlightRecovery {
+                Toggle("하이라이트 복구", isOn: Binding(
+                    get: { edits.rawDevelop.highlightRecovery ?? automatic },
+                    set: { enabled in change { $0.rawDevelop.highlightRecovery = enabled } }
+                )).font(.caption).accessibilityLabel("하이라이트 복구")
+            }
+            if capabilities == RAWCapabilities(luminanceNoiseReduction: nil, colorNoiseReduction: nil,
+                                               lensCorrection: nil, highlightRecovery: nil) {
+                Text("이 RAW는 macOS 디코더에서 조절할 수 있는 현상 항목이 없습니다.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        } else {
+            ProgressView().controlSize(.small)
+        }
+    }
+
+    private func rawSlider(_ title: String, value: Double?, automatic: Double,
+                           set: @escaping (inout EditSettings, Double) -> Void) -> some View {
+        let shown = value ?? automatic
+        return VStack(spacing: 3) {
+            HStack {
+                Text(title).font(.caption)
+                Spacer()
+                Text(value == nil ? "자동 \(Int((shown * 100).rounded()))%" : "\(Int((shown * 100).rounded()))%")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            Slider(value: Binding(
+                get: { shown },
+                set: { newValue in self.change(continuous: true) { set(&$0, newValue) } }
+            ), in: 0...1) { editing in
+                if !editing { model.endContinuousEdit() }
+            }
+            .accessibilityLabel(title)
         }
     }
 

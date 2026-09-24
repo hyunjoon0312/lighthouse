@@ -225,3 +225,35 @@ public struct RetouchStroke: Identifiable, Codable, Equatable, Sendable {
         self.isEnabled = isEnabled
     }
 }
+
+/// RAW 디코더 단계의 설정. nil은 카메라·디코더 기본값을 그대로 쓴다는 뜻이다.
+public struct RAWDevelopSettings: Codable, Equatable, Sendable {
+    public var luminanceNoiseReduction: Double?
+    public var colorNoiseReduction: Double?
+    public var lensCorrection: Bool?
+    public var highlightRecovery: Bool?
+
+    public init(luminanceNoiseReduction: Double? = nil, colorNoiseReduction: Double? = nil,
+                lensCorrection: Bool? = nil, highlightRecovery: Bool? = nil) {
+        self.luminanceNoiseReduction = luminanceNoiseReduction
+        self.colorNoiseReduction = colorNoiseReduction
+        self.lensCorrection = lensCorrection
+        self.highlightRecovery = highlightRecovery
+    }
+}
+
+/// 사진 파일에서 조절할 수 있는 RAW 디코더 항목과 그 기본값. 지원하지 않는 항목은 nil이다.
+public struct RAWCapabilities: Equatable, Sendable {
+    public let luminanceNoiseReduction: Double?
+    public let colorNoiseReduction: Double?
+    public let lensCorrection: Bool?
+    public let highlightRecovery: Bool?
+
+    public init(luminanceNoiseReduction: Double?, colorNoiseReduction: Double?,
+                lensCorrection: Bool?, highlightRecovery: Bool?) {
+        self.luminanceNoiseReduction = luminanceNoiseReduction
+        self.colorNoiseReduction = colorNoiseReduction
+        self.lensCorrection = lensCorrection
+        self.highlightRecovery = highlightRecovery
+    }
+}

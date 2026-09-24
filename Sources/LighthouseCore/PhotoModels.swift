@@ -104,6 +104,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
     public var straightenDegrees: Double
     public var cropRect: NormalizedCrop?
     public var retouchStrokes: [RetouchStroke]
+    public var rawDevelop: RAWDevelopSettings
 
     public init(exposure: Double = 0, contrast: Double = 1, saturation: Double = 1,
                 temperatureShift: Double = 0, tintShift: Double = 0, highlights: Double = 1,
@@ -112,7 +113,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
                 lut: LUTAdjustment? = nil, curves: ToneCurves = .identity,
                 colorRanges: [ColorRangeAdjustment] = [], grain: GrainSettings = GrainSettings(),
                 straightenDegrees: Double = 0, cropRect: NormalizedCrop? = nil,
-                retouchStrokes: [RetouchStroke] = []) {
+                retouchStrokes: [RetouchStroke] = [], rawDevelop: RAWDevelopSettings = RAWDevelopSettings()) {
         self.exposure = exposure
         self.contrast = contrast
         self.saturation = saturation
@@ -131,6 +132,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
         self.straightenDegrees = straightenDegrees
         self.cropRect = cropRect
         self.retouchStrokes = retouchStrokes
+        self.rawDevelop = rawDevelop
     }
 
     public static let neutral = EditSettings()
@@ -139,7 +141,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case exposure, contrast, saturation, temperatureShift, tintShift, highlights, shadows
         case sharpness, rotationQuarterTurns, cropAspect, localAdjustments, lut
-        case curves, colorRanges, grain, straightenDegrees, cropRect, retouchStrokes
+        case curves, colorRanges, grain, straightenDegrees, cropRect, retouchStrokes, rawDevelop
     }
 
     public init(from decoder: Decoder) throws {
@@ -168,6 +170,8 @@ public struct EditSettings: Codable, Equatable, Sendable {
         cropRect = try container.decodeIfPresent(NormalizedCrop.self, forKey: .cropRect)
         retouchStrokes = try container.contains(.retouchStrokes)
             ? container.decode([RetouchStroke].self, forKey: .retouchStrokes) : []
+        rawDevelop = try container.contains(.rawDevelop)
+            ? container.decode(RAWDevelopSettings.self, forKey: .rawDevelop) : RAWDevelopSettings()
     }
 }
 

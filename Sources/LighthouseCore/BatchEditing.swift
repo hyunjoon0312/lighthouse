@@ -30,6 +30,7 @@ public extension EditSettings {
             result.curves = source.curves
             result.colorRanges = source.colorRanges
             result.grain = source.grain
+            result.rawDevelop = source.rawDevelop
         }
         if components.contains(.lut) {
             result.lut = source.lut

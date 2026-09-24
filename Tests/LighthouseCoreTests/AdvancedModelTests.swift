@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 import XCTest
 @testable import LighthouseCore
 
@@ -91,6 +92,40 @@ final class AdvancedModelTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(EditSettings.self, from: JSONEncoder().encode(settings)), settings)
         XCTAssertTrue(settings.isModified)
         XCTAssertFalse(EditSettings.neutral.isModified)
+    }
+
+    func testRAWDevelopSettingsDefaultRoundTripAndBatchCopy() throws {
+        let encoded = try JSONEncoder().encode(EditSettings())
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "rawDevelop")
+        let legacy = try JSONDecoder().decode(EditSettings.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(legacy.rawDevelop, RAWDevelopSettings())
+        XCTAssertFalse(legacy.isModified)
+
+        let develop = RAWDevelopSettings(luminanceNoiseReduction: 0.8, colorNoiseReduction: 0.2,
+                                         lensCorrection: false, highlightRecovery: true)
+        let settings = EditSettings(rawDevelop: develop)
+        XCTAssertTrue(settings.isModified)
+        XCTAssertEqual(try JSONDecoder().decode(EditSettings.self, from: JSONEncoder().encode(settings)), settings)
+        XCTAssertEqual(EditSettings().merging(from: settings, components: .global).rawDevelop, develop)
+        XCTAssertEqual(EditSettings().merging(from: settings, components: [.lut, .geometry]).rawDevelop,
+                       RAWDevelopSettings())
+
+        let png = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+        defer { try? FileManager.default.removeItem(at: png) }
+        let context = try XCTUnwrap(CGContext(data: nil, width: 8, height: 6, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(red: 0.3, green: 0.5, blue: 0.7, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 8, height: 6))
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(png as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let pipeline = ImagePipeline()
+        XCTAssertNil(pipeline.rawCapabilities(for: png))
+        let plain = try pipeline.render(url: png, edits: .neutral, maxPixel: nil)
+        let withDevelop = try pipeline.render(url: png, edits: settings, maxPixel: nil)
+        XCTAssertEqual(plain.dataProvider?.data as Data?, withDevelop.dataProvider?.data as Data?)
     }
 
     func testToneCurveValidationAtDecodeBoundary() throws {
