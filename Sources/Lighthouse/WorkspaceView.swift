@@ -313,27 +313,37 @@ struct WorkspaceView: View {
             .buttonStyle(.borderless).padding(.horizontal, 20).frame(height: 44)
             HStack(spacing: 1) {
                 if model.mode == .compare {
-                    imagePane(model.pinnedImage, error: model.pinnedError, caption: "기준 · 원본")
+                    imagePane(model.pinnedImage, error: model.pinnedError, caption: "기준 · 원본", overlay: nil)
                 }
-                imagePane(model.rendered, error: model.imageError, caption: model.isOriginal ? "현재 · 원본" : "현재 · 보정")
+                imagePane(model.rendered, error: model.imageError, caption: model.isOriginal ? "현재 · 원본" : "현재 · 보정",
+                          overlay: model.showsClipping ? model.clippingOverlay : nil)
             }
             .background(Palette.canvas)
         }
     }
 
-    private func imagePane(_ image: NSImage?, error: String?, caption: String) -> some View {
+    private func imagePane(_ image: NSImage?, error: String?, caption: String, overlay: NSImage?) -> some View {
         GeometryReader { geometry in
             ZStack {
                 if let image {
                     if model.actualSize {
                         let scale = NSApp.keyWindow?.backingScaleFactor ?? 1
                         ScrollView([.horizontal, .vertical]) {
-                            Image(nsImage: image).resizable().interpolation(.high)
-                                .frame(width: image.size.width / scale, height: image.size.height / scale)
-                                .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
+                            ZStack {
+                                Image(nsImage: image).resizable().interpolation(.high)
+                                if let overlay {
+                                    Image(nsImage: overlay).resizable().interpolation(.none).allowsHitTesting(false)
+                                }
+                            }
+                            .frame(width: image.size.width / scale, height: image.size.height / scale)
+                            .frame(minWidth: geometry.size.width, minHeight: geometry.size.height)
                         }
                     } else {
                         Image(nsImage: image).resizable().interpolation(.high).scaledToFit().padding(20)
+                        if let overlay {
+                            Image(nsImage: overlay).resizable().interpolation(.none).scaledToFit().padding(20)
+                                .allowsHitTesting(false)
+                        }
                         if model.mode == .edit, let photo = model.selection {
                             BrushCanvasView(canvas: model.canvas, photo: photo, imageSize: image.size,
                                             availableSize: geometry.size)
@@ -425,6 +435,7 @@ struct WorkspaceView: View {
                 case "e": model.setMode(.edit); return nil
                 case "c": model.setMode(.compare); return nil
                 case "\\": model.toggleOriginal(); return nil
+                case "j": model.showsClipping.toggle(); return nil
                 default: break
                 }
                 if event.keyCode == 123 { model.move(-1); return nil }

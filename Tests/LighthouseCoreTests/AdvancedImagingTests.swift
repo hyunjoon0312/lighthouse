@@ -299,6 +299,40 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertNil(ThumbnailStore.key(for: PhotoAsset(url: directory.appendingPathComponent("missing.png"))))
     }
 
+    func testHistogramCountsChannelsAndClipping() throws {
+        let image = try makeImage(width: 10, height: 10) { x, _ in
+            switch x {
+            case 0..<2: (255, 255, 255, 255)
+            case 2..<3: (255, 10, 10, 255)
+            case 3..<5: (0, 0, 0, 255)
+            default: (128, 64, 32, 255)
+            }
+        }
+        let histogram = try XCTUnwrap(ImageHistogram.make(from: image))
+        XCTAssertEqual(histogram.sampleCount, 100)
+        XCTAssertEqual(histogram.red[255], 30)
+        XCTAssertEqual(histogram.red[128], 50)
+        XCTAssertEqual(histogram.green[64], 50)
+        XCTAssertEqual(histogram.blue[32], 50)
+        XCTAssertEqual(histogram.luminance.reduce(0, +), 100)
+        XCTAssertEqual(histogram.highlightClipped, 0.3, accuracy: 1e-9)
+        XCTAssertEqual(histogram.shadowClipped, 0.2, accuracy: 1e-9)
+
+        let overlay = try XCTUnwrap(ImageHistogram.clippingOverlay(for: image))
+        XCTAssertEqual(overlay.width, 10)
+        let highlight = try rgba(overlay, x: 2, y: 5)
+        XCTAssertEqual(highlight.3, 255)
+        XCTAssertGreaterThan(highlight.0, 200)
+        let shadow = try rgba(overlay, x: 4, y: 5)
+        XCTAssertGreaterThan(shadow.2, 200)
+        XCTAssertEqual(try rgba(overlay, x: 7, y: 5).3, 0)
+
+        let large = try makeImage(width: 3000, height: 1500) { _, _ in (100, 100, 100, 255) }
+        let sampled = try XCTUnwrap(ImageHistogram.make(from: large))
+        XCTAssertEqual(sampled.sampleCount, 1024 * 512)
+        XCTAssertEqual(sampled.red[100], sampled.sampleCount)
+    }
+
     func testStraightenedImageHasOpaqueSafeCornersAndFinalScale() throws {
         let input = try temporaryPNG(width: 80, height: 50) { _, _ in (80, 120, 160, 255) }
         defer { try? FileManager.default.removeItem(at: input) }

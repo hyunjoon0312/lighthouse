@@ -19,6 +19,7 @@ struct InspectorView: View {
                     }
                     Text(photo.filename).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
+                HistogramView()
                 ratingRow
                 HStack(spacing: 8) {
                     flagButton("선택", icon: "checkmark", flag: .pick)

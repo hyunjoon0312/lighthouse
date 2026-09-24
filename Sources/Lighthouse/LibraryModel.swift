@@ -142,6 +142,9 @@ final class LibraryModel: ObservableObject {
     @Published var isFindingHealSource = false
     @Published var retouchError: String?
     @Published var rawCapabilities: RAWCapabilities?
+    @Published var histogram: ImageHistogram?
+    @Published var showsClipping = false { didSet { refreshClippingOverlay() } }
+    @Published var clippingOverlay: NSImage?
     let canvas = CanvasStrokeState()
     var gridColumnCount = 1
 
@@ -187,7 +190,8 @@ final class LibraryModel: ObservableObject {
     private var renderJob: DispatchWorkItem?
     private var displayedToken = 0
     private var lastRenderDispatch = Date.distantPast
-    private var recentRenders: [(key: String, edits: EditSettings, image: NSImage)] = []
+    private var recentRenders: [(key: String, edits: EditSettings, image: NSImage, histogram: ImageHistogram?)] = []
+    private var overlayToken = 0
     private var prefetching = Set<String>()
     private var moveDirection = 1
     private var pendingCollapse: DispatchWorkItem?
@@ -1274,6 +1278,8 @@ final class LibraryModel: ObservableObject {
             imageError = nil
             renderedSource = source
             displayedToken = 0
+            histogram = nil
+            clippingOverlay = nil
         }
         if mode != .compare { pinnedImage = nil; pinnedError = nil; pinnedSource = nil }
         requestMask()
@@ -1291,7 +1297,9 @@ final class LibraryModel: ObservableObject {
             rendered = recent.image
             imageError = nil
             displayedToken = token
-            rememberRender(recent.image, key: recentKey, edits: edits)
+            histogram = recent.histogram
+            refreshClippingOverlay()
+            rememberRender(recent.image, key: recentKey, edits: edits, histogram: recent.histogram)
             if reference == nil {
                 rendering = false
                 prefetchNeighbor()
@@ -1300,6 +1308,7 @@ final class LibraryModel: ObservableObject {
         } else if rendered == nil {
             if let recent {
                 rendered = recent.image
+                histogram = recent.histogram
             } else if photo.isRAW, !actualSize, isOriginal || !photo.edits.isModified {
                 requestPlaceholder(for: photo, source: source)
             }
@@ -1312,6 +1321,7 @@ final class LibraryModel: ObservableObject {
             let thumbnail = thumbnailSize.flatMap { size in
                 (try? current?.get()).flatMap { Self.downscaled($0, maxPixel: size) }
             }
+            let histogram = (try? current?.get()).flatMap { ImageHistogram.make(from: $0) }
             let referenceResult = reference.map { fixed in
                 Result { try pipeline.render(url: fixed.url, edits: .neutral, maxPixel: maxPixel) }
             }
@@ -1321,6 +1331,7 @@ final class LibraryModel: ObservableObject {
                           case .success(let cg)? = current else { return }
                     self.displayedToken = token
                     self.rendered = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                    self.histogram = histogram
                     return
                 }
                 self.rendering = false
@@ -1330,10 +1341,16 @@ final class LibraryModel: ObservableObject {
                     let image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
                     self.rendered = image
                     self.displayedToken = token
-                    if let recentKey { self.rememberRender(image, key: recentKey, edits: edits) }
+                    self.histogram = histogram
+                    self.refreshClippingOverlay()
+                    if let recentKey {
+                        self.rememberRender(image, key: recentKey, edits: edits, histogram: histogram)
+                    }
                 case .failure(let error)?:
                     self.rendered = nil
                     self.imageError = error.localizedDescription
+                    self.histogram = nil
+                    self.clippingOverlay = nil
                 case nil:
                     break
                 }
@@ -1387,11 +1404,29 @@ final class LibraryModel: ObservableObject {
         }
     }
 
-    private func rememberRender(_ image: NSImage, key: String, edits: EditSettings) {
+    private func rememberRender(_ image: NSImage, key: String, edits: EditSettings, histogram: ImageHistogram?) {
         recentRenders.removeAll { $0.key == key }
-        recentRenders.append((key, edits, image))
+        recentRenders.append((key, edits, image, histogram))
         if recentRenders.count > Self.recentRenderLimit {
             recentRenders.removeFirst(recentRenders.count - Self.recentRenderLimit)
+        }
+    }
+
+    /// 현상한 결과가 보일 때만 클리핑 표시를 만든다. 카메라 미리보기에는 히스토그램과 표시를 만들지 않는다.
+    private func refreshClippingOverlay() {
+        overlayToken += 1
+        let token = overlayToken
+        guard showsClipping, histogram != nil,
+              let image = rendered?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            clippingOverlay = nil
+            return
+        }
+        placeholderQueue.async {
+            let overlay = ImageHistogram.clippingOverlay(for: image)
+            DispatchQueue.main.async {
+                guard token == self.overlayToken else { return }
+                self.clippingOverlay = overlay.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+            }
         }
     }
 
@@ -1422,15 +1457,17 @@ final class LibraryModel: ObservableObject {
         prefetching.insert(key)
         prefetchQueue.async { [pipeline] in
             let cg = try? pipeline.render(url: photo.url, edits: edits, maxPixel: 2200)
+            let histogram = cg.flatMap { ImageHistogram.make(from: $0) }
             DispatchQueue.main.async {
                 self.prefetching.remove(key)
                 guard let cg, let latest = self.photo(withID: photo.id),
                       (originalView ? EditSettings.neutral : latest.edits) == edits else { return }
                 let image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
-                self.rememberRender(image, key: key, edits: edits)
+                self.rememberRender(image, key: key, edits: edits, histogram: histogram)
                 if self.renderedSource == "\(photo.id):\(originalView):false", self.displayedToken == 0,
                    self.rendering {
                     self.rendered = image
+                    self.histogram = histogram
                 }
             }
         }
