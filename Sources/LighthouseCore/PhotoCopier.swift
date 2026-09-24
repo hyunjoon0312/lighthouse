@@ -37,6 +37,7 @@ public enum PhotoCopier {
     }
 
     /// 같은 이름이 있으면 내용이 같을 때 기존 파일을 쓰고, 다르면 `-2`, `-3`을 붙인다.
+    /// 복사는 수정 시각을 그대로 옮기므로 크기와 수정 시각이 같으면 같은 파일로 보고 다시 읽지 않는다.
     /// 임시 이름으로 복사한 뒤 이름을 바꾸므로 중간에 실패해도 반쯤 복사된 사진 파일이 남지 않는다.
     public static func copy(_ source: URL, into folder: URL) throws -> PhotoCopyResult {
         let manager = FileManager.default
@@ -75,7 +76,12 @@ public enum PhotoCopier {
 
     private static func sameContents(_ first: URL, _ second: URL) throws -> Bool {
         guard let firstSize = size(of: first), firstSize == size(of: second) else { return false }
+        if let firstDate = modified(first), let secondDate = modified(second), firstDate == secondDate { return true }
         return try digest(first) == digest(second)
+    }
+
+    private static func modified(_ url: URL) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
     }
 
     private static func digest(_ url: URL) throws -> SHA256.Digest {
