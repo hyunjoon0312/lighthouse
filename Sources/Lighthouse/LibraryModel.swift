@@ -259,6 +259,8 @@ final class LibraryModel: ObservableObject {
     private let burstQueue = DispatchQueue(label: "com.rian.lighthouse.burst", qos: .utility)
     /// 이번 실행에서 분석한 원본 품질. 앱을 다시 열면 다시 분석한다.
     @Published private(set) var burstQualities: [UUID: PhotoQuality] = [:] { didSet { burstRecommendationCache = nil } }
+    /// 분석하려 했지만 읽지 못한 파일. 이 컷은 추천에서 빼고 표시도 바꾸지 않는다.
+    @Published private(set) var burstFailedIDs = Set<UUID>() { didSet { burstRecommendationCache = nil } }
     @Published private(set) var isAnalyzingBursts = false
     @Published private(set) var burstAnalysisProgress = 0.0
     @Published var burstMessage: String?
@@ -797,11 +799,12 @@ final class LibraryModel: ObservableObject {
         return index
     }
 
+    /// 모든 컷을 분석했거나 읽지 못한 묶음만 추천한다. 분석을 중간에 멈춘 묶음은 일부 컷만 보고 고르지 않는다.
     var burstRecommendations: [UUID: BurstRecommendation] {
         if let burstRecommendationCache { return burstRecommendationCache }
         var computed: [UUID: BurstRecommendation] = [:]
         if !burstQualities.isEmpty {
-            for group in burstIndex.groups {
+            for group in burstIndex.groups where isBurstAnalyzed(group) {
                 if let recommendation = BurstRanking.recommend(group, qualities: burstQualities) {
                     computed[group.id] = recommendation
                 }
@@ -809,6 +812,12 @@ final class LibraryModel: ObservableObject {
         }
         burstRecommendationCache = computed
         return computed
+    }
+
+    private func isBurstAnalyzed(_ group: BurstGroup) -> Bool {
+        group.shots.allSatisfy { shot in
+            shot.contains { burstQualities[$0] != nil || burstFailedIDs.contains($0) }
+        }
     }
 
     func burstBadge(for photo: PhotoAsset) -> BurstBadge? {
@@ -853,7 +862,12 @@ final class LibraryModel: ObservableObject {
                 let progress = Double(index + 1) / Double(targets.count)
                 DispatchQueue.main.async {
                     guard self.burstCancellation === cancellation else { return }
-                    if let quality { self.burstQualities[target.id] = quality }
+                    if let quality {
+                        self.burstQualities[target.id] = quality
+                        self.burstFailedIDs.remove(target.id)
+                    } else {
+                        self.burstFailedIDs.insert(target.id)
+                    }
                     self.burstAnalysisProgress = progress
                 }
             }
@@ -874,11 +888,13 @@ final class LibraryModel: ObservableObject {
     private func burstSummary(_ groups: [BurstGroup], failed: Int, cancelled: Bool) -> String {
         let recommendations = burstRecommendations
         let analyzed = groups.filter { recommendations[$0.id] != nil }
+        let unfinished = groups.filter { !isBurstAnalyzed($0) }.count
         let faceGroups = analyzed.filter { recommendations[$0.id]?.usedFaces == true }.count
         let noFaceModel = groups.flatMap(\.photoIDs).contains { burstQualities[$0].map { $0.faceQualities == nil } ?? false }
         return "연속 촬영 \(groups.count)묶음 중 \(analyzed.count)묶음 추천 완료" +
+            (unfinished > 0 ? " · 분석이 끝나지 않은 \(unfinished)묶음은 추천하지 않음" : "") +
             (faceGroups > 0 ? " · 얼굴 반영 \(faceGroups)묶음" : "") +
-            (failed > 0 ? " · 읽지 못한 컷 \(failed)장" : "") +
+            (failed > 0 ? " · 읽지 못한 컷 \(failed)장은 표시하지 않음" : "") +
             (noFaceModel ? " · 얼굴 분석을 쓸 수 없어 선명도만 반영한 컷이 있음" : "") +
             (cancelled ? " · 중지함" : "")
     }
@@ -908,7 +924,7 @@ final class LibraryModel: ObservableObject {
         var changes: [PhotoMarkChange] = []
         for group in visibleBurstGroups {
             guard let recommendation = recommendations[group.id] else { continue }
-            for (shotIndex, shot) in group.shots.enumerated() {
+            for (shotIndex, shot) in group.shots.enumerated() where recommendation.scores[shotIndex] != nil {
                 for id in shot where visible.contains(id) {
                     guard let photo = photo(withID: id), photo.flag == .none else { continue }
                     let before = PhotoMarks(rating: photo.rating, flag: photo.flag)
@@ -918,8 +934,12 @@ final class LibraryModel: ObservableObject {
                 }
             }
         }
+        let unfinished = visibleBurstGroups.filter { !isBurstAnalyzed($0) }.count
+        let skipped = unfinished > 0 ? " 분석이 끝나지 않은 \(unfinished)묶음은 건너뛰었습니다. ‘베스트 컷 분석’을 다시 누르면 남은 컷만 분석합니다." : ""
         guard !changes.isEmpty else {
-            burstMessage = recommendations.isEmpty ? "먼저 연속 촬영을 분석하세요." : "새로 표시할 사진이 없습니다. 이미 표시한 사진은 바꾸지 않습니다."
+            burstMessage = (recommendations.isEmpty && unfinished == 0 ? "먼저 연속 촬영을 분석하세요." :
+                            recommendations.isEmpty ? "추천할 수 있는 묶음이 없습니다." :
+                            "새로 표시할 사진이 없습니다. 이미 표시한 사진은 바꾸지 않습니다.") + skipped
             return
         }
         editHistory.recordMarks(changes)
@@ -930,7 +950,7 @@ final class LibraryModel: ObservableObject {
         scheduleSave()
         ensureSelectionVisible()
         let picks = changes.filter { $0.after.flag == .pick }.count
-        burstMessage = "추천 \(picks)장 선택 · \(changes.count - picks)장 제외로 표시했습니다. ⌘Z로 되돌릴 수 있습니다."
+        burstMessage = "추천 \(picks)장 선택 · \(changes.count - picks)장 제외로 표시했습니다. ⌘Z로 되돌릴 수 있습니다." + skipped
     }
 
     // MARK: 가상 사본
