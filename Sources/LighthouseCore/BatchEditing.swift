@@ -160,10 +160,38 @@ public struct PhotoEditChange: Equatable, Sendable {
     }
 }
 
+public struct PhotoMarks: Equatable, Sendable {
+    public var rating: Int
+    public var flag: PhotoFlag
+
+    public init(rating: Int, flag: PhotoFlag) {
+        self.rating = rating
+        self.flag = flag
+    }
+}
+
+public struct PhotoMarkChange: Equatable, Sendable {
+    public let id: UUID
+    public let before: PhotoMarks
+    public let after: PhotoMarks
+
+    public init(id: UUID, before: PhotoMarks, after: PhotoMarks) {
+        self.id = id
+        self.before = before
+        self.after = after
+    }
+}
+
+/// 실행 취소 한 단계. 보정값 변경과 별점·플래그 변경을 같은 순서로 되돌린다.
+public enum HistoryStep: Equatable, Sendable {
+    case edits([PhotoEditChange])
+    case marks([PhotoMarkChange])
+}
+
 public struct EditHistory: Sendable {
     private let limit: Int
-    private var undoStack: [[PhotoEditChange]] = []
-    private var redoStack: [[PhotoEditChange]] = []
+    private var undoStack: [HistoryStep] = []
+    private var redoStack: [HistoryStep] = []
     private var pendingContinuous: PhotoEditChange?
 
     public init(limit: Int = 100) {
@@ -189,36 +217,43 @@ public struct EditHistory: Sendable {
     public mutating func commitContinuous() {
         guard let pending = pendingContinuous else { return }
         pendingContinuous = nil
-        appendToUndo([pending])
+        append(.edits([pending].filter { $0.before != $0.after }))
     }
 
     public mutating func record(_ changes: [PhotoEditChange]) {
         commitContinuous()
-        appendToUndo(changes)
+        append(.edits(changes.filter { $0.before != $0.after }))
     }
 
-    private mutating func appendToUndo(_ changes: [PhotoEditChange]) {
-        let effective = changes.filter { $0.before != $0.after }
-        guard !effective.isEmpty else { return }
+    public mutating func recordMarks(_ changes: [PhotoMarkChange]) {
+        commitContinuous()
+        append(.marks(changes.filter { $0.before != $0.after }))
+    }
+
+    private mutating func append(_ step: HistoryStep) {
+        switch step {
+        case .edits(let changes): guard !changes.isEmpty else { return }
+        case .marks(let changes): guard !changes.isEmpty else { return }
+        }
         redoStack.removeAll()
         guard limit > 0 else { return }
-        undoStack.append(effective)
+        undoStack.append(step)
         if undoStack.count > limit {
             undoStack.removeFirst(undoStack.count - limit)
         }
     }
 
-    public mutating func undo() -> [PhotoEditChange]? {
+    public mutating func undo() -> HistoryStep? {
         commitContinuous()
-        guard let changes = undoStack.popLast() else { return nil }
-        redoStack.append(changes)
-        return changes
+        guard let step = undoStack.popLast() else { return nil }
+        redoStack.append(step)
+        return step
     }
 
-    public mutating func redo() -> [PhotoEditChange]? {
+    public mutating func redo() -> HistoryStep? {
         commitContinuous()
-        guard let changes = redoStack.popLast() else { return nil }
-        undoStack.append(changes)
-        return changes
+        guard let step = redoStack.popLast() else { return nil }
+        undoStack.append(step)
+        return step
     }
 }

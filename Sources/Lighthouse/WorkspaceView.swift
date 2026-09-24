@@ -75,9 +75,9 @@ struct WorkspaceView: View {
             .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 30)
             sectionLabel("라이브러리")
             sidebarRow("전체 사진", icon: "square.grid.2x2", count: model.photos.count, selected: model.filter == .all) { model.filter = .all }
-            sidebarRow("선택됨", icon: "checkmark.circle", count: model.photos.filter { $0.flag == .pick }.count, selected: model.filter == .picks) { model.filter = .picks }
-            sidebarRow("제외됨", icon: "xmark.circle", count: model.photos.filter { $0.flag == .reject }.count, selected: model.filter == .rejects) { model.filter = .rejects }
-            sidebarRow("보정됨", icon: "slider.horizontal.3", count: model.photos.filter { $0.edits.isModified }.count, selected: model.filter == .edited) { model.filter = .edited }
+            sidebarRow("선택됨", icon: "checkmark.circle", count: model.counts.picks, selected: model.filter == .picks) { model.filter = .picks }
+            sidebarRow("제외됨", icon: "xmark.circle", count: model.counts.rejects, selected: model.filter == .rejects) { model.filter = .rejects }
+            sidebarRow("보정됨", icon: "slider.horizontal.3", count: model.counts.edited, selected: model.filter == .edited) { model.filter = .edited }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     HStack {
@@ -97,7 +97,7 @@ struct WorkspaceView: View {
                     ForEach(model.photoFolders) { folder in
                         HStack(spacing: 0) {
                             sidebarRow(folder.name, icon: "folder.fill",
-                                       count: folder.photoIDs.intersection(Set(model.photos.map(\.id))).count,
+                                       count: folder.photoIDs.intersection(model.counts.ids).count,
                                        selected: model.filter == .collection(folder.id)) {
                                 model.filter = .collection(folder.id)
                             }
@@ -418,6 +418,12 @@ struct WorkspaceView: View {
     }
 }
 
+@MainActor
+private func tileClicked(_ model: LibraryModel, _ photo: PhotoAsset) {
+    let event = NSApp.currentEvent
+    model.handleTileClick(photo, clickCount: event?.clickCount ?? 1, modifiers: event?.modifierFlags ?? [])
+}
+
 private struct PhotoTile: View {
     @EnvironmentObject private var model: LibraryModel
     let photo: PhotoAsset
@@ -454,12 +460,7 @@ private struct PhotoTile: View {
             .background(selected ? Palette.accent.opacity(0.14) : Palette.panel, in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(active ? Palette.accent : selected ? Palette.accent.opacity(0.48) : .clear, lineWidth: active ? 2 : 1.5))
             .contentShape(RoundedRectangle(cornerRadius: 10))
-            .gesture(TapGesture(count: 2).exclusively(before: TapGesture(count: 1)).onEnded { result in
-                switch result {
-                case .first: model.focusPhoto(photo); model.setMode(.edit)
-                case .second: model.selectFromClick(photo)
-                }
-            })
+            .onTapGesture { tileClicked(model, photo) }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(photo.filename), 별점 \(photo.rating), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")")
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
@@ -502,12 +503,7 @@ private struct FilmstripTile: View {
             .clipShape(RoundedRectangle(cornerRadius: 5))
             .overlay(RoundedRectangle(cornerRadius: 5).stroke(active ? Palette.accent : selected ? Palette.accent.opacity(0.5) : .clear, lineWidth: active ? 2 : 1.5))
             .contentShape(RoundedRectangle(cornerRadius: 5))
-            .gesture(TapGesture(count: 2).exclusively(before: TapGesture(count: 1)).onEnded { result in
-                switch result {
-                case .first: model.focusPhoto(photo); model.setMode(.edit)
-                case .second: model.selectFromClick(photo)
-                }
-            })
+            .onTapGesture { tileClicked(model, photo) }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(photo.filename), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")")
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)

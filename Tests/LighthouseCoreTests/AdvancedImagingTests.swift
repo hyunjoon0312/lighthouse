@@ -196,6 +196,8 @@ final class AdvancedImagingTests: XCTestCase {
         let smallThumbnail = try pipeline.thumbnail(for: small, maxPixel: 360)
         XCTAssertEqual(smallThumbnail.width, 40)
         XCTAssertEqual(smallThumbnail.height, 20)
+        XCTAssertNil(pipeline.embeddedPreview(for: url, maxPixel: 2200))
+        XCTAssertNil(pipeline.embeddedPreview(for: small, maxPixel: 2200))
     }
 
     func testPreparedJPEGKeepsCaptureMetadataAndOptionalLocation() throws {
@@ -243,6 +245,58 @@ final class AdvancedImagingTests: XCTestCase {
             XCTAssertEqual((tiff[kCGImagePropertyTIFFOrientation] as? NSNumber)?.intValue ?? 1, 1)
             XCTAssertEqual(properties[kCGImagePropertyGPSDictionary] != nil, includeLocation)
         }
+    }
+
+    func testDevelopmentCacheMatchesUncachedRenderAndFollowsFileChanges() throws {
+        let input = try temporaryPNG(width: 96, height: 64) { x, y in (UInt8(x * 2), UInt8(y * 3), 90, 255) }
+        defer { try? FileManager.default.removeItem(at: input) }
+        let cached = ImagePipeline(cachesDevelopment: true)
+        let plain = ImagePipeline()
+        for contrast in [1.0, 1.2, 0.8] {
+            let edits = EditSettings(exposure: 0.3, contrast: contrast, saturation: 1.1)
+            XCTAssertEqual(try rgbaBytes(cached.render(url: input, edits: edits, maxPixel: 48)),
+                           try rgbaBytes(plain.render(url: input, edits: edits, maxPixel: 48)))
+        }
+        try pngData(makeImage(width: 96, height: 64) { _, _ in (200, 20, 20, 255) }).write(to: input)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(5)],
+                                              ofItemAtPath: input.path)
+        let changed = try cached.render(url: input, edits: .neutral, maxPixel: nil)
+        XCTAssertEqual(try rgbaBytes(changed), try rgbaBytes(plain.render(url: input, edits: .neutral, maxPixel: nil)))
+        XCTAssertGreaterThan(try rgba(changed, x: 10, y: 10).0, 150)
+    }
+
+    func testThumbnailStoreKeepsOneVariantPerPhotoAndTracksEdits() throws {
+        let input = try temporaryPNG(width: 40, height: 30) { _, _ in (50, 60, 70, 255) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            try? FileManager.default.removeItem(at: input)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = ThumbnailStore(directory: directory)
+        var photo = PhotoAsset(url: input)
+        photo.edits.exposure = 0.5
+        let first = try XCTUnwrap(ThumbnailStore.key(for: photo))
+        XCTAssertEqual(ThumbnailStore.key(for: photo), first)
+        XCTAssertNil(store.load(photoID: photo.id, key: first))
+        let image = try makeImage(width: 20, height: 15) { _, _ in (200, 100, 50, 255) }
+        store.store(image, photoID: photo.id, key: first)
+        let loaded = try XCTUnwrap(store.load(photoID: photo.id, key: first))
+        XCTAssertEqual(loaded.width, 20)
+        XCTAssertEqual(loaded.height, 15)
+
+        photo.edits.exposure = 0.6
+        let second = try XCTUnwrap(ThumbnailStore.key(for: photo))
+        XCTAssertNotEqual(first, second)
+        store.store(image, photoID: photo.id, key: second)
+        XCTAssertNil(store.load(photoID: photo.id, key: first))
+        XCTAssertNotNil(store.load(photoID: photo.id, key: second))
+        let folder = directory.appendingPathComponent(photo.id.uuidString)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), [second + ".jpg"])
+
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(10)],
+                                              ofItemAtPath: input.path)
+        XCTAssertNotEqual(ThumbnailStore.key(for: photo), second)
+        XCTAssertNil(ThumbnailStore.key(for: PhotoAsset(url: directory.appendingPathComponent("missing.png"))))
     }
 
     func testStraightenedImageHasOpaqueSafeCornersAndFinalScale() throws {

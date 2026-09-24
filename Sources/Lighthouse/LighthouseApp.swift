@@ -35,10 +35,10 @@ struct LighthouseApp: App {
                     .disabled(library.selection == nil || library.isExporting || library.hasModalPresentation)
             }
             CommandGroup(replacing: .undoRedo) {
-                Button("보정 실행 취소") { library.undo() }
+                Button("실행 취소") { library.undo() }
                     .keyboardShortcut("z", modifiers: .command)
                     .disabled(!library.canUndo || library.hasModalPresentation)
-                Button("보정 다시 실행") { library.redo() }
+                Button("다시 실행") { library.redo() }
                     .keyboardShortcut("z", modifiers: [.command, .shift])
                     .disabled(!library.canRedo || library.hasModalPresentation)
             }

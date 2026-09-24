@@ -65,7 +65,14 @@ struct ExportSheet: View {
                 Button("폴더 선택…") { chooseDirectory() }
                     .disabled(model.isExporting).accessibilityLabel("JPEG 저장 폴더 선택")
             }
-            if model.isExporting { ProgressView(value: model.operationProgress) }
+            if model.isExporting {
+                HStack {
+                    ProgressView(value: model.operationProgress)
+                    Button(model.isCancellingExport ? "중지하는 중…" : "중지") { model.cancelExport() }
+                        .disabled(model.isCancellingExport)
+                        .accessibilityLabel("JPEG 내보내기 중지")
+                }
+            }
             if let report = model.exportReport { Text(report).font(.caption).textSelection(.enabled) }
             HStack {
                 Spacer()

@@ -64,17 +64,38 @@ private final class ThumbnailEntry: NSObject {
     }
 }
 
+struct LibraryCounts {
+    var ids = Set<UUID>()
+    var picks = 0
+    var rejects = 0
+    var edited = 0
+}
+
+private final class CancellationFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock(); cancelled = true; lock.unlock()
+    }
+}
+
 @MainActor
 final class LibraryModel: ObservableObject {
-    @Published var photos: [PhotoAsset] = []
+    @Published var photos: [PhotoAsset] = [] { didSet { invalidateLibraryCaches() } }
     @Published var photoSelection = PhotoSelectionState()
-    @Published var photoFolders: [PhotoFolder] = []
+    @Published var photoFolders: [PhotoFolder] = [] { didSet { visibleCache = nil } }
     @Published var foldersLoaded = false
     @Published var folderLoadError: String?
     @Published var folderSheetRequest: PhotoFolderSheetRequest?
-    @Published var filter: LibraryFilter = .all
-    @Published var search = ""
-    @Published var minimumRating = 0
+    @Published var filter: LibraryFilter = .all { didSet { visibleCache = nil } }
+    @Published var search = "" { didSet { visibleCache = nil } }
+    @Published var minimumRating = 0 { didSet { visibleCache = nil } }
     @Published var mode: WorkspaceMode = .grid
     @Published var isOriginal = false
     @Published var actualSize = false
@@ -90,6 +111,7 @@ final class LibraryModel: ObservableObject {
     @Published var operationProgress: Double = 0
     @Published var isImporting = false
     @Published var isExporting = false
+    @Published var isCancellingExport = false
     @Published var showExport = false
     @Published var showBatchEdit = false
     @Published var referenceMatchSource: PhotoAsset?
@@ -138,11 +160,15 @@ final class LibraryModel: ObservableObject {
     }
 
     private let pipeline = ImagePipeline()
+    private let previewPipeline = ImagePipeline(cachesDevelopment: true)
+    private let thumbnailStore = ThumbnailStore()
     private let lutStore = LUTStore()
     private let catalog = CatalogStore(url: CatalogStore.defaultURL)
     private let folderStore = PhotoFolderStore(url: PhotoFolderStore.defaultURL)
     private let previewQueue = DispatchQueue(label: "com.rian.lighthouse.preview", qos: .userInitiated)
     private let thumbnailQueue = DispatchQueue(label: "com.rian.lighthouse.thumbnails", qos: .utility)
+    private let placeholderQueue = DispatchQueue(label: "com.rian.lighthouse.placeholder", qos: .userInitiated)
+    private let prefetchQueue = DispatchQueue(label: "com.rian.lighthouse.prefetch", qos: .utility)
     private let batchQueue = DispatchQueue(label: "com.rian.lighthouse.batch", qos: .userInitiated)
     private let maskQueue = DispatchQueue(label: "com.rian.lighthouse.mask", qos: .userInitiated)
     private let autoMaskQueue = DispatchQueue(label: "com.rian.lighthouse.automask", qos: .userInitiated)
@@ -155,6 +181,20 @@ final class LibraryModel: ObservableObject {
     private var renderedSource: String?
     private var pinnedSource: String?
     private var retouchGeneration = 0
+    private var renderJob: DispatchWorkItem?
+    private var displayedToken = 0
+    private var lastRenderDispatch = Date.distantPast
+    private var recentRenders: [(key: String, edits: EditSettings, image: NSImage)] = []
+    private var prefetching = Set<String>()
+    private var moveDirection = 1
+    private var pendingCollapse: DispatchWorkItem?
+    private var exportCancellation: CancellationFlag?
+    private var visibleCache: [PhotoAsset]?
+    private var indexCache: [UUID: Int]?
+    private var countsCache: LibraryCounts?
+    private var foldersCache: [String]?
+    private static let renderInterval = 0.1
+    private static let recentRenderLimit = 6
     private var maskGeneration = 0
     private var selectionGeneration = 0
     private var autoMaskGeneration = 0
@@ -177,7 +217,7 @@ final class LibraryModel: ObservableObject {
     var selectedID: UUID? { photoSelection.activeID }
     var selectedPhotoIDs: Set<UUID> { photoSelection.selectedIDs }
     var selectedPhotos: [PhotoAsset] { visiblePhotos.filter { selectedPhotoIDs.contains($0.id) } }
-    var selection: PhotoAsset? { photos.first { $0.id == selectedID } }
+    var selection: PhotoAsset? { selectedID.flatMap(photo(withID:)) }
     var pinned: PhotoAsset? { photos.first { $0.id == pinnedID } }
     var canUndo: Bool { editHistory.canUndo }
     var canRedo: Bool { editHistory.canRedo }
@@ -199,7 +239,38 @@ final class LibraryModel: ObservableObject {
     }
 
     var folders: [String] {
-        Array(Set(photos.map { $0.url.deletingLastPathComponent().path })).sorted()
+        if let foldersCache { return foldersCache }
+        let computed = Array(Set(photos.map { ($0.path as NSString).deletingLastPathComponent })).sorted()
+        foldersCache = computed
+        return computed
+    }
+
+    /// 화면을 다시 그릴 때마다 여러 번 읽히므로 사진 목록이 바뀔 때만 다시 계산한다.
+    var counts: LibraryCounts {
+        if let countsCache { return countsCache }
+        var computed = LibraryCounts()
+        for photo in photos {
+            computed.ids.insert(photo.id)
+            if photo.flag == .pick { computed.picks += 1 }
+            if photo.flag == .reject { computed.rejects += 1 }
+            if photo.edits.isModified { computed.edited += 1 }
+        }
+        countsCache = computed
+        return computed
+    }
+
+    func photo(withID id: UUID) -> PhotoAsset? {
+        if indexCache == nil {
+            indexCache = Dictionary(photos.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        }
+        return indexCache?[id].map { photos[$0] }
+    }
+
+    private func invalidateLibraryCaches() {
+        visibleCache = nil
+        indexCache = nil
+        countsCache = nil
+        foldersCache = nil
     }
 
     func presentCreateFolder() {
@@ -284,19 +355,26 @@ final class LibraryModel: ObservableObject {
     }
 
     var visiblePhotos: [PhotoAsset] {
-        photos.filter { photo in
+        if let visibleCache { return visibleCache }
+        var members: Set<UUID>?
+        if case .collection(let id) = filter {
+            members = photoFolders.first(where: { $0.id == id })?.photoIDs ?? []
+        }
+        let computed = photos.filter { photo in
             let matchesFilter: Bool
             switch filter {
             case .all: matchesFilter = true
             case .picks: matchesFilter = photo.flag == .pick
             case .rejects: matchesFilter = photo.flag == .reject
             case .edited: matchesFilter = photo.edits.isModified
-            case .folder(let path): matchesFilter = photo.url.deletingLastPathComponent().path == path
-            case .collection(let id): matchesFilter = photoFolders.first(where: { $0.id == id })?.photoIDs.contains(photo.id) ?? false
+            case .folder(let path): matchesFilter = (photo.path as NSString).deletingLastPathComponent == path
+            case .collection: matchesFilter = members?.contains(photo.id) ?? false
             }
             return matchesFilter && photo.rating >= minimumRating &&
                 (search.isEmpty || photo.filename.localizedCaseInsensitiveContains(search))
         }
+        visibleCache = computed
+        return computed
     }
 
     func start() {
@@ -336,9 +414,28 @@ final class LibraryModel: ObservableObject {
         selectionDidChange(previousActive: previous)
     }
 
-    func selectFromClick(_ photo: PhotoAsset) {
-        let flags = NSApp.currentEvent?.modifierFlags ?? []
-        let mode: PhotoSelectionMode = flags.contains(.shift) ? .range : flags.contains(.command) ? .toggle : .single
+    /// 한 번 클릭은 바로 선택한다. 여러 장 선택 중 이미 선택된 사진을 누른 경우만
+    /// 더블클릭(그룹을 유지한 채 열기)일 수 있어 더블클릭 판정 시간 뒤에 단일 선택으로 바꾼다.
+    func handleTileClick(_ photo: PhotoAsset, clickCount: Int, modifiers: NSEvent.ModifierFlags) {
+        pendingCollapse?.cancel()
+        pendingCollapse = nil
+        if clickCount >= 2 {
+            focusPhoto(photo)
+            setMode(.edit)
+            return
+        }
+        let mode: PhotoSelectionMode = modifiers.contains(.shift) ? .range
+            : modifiers.contains(.command) ? .toggle : .single
+        if mode == .single, selectedPhotoIDs.count > 1, selectedPhotoIDs.contains(photo.id) {
+            let group = selectedPhotoIDs
+            let collapse = DispatchWorkItem { [weak self] in
+                guard let self, self.selectedPhotoIDs == group else { return }
+                self.select(photo)
+            }
+            pendingCollapse = collapse
+            DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: collapse)
+            return
+        }
         let previous = selectedID
         photoSelection.select(photo.id, in: visiblePhotos.map(\.id), mode: mode)
         selectionDidChange(previousActive: previous)
@@ -394,6 +491,7 @@ final class LibraryModel: ObservableObject {
         guard !visible.isEmpty else { return }
         let index = visible.firstIndex(where: { $0.id == selectedID }) ?? (direction > 0 ? -1 : visible.count)
         let next = min(max(index + direction, 0), visible.count - 1)
+        if direction != 0 { moveDirection = direction > 0 ? 1 : -1 }
         focusPhoto(visible[next])
     }
 
@@ -454,15 +552,25 @@ final class LibraryModel: ObservableObject {
     func undo() {
         cancelDraft()
         cancelRetouchDraft()
-        guard let changes = editHistory.undo() else { return }
-        applyEditChanges(changes, useAfter: false, record: false)
+        guard let step = editHistory.undo() else { return }
+        apply(step, useAfter: false)
     }
 
     func redo() {
         cancelDraft()
         cancelRetouchDraft()
-        guard let changes = editHistory.redo() else { return }
-        applyEditChanges(changes, useAfter: true, record: false)
+        guard let step = editHistory.redo() else { return }
+        apply(step, useAfter: true)
+    }
+
+    private func apply(_ step: HistoryStep, useAfter: Bool) {
+        switch step {
+        case .edits(let changes):
+            applyEditChanges(changes, useAfter: useAfter, record: false)
+        case .marks(let changes):
+            for change in changes { applyMarks(useAfter ? change.after : change.before, to: change.id) }
+            objectWillChange.send()
+        }
     }
 
     private func applyEditChanges(_ changes: [PhotoEditChange], useAfter: Bool,
@@ -521,12 +629,29 @@ final class LibraryModel: ObservableObject {
 
     func setRating(_ rating: Int) {
         guard let id = selectedID else { return }
-        updatePhoto(id, { $0.rating = rating })
+        changeMarks(of: id) { $0.rating = rating }
     }
 
     func setFlag(_ flag: PhotoFlag) {
         guard let id = selectedID else { return }
-        updatePhoto(id, { $0.flag = flag })
+        changeMarks(of: id) { $0.flag = flag }
+    }
+
+    private func changeMarks(of id: UUID, _ change: (inout PhotoMarks) -> Void) {
+        guard catalogLoaded, loadError == nil, let photo = photo(withID: id) else { return }
+        let before = PhotoMarks(rating: photo.rating, flag: photo.flag)
+        var after = before
+        change(&after)
+        guard after != before else { return }
+        editHistory.recordMarks([PhotoMarkChange(id: id, before: before, after: after)])
+        applyMarks(after, to: id)
+    }
+
+    private func applyMarks(_ marks: PhotoMarks, to id: UUID) {
+        updatePhoto(id) {
+            $0.rating = marks.rating
+            $0.flag = marks.flag
+        }
     }
 
     func copyEdits() { clipboard = selection?.edits }
@@ -968,8 +1093,10 @@ final class LibraryModel: ObservableObject {
         let token = retouchGeneration
         let selectionToken = selectionGeneration
         isFindingHealSource = true
-        retouchQueue.async { [pipeline] in
-            let result = Result { try pipeline.healingSourceOffset(url: photo.url, edits: photo.edits, stroke: stroke) }
+        retouchQueue.async { [previewPipeline] in
+            let result = Result {
+                try previewPipeline.healingSourceOffset(url: photo.url, edits: photo.edits, stroke: stroke)
+            }
             DispatchQueue.main.async {
                 guard token == self.retouchGeneration else { return }
                 self.isFindingHealSource = false
@@ -1077,6 +1204,7 @@ final class LibraryModel: ObservableObject {
     }
 
     /// 보정한 사진은 보정 결과로 썸네일을 만든다. 편집 화면의 사진은 미리보기 렌더가 썸네일을 갱신한다.
+    /// 보정 썸네일은 디스크에도 보관해 다음 실행 때 RAW를 다시 현상하지 않는다.
     func requestThumbnail(for photo: PhotoAsset) {
         let wanted: EditSettings? = photo.edits.isModified ? photo.edits : nil
         let entry = thumbnailCache.object(forKey: photo.path as NSString)
@@ -1085,13 +1213,21 @@ final class LibraryModel: ObservableObject {
         guard !loadingThumbnails.contains(photo.path) else { return }
         loadingThumbnails.insert(photo.path)
         let size = Self.thumbnailPixels
-        thumbnailQueue.async { [pipeline] in
-            let image = wanted.flatMap { try? pipeline.render(url: photo.url, edits: $0, maxPixel: size) }
-                ?? (try? pipeline.thumbnail(for: photo.url, maxPixel: size))
+        thumbnailQueue.async { [pipeline, thumbnailStore] in
+            var image: CGImage?
+            if let wanted {
+                let key = ThumbnailStore.key(for: photo)
+                image = key.flatMap { thumbnailStore.load(photoID: photo.id, key: $0) }
+                if image == nil, let rendered = try? pipeline.render(url: photo.url, edits: wanted, maxPixel: size) {
+                    image = rendered
+                    if let key { thumbnailStore.store(rendered, photoID: photo.id, key: key) }
+                }
+            }
+            image = image ?? (try? pipeline.thumbnail(for: photo.url, maxPixel: size))
             DispatchQueue.main.async {
                 self.loadingThumbnails.remove(photo.path)
                 if let image { self.storeThumbnail(image, path: photo.path, edits: wanted) }
-                if let latest = self.photos.first(where: { $0.id == photo.id }),
+                if let latest = self.photo(withID: photo.id),
                    (latest.edits.isModified ? latest.edits : nil) != wanted {
                     self.requestThumbnail(for: latest)
                 }
@@ -1118,8 +1254,11 @@ final class LibraryModel: ObservableObject {
         return context.makeImage()
     }
 
+    /// 슬라이더를 움직이는 동안에도 `renderInterval`마다 그린다. 같은 사진의 중간 결과는 순서대로 보여 주고,
+    /// 다른 사진이나 원본·100% 보기로 바뀐 뒤 도착한 결과는 버린다.
     func requestRender(debounce: Bool = false) {
         renderDelay?.cancel()
+        renderJob?.cancel()
         generation += 1
         let token = generation
         let source = "\(selectedID?.uuidString ?? "none"):\(isOriginal):\(actualSize)"
@@ -1127,38 +1266,76 @@ final class LibraryModel: ObservableObject {
             rendered = nil
             imageError = nil
             renderedSource = source
+            displayedToken = 0
         }
         if mode != .compare { pinnedImage = nil; pinnedError = nil; pinnedSource = nil }
         requestMask()
         guard mode != .grid, let photo = selection else { rendering = false; return }
-        rendering = true
         let edits = isOriginal ? EditSettings.neutral : photo.edits
         let maxPixel: Int? = actualSize ? nil : 2200
         let compare = mode == .compare ? pinned : nil
         let pinnedKey = compare.map { "\($0.id):\(maxPixel ?? 0)" }
         let reference = pinnedKey != pinnedSource ? compare : nil
-        let thumbnailSize = !isOriginal && edits.isModified ? Self.thumbnailPixels : nil
-        let job = DispatchWorkItem { [pipeline] in
-            let current = Result { try pipeline.render(url: photo.url, edits: edits, maxPixel: maxPixel) }
+        let recentKey = actualSize ? nil : "\(photo.id):\(isOriginal)"
+        let recent = recentKey.flatMap { key in recentRenders.last { $0.key == key } }
+        let renderCurrent = recent?.edits != edits
+        if let recent, let recentKey, !renderCurrent {
+            rendered = recent.image
+            imageError = nil
+            displayedToken = token
+            rememberRender(recent.image, key: recentKey, edits: edits)
+            if reference == nil {
+                rendering = false
+                prefetchNeighbor()
+                return
+            }
+        } else if rendered == nil {
+            if let recent {
+                rendered = recent.image
+            } else if photo.isRAW, !actualSize, isOriginal || !photo.edits.isModified {
+                requestPlaceholder(for: photo, source: source)
+            }
+        }
+        rendering = true
+        let thumbnailSize = renderCurrent && !isOriginal && edits.isModified ? Self.thumbnailPixels : nil
+        let job = DispatchWorkItem { [previewPipeline, pipeline] in
+            let current = renderCurrent
+                ? Result { try previewPipeline.render(url: photo.url, edits: edits, maxPixel: maxPixel) } : nil
             let thumbnail = thumbnailSize.flatMap { size in
-                (try? current.get()).flatMap { Self.downscaled($0, maxPixel: size) }
+                (try? current?.get()).flatMap { Self.downscaled($0, maxPixel: size) }
             }
             let referenceResult = reference.map { fixed in
                 Result { try pipeline.render(url: fixed.url, edits: .neutral, maxPixel: maxPixel) }
             }
             DispatchQueue.main.async {
-                guard token == self.generation else { return }
+                guard token == self.generation else {
+                    guard source == self.renderedSource, token > self.displayedToken,
+                          case .success(let cg)? = current else { return }
+                    self.displayedToken = token
+                    self.rendered = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                    return
+                }
                 self.rendering = false
                 switch current {
-                case .success(let cg):
+                case .success(let cg)?:
                     self.imageError = nil
-                    self.rendered = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
-                case .failure(let error):
+                    let image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                    self.rendered = image
+                    self.displayedToken = token
+                    if let recentKey { self.rememberRender(image, key: recentKey, edits: edits) }
+                case .failure(let error)?:
                     self.rendered = nil
                     self.imageError = error.localizedDescription
+                case nil:
+                    break
                 }
-                if let thumbnail, self.photos.first(where: { $0.id == photo.id })?.edits == edits {
+                if let thumbnail, let latest = self.photo(withID: photo.id), latest.edits == edits {
                     self.storeThumbnail(thumbnail, path: photo.path, edits: edits)
+                    self.thumbnailQueue.async { [thumbnailStore = self.thumbnailStore] in
+                        if let key = ThumbnailStore.key(for: latest) {
+                            thumbnailStore.store(thumbnail, photoID: latest.id, key: key)
+                        }
+                    }
                 }
                 if let referenceResult {
                     switch referenceResult {
@@ -1171,12 +1348,66 @@ final class LibraryModel: ObservableObject {
                     }
                     self.pinnedSource = pinnedKey
                 }
+                self.prefetchNeighbor()
             }
         }
-        renderDelay = job
-        DispatchQueue.main.asyncAfter(deadline: .now() + (debounce ? 0.22 : 0), execute: DispatchWorkItem {
+        renderJob = job
+        let delay = debounce ? max(0, Self.renderInterval - Date().timeIntervalSince(lastRenderDispatch)) : 0
+        let dispatch = DispatchWorkItem {
+            self.lastRenderDispatch = Date()
             self.previewQueue.async(execute: job)
-        })
+        }
+        renderDelay = dispatch
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: dispatch)
+    }
+
+    private func rememberRender(_ image: NSImage, key: String, edits: EditSettings) {
+        recentRenders.removeAll { $0.key == key }
+        recentRenders.append((key, edits, image))
+        if recentRenders.count > Self.recentRenderLimit {
+            recentRenders.removeFirst(recentRenders.count - Self.recentRenderLimit)
+        }
+    }
+
+    /// RAW 안의 카메라 미리보기를 현상이 끝날 때까지 먼저 보여 준다. 보정하지 않은 사진에만 쓴다.
+    private func requestPlaceholder(for photo: PhotoAsset, source: String) {
+        placeholderQueue.async { [pipeline] in
+            let image = pipeline.embeddedPreview(for: photo.url, maxPixel: 2200)
+            DispatchQueue.main.async {
+                guard let image, self.renderedSource == source, self.rendered == nil, self.rendering else { return }
+                self.rendered = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+            }
+        }
+    }
+
+    /// 방금 이동한 방향의 다음 사진을 미리 현상해 두면 넘기는 즉시 보인다.
+    private func prefetchNeighbor() {
+        guard mode != .grid, !actualSize, let current = selectedID else { return }
+        let visible = visiblePhotos
+        guard let index = visible.firstIndex(where: { $0.id == current }),
+              visible.indices.contains(index + moveDirection) else { return }
+        let photo = visible[index + moveDirection]
+        let originalView = isOriginal
+        let edits = originalView ? EditSettings.neutral : photo.edits
+        let key = "\(photo.id):\(originalView)"
+        guard !prefetching.contains(key), !recentRenders.contains(where: { $0.key == key && $0.edits == edits }) else {
+            return
+        }
+        prefetching.insert(key)
+        prefetchQueue.async { [pipeline] in
+            let cg = try? pipeline.render(url: photo.url, edits: edits, maxPixel: 2200)
+            DispatchQueue.main.async {
+                self.prefetching.remove(key)
+                guard let cg, let latest = self.photo(withID: photo.id),
+                      (originalView ? EditSettings.neutral : latest.edits) == edits else { return }
+                let image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                self.rememberRender(image, key: key, edits: edits)
+                if self.renderedSource == "\(photo.id):\(originalView):false", self.displayedToken == 0,
+                   self.rendering {
+                    self.rendered = image
+                }
+            }
+        }
     }
 
     func presentImport() {
@@ -1249,12 +1480,20 @@ final class LibraryModel: ObservableObject {
         let targets = exportTargets(for: scope)
         guard !targets.isEmpty else { return }
         isExporting = true
+        isCancellingExport = false
         operationProgress = 0
         exportReport = nil
+        let cancellation = CancellationFlag()
+        exportCancellation = cancellation
         batchQueue.async { [pipeline] in
             var successes = 0
             var failures: [String] = []
+            var skipped = 0
             for (index, photo) in targets.enumerated() {
+                if cancellation.isCancelled {
+                    skipped = targets.count - index
+                    break
+                }
                 do {
                     if let prepared, prepared.photoID == photo.id, prepared.edits == photo.edits,
                        prepared.maxPixel == maxPixel, prepared.quality == quality,
@@ -1273,8 +1512,19 @@ final class LibraryModel: ObservableObject {
             }
             DispatchQueue.main.async {
                 self.isExporting = false
-                self.exportReport = "\(successes)장 내보냄 · 실패 \(failures.count)장" + (failures.isEmpty ? "" : "\n" + failures.prefix(8).joined(separator: "\n"))
+                self.isCancellingExport = false
+                self.exportCancellation = nil
+                self.exportReport = "\(successes)장 내보냄 · 실패 \(failures.count)장" +
+                    (skipped > 0 ? " · 중지해서 \(skipped)장 건너뜀" : "") +
+                    (failures.isEmpty ? "" : "\n" + failures.prefix(8).joined(separator: "\n"))
             }
         }
+    }
+
+    /// 지금 처리 중인 한 장은 끝까지 저장하고 나머지를 건너뛴다.
+    func cancelExport() {
+        guard isExporting else { return }
+        exportCancellation?.cancel()
+        isCancellingExport = true
     }
 }

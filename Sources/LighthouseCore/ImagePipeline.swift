@@ -50,10 +50,16 @@ public final class ImagePipeline: @unchecked Sendable {
     let context: CIContext
     let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
     private let lutStore: LUTStore
+    private let cachesDevelopment: Bool
+    private let developmentLock = NSLock()
+    private var developedSources: [(key: String, image: CIImage)] = []
 
-    public init(lutDirectory: URL = LUTStore.defaultDirectory) {
-        context = CIContext(options: [.cacheIntermediates: false])
+    /// `cachesDevelopment`는 편집 미리보기용이다. 최근 현상 결과(최대 2장)와 중간 계산을 재사용해
+    /// RAW 현상 값(노출·색온도·틴트)이 같은 동안 다른 슬라이더를 다시 현상하지 않고 그린다.
+    public init(lutDirectory: URL = LUTStore.defaultDirectory, cachesDevelopment: Bool = false) {
+        context = CIContext(options: [.cacheIntermediates: cachesDevelopment])
         lutStore = LUTStore(directory: lutDirectory)
+        self.cachesDevelopment = cachesDevelopment
     }
 
     public func metadata(for url: URL) throws -> PhotoMetadata {
@@ -104,6 +110,17 @@ public final class ImagePipeline: @unchecked Sendable {
             return embedded
         }
         guard let image = thumbnail(fromImageAlways: true) else { throw ImagePipelineError.unreadable(url) }
+        return image
+    }
+
+    /// RAW 파일에 든 카메라 미리보기만 읽는다. RAW가 아니거나 미리보기가 1024px보다 작거나 비율이 다르면 nil이다.
+    public func embeddedPreview(for url: URL, maxPixel: Int) -> CGImage? {
+        guard Self.isRAW(url), let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixel)
+              ] as CFDictionary),
+              Self.embeddedThumbnail(image, isUsableFor: source, maxPixel: min(maxPixel, 1024)) else { return nil }
         return image
     }
 
@@ -177,8 +194,31 @@ public final class ImagePipeline: @unchecked Sendable {
                                                         context: context, colorSpace: colorSpace)
     }
 
-    private func developed(url: URL, edits: EditSettings) throws -> CIImage {
-        var image: CIImage
+    private func developedSource(url: URL, edits: EditSettings) throws -> CIImage {
+        guard cachesDevelopment else { return try makeDevelopedSource(url: url, edits: edits) }
+        let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        var key = "\(url.path)|\(modified?.timeIntervalSinceReferenceDate ?? 0)"
+        if Self.isRAW(url) { key += "|\(edits.exposure)|\(edits.temperatureShift)|\(edits.tintShift)" }
+        developmentLock.lock()
+        if let index = developedSources.firstIndex(where: { $0.key == key }) {
+            let hit = developedSources.remove(at: index)
+            developedSources.append(hit)
+            developmentLock.unlock()
+            return hit.image
+        }
+        developmentLock.unlock()
+        let image = try makeDevelopedSource(url: url, edits: edits)
+        developmentLock.lock()
+        developedSources.removeAll { $0.key == key }
+        developedSources.append((key, image))
+        let evicted = developedSources.count > 2
+        if evicted { developedSources.removeFirst(developedSources.count - 2) }
+        developmentLock.unlock()
+        if evicted { context.clearCaches() }
+        return image
+    }
+
+    private func makeDevelopedSource(url: URL, edits: EditSettings) throws -> CIImage {
         if Self.isRAW(url) {
             guard let raw = CIRAWFilter(imageURL: url) else { throw ImagePipelineError.unreadable(url) }
             let originalExposure = raw.exposure
@@ -188,12 +228,17 @@ public final class ImagePipeline: @unchecked Sendable {
             raw.neutralTemperature = min(50_000, max(2_000, originalTemperature + Float(edits.temperatureShift)))
             raw.neutralTint = min(150, max(-150, originalTint + Float(edits.tintShift)))
             guard let output = raw.outputImage else { throw ImagePipelineError.renderFailed(url) }
-            image = output
-        } else {
-            guard let source = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
-                throw ImagePipelineError.unreadable(url)
-            }
-            image = source
+            return output
+        }
+        guard let source = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
+            throw ImagePipelineError.unreadable(url)
+        }
+        return source
+    }
+
+    private func developed(url: URL, edits: EditSettings) throws -> CIImage {
+        var image = try developedSource(url: url, edits: edits)
+        if !Self.isRAW(url) {
             if edits.exposure != 0 {
                 let filter = CIFilter.exposureAdjust()
                 filter.inputImage = image

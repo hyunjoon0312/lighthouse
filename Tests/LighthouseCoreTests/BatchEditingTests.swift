@@ -114,13 +114,13 @@ final class BatchEditingTests: XCTestCase {
         history.record([noOp] + changes)
         XCTAssertTrue(history.canUndo)
         XCTAssertFalse(history.canRedo)
-        XCTAssertEqual(history.undo(), changes)
+        XCTAssertEqual(history.undo(), .edits(changes))
         XCTAssertFalse(history.canUndo)
         XCTAssertTrue(history.canRedo)
         history.record([noOp])
         XCTAssertTrue(history.canRedo)
-        XCTAssertEqual(history.redo(), changes)
-        XCTAssertEqual(history.undo(), changes)
+        XCTAssertEqual(history.redo(), .edits(changes))
+        XCTAssertEqual(history.undo(), .edits(changes))
         history.record([PhotoEditChange(id: first, before: after, after: .neutral)])
         XCTAssertFalse(history.canRedo)
     }
@@ -134,16 +134,16 @@ final class BatchEditingTests: XCTestCase {
         }
         XCTAssertTrue(history.canUndo)
         history.commitContinuous()
-        XCTAssertEqual(history.undo(), [PhotoEditChange(id: photo, before: steps[0], after: steps[20])])
+        XCTAssertEqual(history.undo(), .edits([PhotoEditChange(id: photo, before: steps[0], after: steps[20])]))
         XCTAssertNil(history.undo())
 
         history.recordContinuous(PhotoEditChange(id: photo, before: .neutral, after: steps[1]))
         XCTAssertFalse(history.canRedo)
         history.recordContinuous(PhotoEditChange(id: other, before: .neutral, after: steps[2]))
         history.record([PhotoEditChange(id: photo, before: steps[1], after: steps[3])])
-        XCTAssertEqual(history.undo(), [PhotoEditChange(id: photo, before: steps[1], after: steps[3])])
-        XCTAssertEqual(history.undo(), [PhotoEditChange(id: other, before: .neutral, after: steps[2])])
-        XCTAssertEqual(history.undo(), [PhotoEditChange(id: photo, before: .neutral, after: steps[1])])
+        XCTAssertEqual(history.undo(), .edits([PhotoEditChange(id: photo, before: steps[1], after: steps[3])]))
+        XCTAssertEqual(history.undo(), .edits([PhotoEditChange(id: other, before: .neutral, after: steps[2])]))
+        XCTAssertEqual(history.undo(), .edits([PhotoEditChange(id: photo, before: .neutral, after: steps[1])]))
 
         var returned = EditHistory()
         returned.record([PhotoEditChange(id: photo, before: .neutral, after: steps[1])])
@@ -151,7 +151,26 @@ final class BatchEditingTests: XCTestCase {
         returned.recordContinuous(PhotoEditChange(id: photo, before: .neutral, after: steps[2]))
         returned.recordContinuous(PhotoEditChange(id: photo, before: steps[2], after: .neutral))
         XCTAssertTrue(returned.canRedo)
-        XCTAssertEqual(returned.redo(), [PhotoEditChange(id: photo, before: .neutral, after: steps[1])])
+        XCTAssertEqual(returned.redo(), .edits([PhotoEditChange(id: photo, before: .neutral, after: steps[1])]))
+    }
+
+    func testMarksAndEditsShareOneHistoryOrder() {
+        let photo = UUID()
+        let unmarked = PhotoMarks(rating: 0, flag: .none)
+        let rejected = PhotoMarks(rating: 0, flag: .reject)
+        let rated = PhotoMarks(rating: 4, flag: .reject)
+        let edit = PhotoEditChange(id: photo, before: .neutral, after: EditSettings(exposure: 1))
+        var history = EditHistory()
+        history.recordMarks([PhotoMarkChange(id: photo, before: unmarked, after: unmarked)])
+        XCTAssertFalse(history.canUndo)
+        history.recordMarks([PhotoMarkChange(id: photo, before: unmarked, after: rejected)])
+        history.recordContinuous(edit)
+        history.recordMarks([PhotoMarkChange(id: photo, before: rejected, after: rated)])
+        XCTAssertEqual(history.undo(), .marks([PhotoMarkChange(id: photo, before: rejected, after: rated)]))
+        XCTAssertEqual(history.undo(), .edits([edit]))
+        XCTAssertEqual(history.undo(), .marks([PhotoMarkChange(id: photo, before: unmarked, after: rejected)]))
+        XCTAssertNil(history.undo())
+        XCTAssertEqual(history.redo(), .marks([PhotoMarkChange(id: photo, before: unmarked, after: rejected)]))
     }
 
     func testHistoryLimit() {
@@ -166,11 +185,11 @@ final class BatchEditingTests: XCTestCase {
         history.record([first])
         history.record([second])
         history.record([third])
-        XCTAssertEqual(history.undo(), [third])
-        XCTAssertEqual(history.undo(), [second])
+        XCTAssertEqual(history.undo(), .edits([third]))
+        XCTAssertEqual(history.undo(), .edits([second]))
         XCTAssertNil(history.undo())
-        XCTAssertEqual(history.redo(), [second])
-        XCTAssertEqual(history.redo(), [third])
+        XCTAssertEqual(history.redo(), .edits([second]))
+        XCTAssertEqual(history.redo(), .edits([third]))
         XCTAssertNil(history.redo())
     }
 }
