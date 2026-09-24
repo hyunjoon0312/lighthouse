@@ -167,11 +167,10 @@ public final class ImagePipeline: @unchecked Sendable {
                                            context: context, colorSpace: colorSpace)
         image = try AdvancedColorProcessor.applyColor(to: image, curves: edits.curves,
                                                       ranges: edits.colorRanges)
-        for adjustment in edits.localAdjustments where adjustment.isEnabled &&
-            (adjustment.baseMask != nil || adjustment.isInverted || !adjustment.strokes.isEmpty) {
+        for adjustment in edits.localAdjustments where adjustment.isEnabled && adjustment.hasMask {
             if let baseMask = adjustment.baseMask { _ = try decodedMask(baseMask) }
-            guard adjustment.exposure.isFinite, adjustment.contrast.isFinite,
-                  adjustment.exposure != 0 || adjustment.contrast != 1 else { continue }
+            guard [adjustment.exposure, adjustment.contrast, adjustment.temperature, adjustment.saturation,
+                   adjustment.clarity].allSatisfy(\.isFinite), adjustment.hasEffect else { continue }
             let mask = try maskImage(for: adjustment, width: Int(image.extent.width),
                                      height: Int(image.extent.height), scale: 1)
             var adjusted = image
@@ -181,12 +180,22 @@ public final class ImagePipeline: @unchecked Sendable {
                 filter.ev = Float(adjustment.exposure)
                 adjusted = filter.outputImage ?? adjusted
             }
-            if adjustment.contrast != 1 {
+            if adjustment.temperature != 0 {
+                let filter = CIFilter.temperatureAndTint()
+                filter.inputImage = adjusted
+                filter.neutral = CIVector(x: 6500, y: 0)
+                // 목표 기준색이 낮을수록 따뜻해진다. +가 RAW 색온도처럼 따뜻한 쪽이다.
+                filter.targetNeutral = CIVector(x: 6500 - min(1, max(-1, adjustment.temperature)) * 2000, y: 0)
+                adjusted = filter.outputImage ?? adjusted
+            }
+            if adjustment.contrast != 1 || adjustment.saturation != 0 {
                 let filter = CIFilter.colorControls()
                 filter.inputImage = adjusted
                 filter.contrast = Float(adjustment.contrast)
+                filter.saturation = Float(1 + min(1, max(-1, adjustment.saturation)))
                 adjusted = filter.outputImage ?? adjusted
             }
+            adjusted = applyClarity(adjustment.clarity, to: adjusted)
             let blend = CIFilter.blendWithMask()
             blend.inputImage = adjusted
             blend.backgroundImage = image
@@ -217,6 +226,25 @@ public final class ImagePipeline: @unchecked Sendable {
                                                    context: context, colorSpace: colorSpace)
         return try RetouchProcessor.healingSourceOffset(for: stroke, in: retouched,
                                                         context: context, colorSpace: colorSpace)
+    }
+
+    /// 원본 짧은 변의 0.15%~1.5% 크기 대비(중간 주파수)를 중간 톤 위주로 더하거나 빼서 잔 디테일은 남긴다.
+    /// 반경을 원본 크기에 맞추므로 미리보기와 내보내기가 같다.
+    private func applyClarity(_ amount: Double, to image: CIImage) -> CIImage {
+        guard amount != 0, amount.isFinite, let kernel = Self.clarityKernel else { return image }
+        let shortSide = min(image.extent.width, image.extent.height)
+        let small = CIFilter.gaussianBlur()
+        small.inputImage = image.clampedToExtent()
+        small.radius = Float(shortSide * 0.0015)
+        let large = CIFilter.gaussianBlur()
+        large.inputImage = image.clampedToExtent()
+        large.radius = Float(shortSide * 0.015)
+        guard let fine = small.outputImage, let coarse = large.outputImage,
+              let output = kernel.apply(extent: image.extent,
+                                        arguments: [image, fine, coarse, Float(min(1, max(-1, amount)) * 0.5)]) else {
+            return image
+        }
+        return output
     }
 
     private func developedSource(url: URL, edits: EditSettings) throws -> CIImage {
@@ -314,22 +342,7 @@ public final class ImagePipeline: @unchecked Sendable {
             filter.amount = Float(min(1, max(-1, edits.vibrance)))
             image = filter.outputImage ?? image
         }
-        if edits.clarity != 0, edits.clarity.isFinite, let kernel = Self.clarityKernel {
-            // 원본 짧은 변의 0.15%~1.5% 크기 대비(중간 주파수)를 중간 톤 위주로 더하거나 빼서 잔 디테일은 남긴다.
-            // 반경을 원본 크기에 맞추므로 미리보기와 내보내기가 같다.
-            let shortSide = min(image.extent.width, image.extent.height)
-            let small = CIFilter.gaussianBlur()
-            small.inputImage = image.clampedToExtent()
-            small.radius = Float(shortSide * 0.0015)
-            let large = CIFilter.gaussianBlur()
-            large.inputImage = image.clampedToExtent()
-            large.radius = Float(shortSide * 0.015)
-            if let fine = small.outputImage, let coarse = large.outputImage,
-               let output = kernel.apply(extent: image.extent,
-                                         arguments: [image, fine, coarse, Float(min(1, max(-1, edits.clarity)) * 0.5)]) {
-                image = output
-            }
-        }
+        image = applyClarity(edits.clarity, to: image)
         if edits.sharpness != 0 {
             let filter = CIFilter.sharpenLuminance()
             filter.inputImage = image
@@ -409,6 +422,9 @@ public final class ImagePipeline: @unchecked Sendable {
             bitmap.interpolationQuality = .high
             bitmap.draw(decoded, in: CGRect(x: 0, y: 0, width: scaledWidth, height: scaledHeight))
         }
+        if let gradient = adjustment.gradient {
+            Self.draw(gradient, in: bitmap, width: Double(scaledWidth), height: Double(scaledHeight))
+        }
         if adjustment.isInverted, let data = bitmap.data {
             let bytes = data.bindMemory(to: UInt8.self, capacity: bitmap.bytesPerRow * scaledHeight)
             for row in 0..<scaledHeight {
@@ -456,6 +472,36 @@ public final class ImagePipeline: @unchecked Sendable {
             mask = (blur.outputImage ?? mask).cropped(to: mask.extent)
         }
         return mask
+    }
+
+    /// 원본 좌상단 기준 좌표로 그라데이션을 그린다. 이미 그린 마스크와는 밝은 쪽을 남겨 합친다.
+    private static func draw(_ gradient: MaskGradient, in bitmap: CGContext, width: Double, height: Double) {
+        let gray = CGColorSpace(name: CGColorSpace.linearGray)!
+        bitmap.saveGState()
+        defer { bitmap.restoreGState() }
+        bitmap.translateBy(x: 0, y: CGFloat(height))
+        bitmap.scaleBy(x: 1, y: -1)
+        bitmap.setBlendMode(.lighten)
+        switch gradient {
+        case .linear(let start, let end):
+            guard [start.x, start.y, end.x, end.y].allSatisfy(\.isFinite),
+                  hypot((end.x - start.x) * width, (end.y - start.y) * height) >= 1,
+                  let ramp = CGGradient(colorSpace: gray, colorComponents: [1, 1, 0, 1], locations: [0, 1], count: 2)
+            else { return }
+            bitmap.drawLinearGradient(ramp, start: CGPoint(x: start.x * width, y: start.y * height),
+                                      end: CGPoint(x: end.x * width, y: end.y * height),
+                                      options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+        case .radial(let center, let radiusX, let radiusY, let softness):
+            guard [center.x, center.y, radiusX, radiusY, softness].allSatisfy(\.isFinite),
+                  radiusX > 0, radiusY > 0 else { return }
+            let inner = CGFloat(1 - min(1, max(0, softness)))
+            guard let ramp = CGGradient(colorSpace: gray, colorComponents: [1, 1, 1, 1, 0, 1],
+                                        locations: [0, min(0.999, inner), 1], count: 3) else { return }
+            bitmap.translateBy(x: center.x * width, y: center.y * height)
+            bitmap.scaleBy(x: radiusX * width, y: radiusY * height)
+            bitmap.drawRadialGradient(ramp, startCenter: .zero, startRadius: 0, endCenter: .zero, endRadius: 1,
+                                      options: [])
+        }
     }
 
     private func decodedMask(_ mask: RasterMask) throws -> CGImage {

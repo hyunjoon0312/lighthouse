@@ -257,3 +257,68 @@ public struct RAWCapabilities: Equatable, Sendable {
         self.highlightRecovery = highlightRecovery
     }
 }
+
+/// 부분 보정 영역의 그라데이션 마스크. 좌표는 브러시와 같은 원본 기준 정규화 좌표다.
+public enum MaskGradient: Codable, Equatable, Sendable {
+    /// `start`에서 효과 100%, `end`에서 0%.
+    case linear(start: MaskPoint, end: MaskPoint)
+    /// 반지름은 원본 가로·세로에 대한 비율. `softness`는 가장자리에서 안쪽으로 흐려지는 비율(0…1).
+    case radial(center: MaskPoint, radiusX: Double, radiusY: Double, softness: Double)
+}
+
+public enum MaskGradientHandle: CaseIterable, Sendable {
+    /// 직선의 시작·끝, 둘 다의 중심점(평행 이동), 원형의 중심과 가로·세로 반지름.
+    case start, end, center, radiusX, radiusY
+}
+
+extension MaskGradient {
+    /// 원본 좌표의 조절점 위치.
+    public var handles: [(handle: MaskGradientHandle, point: MaskPoint)] {
+        switch self {
+        case .linear(let start, let end):
+            [(.start, start), (.end, end),
+             (.center, MaskPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2))]
+        case .radial(let center, let radiusX, let radiusY, _):
+            [(.center, center), (.radiusX, MaskPoint(x: center.x + radiusX, y: center.y)),
+             (.radiusY, MaskPoint(x: center.x, y: center.y + radiusY))]
+        }
+    }
+
+    /// 조절점 하나를 원본 좌표 `point`로 옮긴 결과. 해당하지 않는 조절점은 그대로 둔다.
+    public func moving(_ handle: MaskGradientHandle, to point: MaskPoint) -> MaskGradient {
+        guard point.x.isFinite, point.y.isFinite else { return self }
+        switch self {
+        case .linear(let start, let end):
+            switch handle {
+            case .start: return .linear(start: point, end: end)
+            case .end: return .linear(start: start, end: point)
+            case .center:
+                let dx = point.x - (start.x + end.x) / 2, dy = point.y - (start.y + end.y) / 2
+                return .linear(start: MaskPoint(x: start.x + dx, y: start.y + dy),
+                               end: MaskPoint(x: end.x + dx, y: end.y + dy))
+            case .radiusX, .radiusY: return self
+            }
+        case .radial(let center, let radiusX, let radiusY, let softness):
+            switch handle {
+            case .center: return .radial(center: point, radiusX: radiusX, radiusY: radiusY, softness: softness)
+            case .radiusX:
+                return .radial(center: center, radiusX: min(2, max(0.01, abs(point.x - center.x))),
+                               radiusY: radiusY, softness: softness)
+            case .radiusY:
+                return .radial(center: center, radiusX: radiusX,
+                               radiusY: min(2, max(0.01, abs(point.y - center.y))), softness: softness)
+            case .start, .end: return self
+            }
+        }
+    }
+
+    public var softness: Double? {
+        if case .radial(_, _, _, let softness) = self { return softness }
+        return nil
+    }
+
+    public func withSoftness(_ value: Double) -> MaskGradient {
+        guard case .radial(let center, let radiusX, let radiusY, _) = self else { return self }
+        return .radial(center: center, radiusX: radiusX, radiusY: radiusY, softness: min(1, max(0, value)))
+    }
+}

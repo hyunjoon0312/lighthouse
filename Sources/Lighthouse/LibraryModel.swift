@@ -264,6 +264,11 @@ final class LibraryModel: ObservableObject {
         adjustmentPanel == .local && isLocalEditing && selectedLocal != nil &&
         mode == .edit && !isOriginal && !actualSize && !rendering && rendered != nil && imageError == nil
     }
+    /// 그라데이션 조절점은 그리기 모드가 아닐 때 드래그한다. 드래그 중 렌더링이 이어져도 조절점을 유지한다.
+    var canEditGradient: Bool {
+        adjustmentPanel == .local && !isLocalEditing && selectedLocal?.gradient != nil &&
+        mode == .edit && !isOriginal && !actualSize && rendered != nil && imageError == nil
+    }
     var canUseRetouchCanvas: Bool {
         adjustmentPanel == .retouch && mode == .edit && !isOriginal && !actualSize &&
         !rendering && rendered != nil && imageError == nil
@@ -879,7 +884,7 @@ final class LibraryModel: ObservableObject {
         actualSize = false
         mode = .edit
         reconcileLocalSelection()
-        isLocalEditing = selectedLocal != nil
+        isLocalEditing = selectedLocal != nil && selectedLocal?.gradient == nil
         requestRender()
     }
 
@@ -906,10 +911,11 @@ final class LibraryModel: ObservableObject {
         maskGeneration += 1
     }
 
-    func chooseLocal(_ id: UUID) {
+    /// 그라데이션 영역은 조절점 모드로, 브러시 영역은 그리기 모드로 연다. `drawing`을 주면 그 모드로 연다.
+    func chooseLocal(_ id: UUID, drawing: Bool? = nil) {
         enterLocalPanel()
         selectedLocalID = id
-        isLocalEditing = true
+        isLocalEditing = drawing ?? (selectedLocal?.gradient == nil)
         requestMask()
     }
 
@@ -922,6 +928,43 @@ final class LibraryModel: ObservableObject {
         selectedLocalID = adjustment.id
         isLocalEditing = true
         updateEdits(edits)
+    }
+
+    /// 화면 기준 기본 위치에 그라데이션 영역을 만든다. 직선은 위쪽 하늘을 어둡게, 원형은 가운데를 밝게 시작한다.
+    func addGradientLocal(radial: Bool) {
+        guard let selected = selection, selected.metadata.width > 0, selected.metadata.height > 0 else { return }
+        enterLocalPanel()
+        let geometry = LocalMaskGeometry(sourceWidth: Double(selected.metadata.width),
+                                         sourceHeight: Double(selected.metadata.height),
+                                         edits: selected.edits)
+        var edits = selected.edits
+        let number = edits.localAdjustments.count + 1
+        let adjustment: LocalAdjustment
+        if radial {
+            adjustment = LocalAdjustment(
+                name: "원형 \(number)", exposure: 0.4, feather: 0,
+                gradient: .radial(center: geometry.sourcePoint(fromDisplay: MaskPoint(x: 0.5, y: 0.5)),
+                                  radiusX: 0.3, radiusY: 0.3, softness: 0.5))
+        } else {
+            adjustment = LocalAdjustment(
+                name: "그라데이션 \(number)", exposure: -0.5, feather: 0,
+                gradient: .linear(start: geometry.sourcePoint(fromDisplay: MaskPoint(x: 0.5, y: 0)),
+                                  end: geometry.sourcePoint(fromDisplay: MaskPoint(x: 0.5, y: 0.45))))
+        }
+        edits.localAdjustments.append(adjustment)
+        selectedLocalID = adjustment.id
+        isLocalEditing = false
+        updateEdits(edits)
+    }
+
+    /// 드래그 중인 조절점을 화면 좌표 `displayPoint`로 옮긴다. 드래그 한 번은 `endContinuousEdit()`에서 한 단계가 된다.
+    func moveGradientHandle(_ handle: MaskGradientHandle, toDisplay displayPoint: MaskPoint) {
+        guard canEditGradient, let photo = selection, photo.metadata.width > 0, photo.metadata.height > 0 else { return }
+        let geometry = LocalMaskGeometry(sourceWidth: Double(photo.metadata.width),
+                                         sourceHeight: Double(photo.metadata.height),
+                                         edits: photo.edits)
+        let point = geometry.sourcePoint(fromDisplay: displayPoint)
+        updateLocal(continuous: true) { area in area.gradient = area.gradient?.moving(handle, to: point) }
     }
 
     func addAutomaticLocal(background: Bool) {

@@ -312,11 +312,22 @@ struct InspectorView: View {
             HStack {
                 section("영역")
                 Spacer()
-                Button { model.addLocal() } label: { Label("영역 추가", systemImage: "plus") }
-                    .accessibilityLabel("부분 보정 영역 추가")
+                Button { model.addLocal() } label: { Label("브러시", systemImage: "plus") }
+                    .accessibilityLabel("브러시 부분 보정 영역 추가")
             }
+            HStack {
+                Button { model.addGradientLocal(radial: false) } label: {
+                    Label("직선 그라데이션", systemImage: "square.bottomhalf.filled").frame(maxWidth: .infinity)
+                }
+                .accessibilityLabel("직선 그라데이션 영역 추가")
+                Button { model.addGradientLocal(radial: true) } label: {
+                    Label("원형 그라데이션", systemImage: "circle.dotted.circle").frame(maxWidth: .infinity)
+                }
+                .accessibilityLabel("원형 그라데이션 영역 추가")
+            }
+            .font(.caption)
             if edits.localAdjustments.isEmpty {
-                Text("영역을 추가한 뒤 사진 위를 드래그해 밝기와 대비를 조절할 곳을 칠하세요.")
+                Text("브러시 영역은 사진 위를 드래그해 칠하고, 그라데이션은 조절점을 끌어 위치를 정합니다.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else {
                 ForEach(edits.localAdjustments) { area in
@@ -365,23 +376,43 @@ struct InspectorView: View {
                     localSlider("영역 대비", value: area.contrast, range: 0.5...1.5, format: "%.2f") { contrast in
                         model.updateLocal(continuous: true) { $0.contrast = contrast }
                     }
+                    localSlider("영역 색온도", value: area.temperature * 100, range: -100...100, format: "%.0f") { value in
+                        model.updateLocal(continuous: true) { $0.temperature = value / 100 }
+                    }
+                    localSlider("영역 채도", value: area.saturation * 100, range: -100...100, format: "%.0f") { value in
+                        model.updateLocal(continuous: true) { $0.saturation = value / 100 }
+                    }
+                    localSlider("영역 명료도", value: area.clarity * 100, range: -100...100, format: "%.0f") { value in
+                        model.updateLocal(continuous: true) { $0.clarity = value / 100 }
+                    }
+                    if let softness = area.gradient?.softness {
+                        localSlider("원형 가장자리 부드럽게", value: softness * 100, range: 0...100, format: "%.0f") { value in
+                            model.updateLocal(continuous: true) { $0.gradient = $0.gradient?.withSoftness(value / 100) }
+                        }
+                    }
                     Toggle("마스크 표시", isOn: Binding(
                         get: { model.showsMask },
                         set: { model.showsMask = $0; model.requestMask() }
                     )).font(.caption).accessibilityLabel("부분 보정 마스크 표시")
-                    Text(model.brushTool == .eraser ? "사진 위를 드래그해 칠한 영역을 지우세요." : "사진 위를 드래그해 영역을 칠하세요.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    if area.gradient != nil && !model.isLocalEditing {
+                        Text("사진 위 조절점을 끌어 위치와 크기를 바꾸세요. 주황색 점은 전체를 옮깁니다. 그리기를 계속하면 브러시로 더하거나 지울 수 있습니다.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(model.brushTool == .eraser ? "사진 위를 드래그해 칠한 영역을 지우세요." : "사진 위를 드래그해 영역을 칠하세요.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     if area.baseMask != nil {
                         Text("자동 선택 결과를 브러시와 지우개로 다듬을 수 있습니다.")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     if let error = model.maskError { Text("마스크 표시 오류: \(error)").font(.caption).foregroundStyle(.red) }
-                    Button(model.isLocalEditing ? "그리기 완료" : "그리기 계속") {
+                    let drawTitle = model.isLocalEditing ? "그리기 완료" : (area.gradient == nil ? "그리기 계속" : "브러시로 다듬기")
+                    Button(drawTitle) {
                         if model.isLocalEditing { model.finishLocalDrawing() }
-                        else { model.chooseLocal(area.id) }
+                        else { model.chooseLocal(area.id, drawing: true) }
                     }
                     .buttonStyle(.borderedProminent)
-                    .accessibilityLabel(model.isLocalEditing ? "부분 보정 그리기 완료" : "부분 보정 그리기 계속")
+                    .accessibilityLabel("부분 보정 " + drawTitle)
                 }
             }
         }

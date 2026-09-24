@@ -36,11 +36,16 @@ public struct LocalAdjustment: Identifiable, Codable, Equatable, Sendable {
     public var strokes: [MaskStroke]
     public var baseMask: RasterMask?
     public var isInverted: Bool
+    public var gradient: MaskGradient?
+    public var temperature: Double
+    public var saturation: Double
+    public var clarity: Double
 
     public init(id: UUID = UUID(), name: String = "영역 1", isEnabled: Bool = true,
                 exposure: Double = 0, contrast: Double = 1, feather: Double = 0.01,
                 strokes: [MaskStroke] = [], baseMask: RasterMask? = nil,
-                isInverted: Bool = false) {
+                isInverted: Bool = false, gradient: MaskGradient? = nil,
+                temperature: Double = 0, saturation: Double = 0, clarity: Double = 0) {
         self.id = id
         self.name = name
         self.isEnabled = isEnabled
@@ -50,10 +55,22 @@ public struct LocalAdjustment: Identifiable, Codable, Equatable, Sendable {
         self.strokes = strokes
         self.baseMask = baseMask
         self.isInverted = isInverted
+        self.gradient = gradient
+        self.temperature = temperature
+        self.saturation = saturation
+        self.clarity = clarity
     }
+
+    /// 마스크 안에서 실제로 바꾸는 값이 있는지.
+    public var hasEffect: Bool {
+        exposure != 0 || contrast != 1 || temperature != 0 || saturation != 0 || clarity != 0
+    }
+
+    public var hasMask: Bool { baseMask != nil || gradient != nil || isInverted || !strokes.isEmpty }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, isEnabled, exposure, contrast, feather, strokes, baseMask, isInverted
+        case gradient, temperature, saturation, clarity
     }
 
     public init(from decoder: Decoder) throws {
@@ -68,6 +85,10 @@ public struct LocalAdjustment: Identifiable, Codable, Equatable, Sendable {
         baseMask = try container.decodeIfPresent(RasterMask.self, forKey: .baseMask)
         isInverted = try container.contains(.isInverted)
             ? container.decode(Bool.self, forKey: .isInverted) : false
+        gradient = try container.decodeIfPresent(MaskGradient.self, forKey: .gradient)
+        temperature = try container.decodeIfPresent(Double.self, forKey: .temperature) ?? 0
+        saturation = try container.decodeIfPresent(Double.self, forKey: .saturation) ?? 0
+        clarity = try container.decodeIfPresent(Double.self, forKey: .clarity) ?? 0
     }
 }
 

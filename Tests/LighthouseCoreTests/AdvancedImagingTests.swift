@@ -333,6 +333,111 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertEqual(sampled.red[100], sampled.sampleCount)
     }
 
+    func testGradientMasksRampCombineAndInvert() throws {
+        let topWhite = try makeImage(width: 4, height: 4) { _, y in y < 2 ? (255, 255, 255, 255) : (0, 0, 0, 255) }
+        XCTAssertEqual(try gray(topWhite, x: 0, y: 0), 255, "헬퍼는 y=0을 위쪽으로 읽어야 한다")
+        let pipeline = ImagePipeline()
+        func mask(_ adjustment: LocalAdjustment) throws -> CGImage {
+            try pipeline.renderMask(adjustment: adjustment, sourceWidth: 40, sourceHeight: 40,
+                                    edits: .neutral, maxPixel: 40)
+        }
+        let linear = try mask(LocalAdjustment(feather: 0, gradient: .linear(start: MaskPoint(x: 0.5, y: 0.25),
+                                                                            end: MaskPoint(x: 0.5, y: 0.75))))
+        XCTAssertGreaterThan(try gray(linear, x: 20, y: 2), 245)
+        XCTAssertLessThan(try gray(linear, x: 20, y: 37), 10)
+        let ramp = try (8...32).map { try gray(linear, x: 5, y: $0) }
+        XCTAssertEqual(ramp, ramp.sorted(by: >))
+        XCTAssertGreaterThan(try gray(linear, x: 20, y: 20), 40)
+        XCTAssertLessThan(try gray(linear, x: 20, y: 20), 230)
+
+        let hard = LocalAdjustment(feather: 0, gradient: .radial(center: MaskPoint(x: 0.5, y: 0.5),
+                                                                 radiusX: 0.25, radiusY: 0.25, softness: 0))
+        let hardMask = try mask(hard)
+        XCTAssertGreaterThan(try gray(hardMask, x: 20, y: 20), 245)
+        XCTAssertGreaterThan(try gray(hardMask, x: 28, y: 20), 245)
+        XCTAssertLessThan(try gray(hardMask, x: 33, y: 20), 10)
+        XCTAssertLessThan(try gray(hardMask, x: 2, y: 2), 10)
+        var soft = hard
+        soft.gradient = hard.gradient?.withSoftness(1)
+        let softMask = try mask(soft)
+        XCTAssertGreaterThan(try gray(softMask, x: 20, y: 20), 235)
+        XCTAssertLessThan(try gray(softMask, x: 27, y: 20), try gray(hardMask, x: 27, y: 20))
+
+        var inverted = hard
+        inverted.isInverted = true
+        inverted.strokes = [MaskStroke(points: [MaskPoint(x: 0.1, y: 0.1)], radius: 0.05, isErasing: true)]
+        let invertedMask = try mask(inverted)
+        XCTAssertLessThan(try gray(invertedMask, x: 20, y: 20), 10)
+        XCTAssertGreaterThan(try gray(invertedMask, x: 38, y: 38), 245)
+        XCTAssertLessThan(try gray(invertedMask, x: 4, y: 4), 10)
+
+        let degenerate = LocalAdjustment(feather: 0, gradient: .linear(start: MaskPoint(x: 0.5, y: 0.5),
+                                                                       end: MaskPoint(x: 0.5, y: 0.5)))
+        XCTAssertLessThan(try gray(mask(degenerate), x: 20, y: 20), 10)
+    }
+
+    func testGradientHandlesMoveInSourceSpace() {
+        let linear = MaskGradient.linear(start: MaskPoint(x: 0.2, y: 0.2), end: MaskPoint(x: 0.4, y: 0.6))
+        guard case .linear(let movedStart, let movedEnd) = linear.moving(.center, to: MaskPoint(x: 0.5, y: 0.5)) else {
+            return XCTFail("직선 그라데이션이어야 한다")
+        }
+        XCTAssertEqual(movedStart.x, 0.4, accuracy: 1e-12)
+        XCTAssertEqual(movedStart.y, 0.3, accuracy: 1e-12)
+        XCTAssertEqual(movedEnd.x, 0.6, accuracy: 1e-12)
+        XCTAssertEqual(movedEnd.y, 0.7, accuracy: 1e-12)
+        XCTAssertEqual(linear.moving(.end, to: MaskPoint(x: 0.9, y: 0.9)),
+                       .linear(start: MaskPoint(x: 0.2, y: 0.2), end: MaskPoint(x: 0.9, y: 0.9)))
+        XCTAssertEqual(linear.moving(.radiusX, to: MaskPoint(x: 0.9, y: 0.9)), linear)
+        XCTAssertEqual(linear.moving(.start, to: MaskPoint(x: .nan, y: 0)), linear)
+        let radial = MaskGradient.radial(center: MaskPoint(x: 0.5, y: 0.5), radiusX: 0.2, radiusY: 0.3, softness: 0.5)
+        XCTAssertEqual(radial.moving(.radiusX, to: MaskPoint(x: 0.1, y: 0.9)),
+                       .radial(center: MaskPoint(x: 0.5, y: 0.5), radiusX: 0.4, radiusY: 0.3, softness: 0.5))
+        XCTAssertEqual(radial.moving(.radiusY, to: MaskPoint(x: 0.5, y: 0.5)),
+                       .radial(center: MaskPoint(x: 0.5, y: 0.5), radiusX: 0.2, radiusY: 0.01, softness: 0.5))
+        XCTAssertEqual(radial.handles.map(\.handle), [.center, .radiusX, .radiusY])
+        XCTAssertEqual(radial.withSoftness(3).softness, 1)
+        XCTAssertNil(linear.softness)
+    }
+
+    func testLocalTemperatureSaturationAndClarityStayInsideMask() throws {
+        let input = try temporaryPNG(width: 80, height: 80) { x, y in
+            ((x / 4 + y / 4) % 2 == 0 ? (180, 120, 80, 255) : (150, 100, 70, 255))
+        }
+        defer { try? FileManager.default.removeItem(at: input) }
+        let pipeline = ImagePipeline()
+        let neutral = try pipeline.render(url: input, edits: .neutral, maxPixel: nil)
+        func render(_ change: (inout LocalAdjustment) -> Void) throws -> CGImage {
+            var area = LocalAdjustment(feather: 0, gradient: .radial(center: MaskPoint(x: 0.5, y: 0.5),
+                                                                     radiusX: 0.25, radiusY: 0.25, softness: 0))
+            change(&area)
+            return try pipeline.render(url: input, edits: EditSettings(localAdjustments: [area]), maxPixel: nil)
+        }
+        func spread(_ image: CGImage, _ x: Int, _ y: Int) throws -> Int {
+            let pixel = try rgba(image, x: x, y: y)
+            return Int(max(pixel.0, pixel.1, pixel.2)) - Int(min(pixel.0, pixel.1, pixel.2))
+        }
+        let warm = try render { $0.temperature = 1 }
+        let cool = try render { $0.temperature = -1 }
+        let warmCenter = try rgba(warm, x: 40, y: 40), coolCenter = try rgba(cool, x: 40, y: 40)
+        XCTAssertGreaterThan(Int(warmCenter.0) - Int(warmCenter.2), Int(coolCenter.0) - Int(coolCenter.2) + 20)
+        XCTAssertTrue(try rgba(warm, x: 2, y: 2) == rgba(neutral, x: 2, y: 2))
+
+        let desaturated = try render { $0.saturation = -1 }
+        XCTAssertLessThan(try spread(desaturated, 40, 40), 4)
+        XCTAssertEqual(try spread(desaturated, 2, 2), try spread(neutral, 2, 2))
+
+        let sky = LocalAdjustment(exposure: -1, feather: 0,
+                                  gradient: .linear(start: MaskPoint(x: 0.5, y: 0), end: MaskPoint(x: 0.5, y: 0.5)))
+        let darkTop = try pipeline.render(url: input, edits: EditSettings(localAdjustments: [sky]), maxPixel: nil)
+        XCTAssertLessThan(try rgba(darkTop, x: 0, y: 0).0, try rgba(neutral, x: 0, y: 0).0 - 40)
+        XCTAssertTrue(try rgba(darkTop, x: 0, y: 79) == rgba(neutral, x: 0, y: 79))
+
+        let clearer = try render { $0.clarity = 1 }
+        XCTAssertNotEqual(try rgbaBytes(clearer), try rgbaBytes(neutral))
+        XCTAssertTrue(try rgba(clearer, x: 2, y: 2) == rgba(neutral, x: 2, y: 2))
+        XCTAssertEqual(try rgbaBytes(render { _ in }), try rgbaBytes(neutral))
+    }
+
     func testVibranceClarityAndVignetteRender() throws {
         let input = try temporaryPNG(width: 120, height: 80) { x, y in
             ((x / 10 + y / 10) % 2 == 0 ? (170, 120, 90, 255) : (110, 140, 150, 255))
@@ -506,8 +611,7 @@ final class AdvancedImagingTests: XCTestCase {
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
             throw TestError.imageCreation
         }
-        context.translateBy(x: 0, y: CGFloat(image.height))
-        context.scaleBy(x: 1, y: -1)
+        // 비트맵 메모리의 첫 행이 이미지 위쪽이 되도록 뒤집지 않고 그린다.
         context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         return bytes
     }

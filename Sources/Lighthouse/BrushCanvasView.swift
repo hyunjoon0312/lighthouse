@@ -110,6 +110,10 @@ struct BrushCanvasView: View {
                 }
             }
             .allowsHitTesting(false)
+            if model.canEditGradient, let gradient = model.selectedLocal?.gradient,
+               photo.metadata.width > 0, photo.metadata.height > 0 {
+                GradientHandlesView(photo: photo, gradient: gradient, imageRect: imageRect, size: availableSize)
+            }
             if model.canDrawLocal || model.canUseRetouchCanvas {
                 Rectangle().fill(.clear).contentShape(Rectangle())
                     .frame(width: imageRect.width, height: imageRect.height)

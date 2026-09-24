@@ -54,6 +54,18 @@ final class AdvancedModelTests: XCTestCase {
         )
         XCTAssertNil(legacy.baseMask)
         XCTAssertFalse(legacy.isInverted)
+        XCTAssertNil(legacy.gradient)
+        XCTAssertEqual([legacy.temperature, legacy.saturation, legacy.clarity], [0, 0, 0])
+        XCTAssertFalse(legacy.hasEffect)
+        XCTAssertFalse(legacy.hasMask)
+
+        let gradient = LocalAdjustment(gradient: .radial(center: MaskPoint(x: 0.4, y: 0.6), radiusX: 0.2,
+                                                         radiusY: 0.1, softness: 0.4),
+                                       saturation: 0.3)
+        let roundTrip = try JSONDecoder().decode(LocalAdjustment.self, from: JSONEncoder().encode(gradient))
+        XCTAssertEqual(roundTrip, gradient)
+        XCTAssertTrue(roundTrip.hasEffect)
+        XCTAssertTrue(roundTrip.hasMask)
 
         object["baseMask"] = NSNull()
         object["isInverted"] = NSNull()
