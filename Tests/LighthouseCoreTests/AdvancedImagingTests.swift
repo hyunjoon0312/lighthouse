@@ -376,6 +376,37 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertLessThan(try gray(mask(degenerate), x: 20, y: 20), 10)
     }
 
+    func testCachedPreviewMasksFollowShapeChangesAndMatchUncachedRender() throws {
+        let input = try temporaryPNG(width: 160, height: 100) { x, y in
+            ((x / 5 + y / 5) % 2 == 0 ? (180, 120, 80, 255) : (60, 90, 140, 255))
+        }
+        defer { try? FileManager.default.removeItem(at: input) }
+        let cached = ImagePipeline(cachesDevelopment: true)
+        let plain = ImagePipeline()
+        var area = LocalAdjustment(exposure: -1, feather: 0.02, isInverted: true,
+                                   gradient: .radial(center: MaskPoint(x: 0.4, y: 0.5), radiusX: 0.2,
+                                                     radiusY: 0.3, softness: 0.5))
+        func check(_ label: String) throws {
+            let edits = EditSettings(localAdjustments: [area])
+            XCTAssertEqual(try rgbaBytes(cached.render(url: input, edits: edits, maxPixel: 60)),
+                           try rgbaBytes(plain.render(url: input, edits: edits, maxPixel: 60)), label)
+        }
+        try check("처음")
+        area.exposure = 0.7
+        try check("효과만 바꿔 캐시한 마스크를 다시 씀")
+        area.gradient = area.gradient?.moving(.center, to: MaskPoint(x: 0.7, y: 0.4))
+        try check("모양을 바꾸면 새 마스크")
+        area.isInverted = false
+        try check("반전")
+
+        let small = try plain.renderMask(adjustment: area, sourceWidth: 6000, sourceHeight: 4000,
+                                         edits: .neutral, maxPixel: 300)
+        XCTAssertEqual(small.width, 300)
+        XCTAssertEqual(small.height, 200)
+        XCTAssertGreaterThan(try gray(small, x: 210, y: 80), 245, "원형 안쪽")
+        XCTAssertLessThan(try gray(small, x: 20, y: 180), 10, "원형 바깥")
+    }
+
     func testGradientHandlesMoveInSourceSpace() {
         let linear = MaskGradient.linear(start: MaskPoint(x: 0.2, y: 0.2), end: MaskPoint(x: 0.4, y: 0.6))
         guard case .linear(let movedStart, let movedEnd) = linear.moving(.center, to: MaskPoint(x: 0.5, y: 0.5)) else {

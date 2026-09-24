@@ -68,6 +68,12 @@ public struct LocalAdjustment: Identifiable, Codable, Equatable, Sendable {
 
     public var hasMask: Bool { baseMask != nil || gradient != nil || isInverted || !strokes.isEmpty }
 
+    /// 마스크 모양을 정하는 값. 노출·색 같은 효과 값만 바뀌면 같으므로 마스크를 다시 그리지 않아도 된다.
+    public var maskDefinition: LocalMaskDefinition {
+        LocalMaskDefinition(baseMask: baseMask, gradient: gradient, isInverted: isInverted,
+                            strokes: strokes, feather: feather)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id, name, isEnabled, exposure, contrast, feather, strokes, baseMask, isInverted
         case gradient, temperature, saturation, clarity
@@ -90,6 +96,14 @@ public struct LocalAdjustment: Identifiable, Codable, Equatable, Sendable {
         saturation = try container.decodeIfPresent(Double.self, forKey: .saturation) ?? 0
         clarity = try container.decodeIfPresent(Double.self, forKey: .clarity) ?? 0
     }
+}
+
+public struct LocalMaskDefinition: Equatable, Sendable {
+    public let baseMask: RasterMask?
+    public let gradient: MaskGradient?
+    public let isInverted: Bool
+    public let strokes: [MaskStroke]
+    public let feather: Double
 }
 
 public struct LUTAdjustment: Codable, Equatable, Sendable {

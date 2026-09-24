@@ -61,6 +61,8 @@ public final class ImagePipeline: @unchecked Sendable {
     private let cachesDevelopment: Bool
     private let developmentLock = NSLock()
     private var developedSources: [(key: String, image: CIImage)] = []
+    private let maskLock = NSLock()
+    private var cachedMasks: [(definition: LocalMaskDefinition, width: Int, height: Int, image: CIImage)] = []
 
     /// `cachesDevelopment`는 편집 미리보기용이다. 최근 현상 결과(최대 2장)와 중간 계산을 재사용해
     /// RAW 현상 값(노출·색온도·틴트)이 같은 동안 다른 슬라이더를 다시 현상하지 않고 그린다.
@@ -174,12 +176,13 @@ public final class ImagePipeline: @unchecked Sendable {
                                            context: context, colorSpace: colorSpace)
         image = try AdvancedColorProcessor.applyColor(to: image, curves: edits.curves,
                                                       ranges: edits.colorRanges)
+        let maskScale = Self.maskScale(sourceWidth: image.extent.width, sourceHeight: image.extent.height,
+                                       edits: edits, maxPixel: maxPixel)
         for adjustment in edits.localAdjustments where adjustment.isEnabled && adjustment.hasMask {
             if let baseMask = adjustment.baseMask { _ = try decodedMask(baseMask) }
             guard [adjustment.exposure, adjustment.contrast, adjustment.temperature, adjustment.saturation,
                    adjustment.clarity].allSatisfy(\.isFinite), adjustment.hasEffect else { continue }
-            let mask = try maskImage(for: adjustment, width: Int(image.extent.width),
-                                     height: Int(image.extent.height), scale: 1)
+            let mask = try fittedMask(for: adjustment, extent: image.extent, scale: maskScale)
             var adjusted = image
             if adjustment.exposure != 0 {
                 let filter = CIFilter.exposureAdjust()
@@ -398,7 +401,9 @@ public final class ImagePipeline: @unchecked Sendable {
     public func renderMask(adjustment: LocalAdjustment, sourceWidth: Int, sourceHeight: Int,
                            edits: EditSettings, maxPixel: Int = 1600) throws -> CGImage {
         guard sourceWidth > 0, sourceHeight > 0 else { throw ImagePipelineError.invalidMaskGeometry }
-        let mask = try maskImage(for: adjustment, width: sourceWidth, height: sourceHeight, scale: 1)
+        let scale = Self.maskScale(sourceWidth: CGFloat(sourceWidth), sourceHeight: CGFloat(sourceHeight),
+                                   edits: edits, maxPixel: maxPixel)
+        let mask = try cachedMask(for: adjustment, width: sourceWidth, height: sourceHeight, scale: scale)
         let output = transformedForDisplay(mask, edits: edits, maxPixel: maxPixel)
         let rect = CGRect(x: 0, y: 0, width: floor(output.extent.width), height: floor(output.extent.height))
         let gray = CGColorSpace(name: CGColorSpace.linearGray)!
@@ -407,6 +412,49 @@ public final class ImagePipeline: @unchecked Sendable {
             throw ImagePipelineError.invalidMaskGeometry
         }
         return image
+    }
+
+    /// 출력의 긴 변이 `maxPixel`이면 마스크도 그만큼만 그리면 된다. 원본 해상도 출력은 1이다.
+    static func maskScale(sourceWidth: CGFloat, sourceHeight: CGFloat, edits: EditSettings, maxPixel: Int?) -> Double {
+        guard let maxPixel, maxPixel > 0 else { return 1 }
+        let geometry = PhotoGeometry(sourceWidth: sourceWidth, sourceHeight: sourceHeight, edits: edits)
+        let longest = max(geometry.outputSize.width, geometry.outputSize.height)
+        guard longest.isFinite, longest > 0 else { return 1 }
+        return min(1, Double(maxPixel) / Double(longest))
+    }
+
+    /// `scale` 해상도로 만든 마스크를 `extent` 크기로 늘린다. 가장자리는 늘리기 전에 연장해 테두리가 옅어지지 않게 한다.
+    private func fittedMask(for adjustment: LocalAdjustment, extent: CGRect, scale: Double) throws -> CIImage {
+        let width = Int(extent.width), height = Int(extent.height)
+        let mask = try cachedMask(for: adjustment, width: width, height: height, scale: scale)
+        guard mask.extent.width != CGFloat(width) || mask.extent.height != CGFloat(height) else { return mask }
+        let stretch = CGAffineTransform(scaleX: CGFloat(width) / mask.extent.width,
+                                        y: CGFloat(height) / mask.extent.height)
+        return mask.clampedToExtent().samplingLinear().transformed(by: stretch)
+            .cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
+    }
+
+    /// 편집 미리보기 파이프라인은 같은 모양의 마스크를 최근 8개까지 기억한다. 효과 값만 바꾸는 동안에는 다시 그리지 않는다.
+    private func cachedMask(for adjustment: LocalAdjustment, width: Int, height: Int, scale: Double) throws -> CIImage {
+        let definition = adjustment.maskDefinition
+        let scaledWidth = max(1, Int((Double(width) * scale).rounded()))
+        let scaledHeight = max(1, Int((Double(height) * scale).rounded()))
+        if cachesDevelopment {
+            maskLock.lock()
+            let hit = cachedMasks.first { $0.width == scaledWidth && $0.height == scaledHeight && $0.definition == definition }
+            maskLock.unlock()
+            if let hit { return hit.image }
+        }
+        var mask = try maskImage(for: adjustment, width: width, height: height, scale: scale)
+        guard cachesDevelopment else { return mask }
+        if adjustment.feather > 0, let flattened = context.createCGImage(mask, from: mask.extent, format: .L8, colorSpace: nil) {
+            mask = CIImage(cgImage: flattened, options: [.colorSpace: NSNull()])
+        }
+        maskLock.lock()
+        cachedMasks.append((definition, scaledWidth, scaledHeight, mask))
+        if cachedMasks.count > 8 { cachedMasks.removeFirst(cachedMasks.count - 8) }
+        maskLock.unlock()
+        return mask
     }
 
     private func maskImage(for adjustment: LocalAdjustment, width: Int, height: Int,
