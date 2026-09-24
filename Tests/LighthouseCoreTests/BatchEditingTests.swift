@@ -192,4 +192,22 @@ final class BatchEditingTests: XCTestCase {
         XCTAssertEqual(history.redo(), .edits([third]))
         XCTAssertNil(history.redo())
     }
+
+    func testRemovingPhotosDropsTheirHistorySteps() {
+        let kept = UUID(), removed = UUID()
+        var history = EditHistory()
+        history.record([PhotoEditChange(id: removed, before: .neutral, after: EditSettings(exposure: 1))])
+        history.recordMarks([PhotoMarkChange(id: kept, before: PhotoMarks(rating: 0, flag: .none),
+                                             after: PhotoMarks(rating: 3, flag: .none)),
+                             PhotoMarkChange(id: removed, before: PhotoMarks(rating: 0, flag: .none),
+                                             after: PhotoMarks(rating: 1, flag: .none))])
+        history.record([PhotoEditChange(id: removed, before: .neutral, after: EditSettings(contrast: 1.2))])
+        _ = history.undo()
+        history.recordContinuous(PhotoEditChange(id: removed, before: .neutral, after: EditSettings(saturation: 0)))
+        history.removeChanges(for: [removed])
+        XCTAssertFalse(history.canRedo)
+        guard case .marks(let changes)? = history.undo() else { return XCTFail("남은 사진의 표시 단계만 남아야 한다") }
+        XCTAssertEqual(changes.map(\.id), [kept])
+        XCTAssertNil(history.undo())
+    }
 }

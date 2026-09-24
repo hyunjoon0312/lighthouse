@@ -260,4 +260,25 @@ public struct EditHistory: Sendable {
         undoStack.append(step)
         return step
     }
+
+    /// 카탈로그에서 뺀 사진의 변경을 기록에서 지운다. 그 사진만 바꾼 단계는 통째로 사라져
+    /// 실행 취소를 눌러도 아무 일도 없는 단계가 남지 않는다.
+    public mutating func removeChanges(for ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        if let pending = pendingContinuous, ids.contains(pending.id) { pendingContinuous = nil }
+        func filtered(_ steps: [HistoryStep]) -> [HistoryStep] {
+            steps.compactMap { step in
+                switch step {
+                case .edits(let changes):
+                    let kept = changes.filter { !ids.contains($0.id) }
+                    return kept.isEmpty ? nil : .edits(kept)
+                case .marks(let changes):
+                    let kept = changes.filter { !ids.contains($0.id) }
+                    return kept.isEmpty ? nil : .marks(kept)
+                }
+            }
+        }
+        undoStack = filtered(undoStack)
+        redoStack = filtered(redoStack)
+    }
 }

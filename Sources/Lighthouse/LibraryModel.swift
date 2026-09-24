@@ -459,7 +459,7 @@ final class LibraryModel: ObservableObject {
             case .collection: matchesFilter = members?.contains(photo.id) ?? false
             }
             return matchesFilter && photo.rating >= minimumRating &&
-                (search.isEmpty || photo.filename.localizedCaseInsensitiveContains(search))
+                (search.isEmpty || photo.displayName.localizedCaseInsensitiveContains(search))
         }
         visibleCache = computed
         return computed
@@ -995,8 +995,10 @@ final class LibraryModel: ObservableObject {
         }
         for id in removedIDs {
             burstQualities[id] = nil
+            burstFailedIDs.remove(id)
             thumbnailCache.removeObject(forKey: id.uuidString as NSString)
         }
+        editHistory.removeChanges(for: removedIDs)
         thumbnailQueue.async { [thumbnailStore] in
             for id in removedIDs { thumbnailStore.remove(photoID: id) }
         }
@@ -1944,8 +1946,12 @@ final class LibraryModel: ObservableObject {
                 if let preset = self.importPreset {
                     for index in added.indices { added[index].edits = preset.applied(to: added[index].edits) }
                 }
-                self.photos.append(contentsOf: added)
-                self.photos.sort { ($0.metadata.capturedAt ?? $0.importedAt) < ($1.metadata.capturedAt ?? $1.importedAt) }
+                // 같은 시각끼리는 원래 순서를 지켜 가상 사본이 원래 항목 바로 뒤에 남게 한다.
+                self.photos = (self.photos + added).enumerated().sorted { first, second in
+                    let a = first.element.metadata.capturedAt ?? first.element.importedAt
+                    let b = second.element.metadata.capturedAt ?? second.element.importedAt
+                    return a != b ? a < b : first.offset < second.offset
+                }.map(\.element)
                 if self.selectedID == nil, let first = added.first {
                     self.photoSelection.select(first.id, in: self.visiblePhotos.map(\.id))
                 }

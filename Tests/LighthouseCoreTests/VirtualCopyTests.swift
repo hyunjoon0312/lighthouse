@@ -20,8 +20,7 @@ final class VirtualCopyTests: XCTestCase {
         var third = master.virtualCopy(among: [master])
         third.copyName = "사본 3"
         let other = PhotoAsset(url: URL(fileURLWithPath: "/photos/P2.RW2")).virtualCopy(among: [])
-        let date = Date(timeIntervalSince1970: 1_900_000_000)
-        let copy = master.virtualCopy(among: [master, third, other], at: date)
+        let copy = master.virtualCopy(among: [master, third, other])
 
         XCTAssertNotEqual(copy.id, master.id)
         XCTAssertEqual(copy.path, master.path)
@@ -29,7 +28,7 @@ final class VirtualCopyTests: XCTestCase {
         XCTAssertEqual(copy.edits, master.edits)
         XCTAssertEqual(copy.rating, 4)
         XCTAssertEqual(copy.flag, .pick)
-        XCTAssertEqual(copy.importedAt, date)
+        XCTAssertEqual(copy.importedAt, master.importedAt, "정렬 뒤에도 원래 항목 옆에 남도록 가져온 시각을 유지")
         XCTAssertTrue(copy.isVirtualCopy)
         XCTAssertFalse(master.isVirtualCopy)
         XCTAssertEqual(copy.displayName, "P1.RW2 · 사본 1")

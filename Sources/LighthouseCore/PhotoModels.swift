@@ -274,9 +274,10 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
     /// 화면에 보이는 이름. 사본은 파일 이름 뒤에 사본 이름을 붙인다.
     public var displayName: String { copyName.map { "\(filename) · \($0)" } ?? filename }
 
-    /// 같은 파일의 새 가상 사본. 보정·별점·표시를 그대로 가져오고 ID와 가져온 시각만 새로 정한다.
+    /// 같은 파일의 새 가상 사본. 보정·별점·표시와 가져온 시각을 그대로 가져오고 ID만 새로 정한다.
+    /// 가져온 시각이 같아야 촬영 시각이 없는 사진도 정렬 뒤 원래 항목 옆에 남는다.
     /// 이름은 `existing` 중 같은 파일의 사본 번호 다음 번호다.
-    public func virtualCopy(among existing: [PhotoAsset], at date: Date = Date()) -> PhotoAsset {
+    public func virtualCopy(among existing: [PhotoAsset]) -> PhotoAsset {
         let used = Set(existing.filter { $0.path == path }.compactMap { photo -> Int? in
             guard let name = photo.copyName, name.hasPrefix("사본 ") else { return nil }
             return Int(name.dropFirst(3))
@@ -285,7 +286,6 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
         while used.contains(number) { number += 1 }
         var copy = self
         copy.id = UUID()
-        copy.importedAt = date
         copy.copyName = "사본 \(number)"
         return copy
     }
