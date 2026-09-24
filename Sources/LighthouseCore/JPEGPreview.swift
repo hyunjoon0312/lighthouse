@@ -19,9 +19,13 @@ public struct JPEGPreview: @unchecked Sendable {
 
 public extension ImagePipeline {
     func prepareJPEG(url: URL, edits: EditSettings, maxPixel: Int?,
-                     quality: Double, includeLocation: Bool = false) throws -> JPEGPreview {
+                     quality: Double, includeLocation: Bool = false, watermark: Watermark? = nil) throws -> JPEGPreview {
         guard quality.isFinite else { throw ImagePipelineError.invalidJPEGQuality }
-        let rendered = try render(url: url, edits: edits, maxPixel: maxPixel)
+        var rendered = try render(url: url, edits: edits, maxPixel: maxPixel)
+        if let watermark {
+            guard let marked = watermark.applied(to: rendered) else { throw ImagePipelineError.exportFailed(url) }
+            rendered = marked
+        }
         let encoded = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             encoded, UTType.jpeg.identifier as CFString, 1, nil
@@ -75,6 +79,11 @@ public extension ImagePipeline {
     }
 
     func writeJPEG(_ data: Data, sourceURL: URL, to directory: URL) throws -> URL {
+        try writeJPEG(data, baseName: sourceURL.deletingPathExtension().lastPathComponent + "-edited", to: directory)
+    }
+
+    /// `baseName.jpg`로 쓴다. 이미 있으면 `-2`, `-3`을 붙이며 기존 파일은 덮어쓰지 않는다.
+    func writeJPEG(_ data: Data, baseName: String, to directory: URL) throws -> URL {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory),
               isDirectory.boolValue else {
@@ -87,7 +96,7 @@ public extension ImagePipeline {
             throw ImagePipelineError.invalidJPEGData
         }
 
-        let base = sourceURL.deletingPathExtension().lastPathComponent + "-edited"
+        let base = baseName
         for number in 1...10_000 {
             let suffix = number == 1 ? "" : "-\(number)"
             let output = directory.appendingPathComponent(base + suffix + ".jpg")

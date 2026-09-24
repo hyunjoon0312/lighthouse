@@ -46,10 +46,16 @@ enum ExportScope: String, CaseIterable {
 struct PreparedJPEGExport: @unchecked Sendable {
     let photoID: UUID
     let edits: EditSettings
-    let maxPixel: Int?
-    let quality: Double
-    let includeLocation: Bool
+    let options: ExportOptions
     let result: JPEGPreview
+
+    /// 파일 이름 규칙은 데이터에 영향이 없으므로 비교하지 않는다.
+    func matches(_ photo: PhotoAsset, _ other: ExportOptions) -> Bool {
+        var mine = options, theirs = other
+        mine.filenameTemplate = ""
+        theirs.filenameTemplate = ""
+        return photoID == photo.id && edits == photo.edits && mine == theirs
+    }
 }
 
 /// 포인터를 움직일 때마다 바뀌는 브러시 상태. 작업 공간 전체가 아니라 캔버스만 다시 그리도록 분리한다.
@@ -1697,8 +1703,7 @@ final class LibraryModel: ObservableObject {
         }
     }
 
-    func export(scope: ExportScope, maxPixel: Int?, quality: Double, includeLocation: Bool, directory: URL,
-                prepared: PreparedJPEGExport? = nil) {
+    func export(scope: ExportScope, options: ExportOptions, directory: URL, prepared: PreparedJPEGExport? = nil) {
         guard !isExporting, catalogLoaded, loadError == nil else { return }
         let targets = exportTargets(for: scope)
         guard !targets.isEmpty else { return }
@@ -1718,15 +1723,17 @@ final class LibraryModel: ObservableObject {
                     break
                 }
                 do {
-                    if let prepared, prepared.photoID == photo.id, prepared.edits == photo.edits,
-                       prepared.maxPixel == maxPixel, prepared.quality == quality,
-                       prepared.includeLocation == includeLocation {
-                        _ = try pipeline.writeJPEG(prepared.result.data, sourceURL: photo.url, to: directory)
+                    let data: Data
+                    if let prepared, prepared.matches(photo, options) {
+                        data = prepared.result.data
                     } else {
-                        _ = try pipeline.exportJPEG(url: photo.url, edits: photo.edits, to: directory,
-                                                    maxPixel: maxPixel, quality: quality,
-                                                    includeLocation: includeLocation)
+                        data = try pipeline.prepareJPEG(url: photo.url, edits: photo.edits, maxPixel: options.maxPixel,
+                                                        quality: options.quality, includeLocation: options.includeLocation,
+                                                        watermark: options.watermark).data
                     }
+                    let baseName = ExportOptions.baseName(template: options.filenameTemplate, sourceURL: photo.url,
+                                                          capturedAt: photo.metadata.capturedAt, sequence: index + 1)
+                    _ = try pipeline.writeJPEG(data, baseName: baseName, to: directory)
                     successes += 1
                 }
                 catch { failures.append("\(photo.filename): \(error.localizedDescription)") }
