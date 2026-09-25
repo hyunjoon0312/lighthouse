@@ -23,10 +23,8 @@ final class JPEGPreviewModel: ObservableObject {
         isPreparing = true
         let job = DispatchWorkItem { [weak self, pipeline] in
             let result = Result {
-                try pipeline.prepareJPEG(url: photo.url, edits: photo.edits,
-                                         maxPixel: options.maxPixel, quality: options.quality,
-                                         includeLocation: options.includeLocation, watermark: options.watermark,
-                                         keywords: photo.keywords, caption: photo.caption)
+                try pipeline.prepareExport(url: photo.url, edits: photo.edits, options: options,
+                                           keywords: photo.keywords, caption: photo.caption)
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self, token == self.generation else { return }

@@ -2429,15 +2429,13 @@ final class LibraryModel: ObservableObject {
                     if let prepared, prepared.matches(photo, options) {
                         data = prepared.result.data
                     } else {
-                        data = try pipeline.prepareJPEG(url: photo.url, edits: photo.edits, maxPixel: options.maxPixel,
-                                                        quality: options.quality, includeLocation: options.includeLocation,
-                                                        watermark: options.watermark, keywords: photo.keywords,
-                                                        caption: photo.caption).data
+                        data = try pipeline.prepareExport(url: photo.url, edits: photo.edits, options: options,
+                                                          keywords: photo.keywords, caption: photo.caption).data
                     }
                     let baseName = ExportOptions.baseName(template: options.filenameTemplate, sourceURL: photo.url,
                                                           capturedAt: photo.metadata.capturedAt, sequence: index + 1,
                                                           copyName: photo.copyName)
-                    _ = try pipeline.writeJPEG(data, baseName: baseName, to: directory)
+                    _ = try pipeline.writeExport(data, format: options.format, baseName: baseName, to: directory)
                     successes += 1
                 }
                 catch { failures.append("\(photo.filename): \(error.localizedDescription)") }

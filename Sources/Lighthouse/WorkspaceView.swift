@@ -262,7 +262,7 @@ struct WorkspaceView: View {
             .labelsHidden().frame(width: 118)
             .help("보이는 목록의 순서. 같은 값끼리는 촬영 시각 순입니다.")
             Button { model.showExport = true } label: { Label("내보내기", systemImage: "square.and.arrow.up") }
-                .accessibilityLabel("JPEG 내보내기")
+                .accessibilityLabel("내보내기")
                 .disabled(model.selection == nil || model.isExporting || !model.catalogLoaded)
         }
         .padding(.horizontal, 20).frame(height: 67).background(Palette.panel)

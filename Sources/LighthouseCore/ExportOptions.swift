@@ -1,6 +1,59 @@
 import CoreGraphics
+import CoreImage
 import CoreText
 import Foundation
+import UniformTypeIdentifiers
+
+/// 내보내기 파일 형식. JPEG은 8비트, HEIF는 16비트로 그려 10비트로 저장하고, TIFF는 압축하지 않은 16비트 RGB다.
+/// (16비트 사진에서 LZW는 오히려 커지고 ZIP은 24MP에 11초가 걸려 압축하지 않는다.)
+public enum ExportFormat: String, Codable, CaseIterable, Sendable {
+    case jpeg, heif, tiff16
+
+    public var title: String {
+        switch self {
+        case .jpeg: "JPEG"
+        case .heif: "HEIF (10비트)"
+        case .tiff16: "TIFF (16비트)"
+        }
+    }
+
+    public var fileExtension: String {
+        switch self {
+        case .jpeg: "jpg"
+        case .heif: "heic"
+        case .tiff16: "tif"
+        }
+    }
+
+    public var type: UTType {
+        switch self {
+        case .jpeg: .jpeg
+        case .heif: .heic
+        case .tiff16: .tiff
+        }
+    }
+
+    /// 품질 설정을 쓰는 손실 압축인지.
+    public var usesQuality: Bool { self != .tiff16 }
+
+    var renderFormat: CIFormat { self == .jpeg ? .RGBA8 : .RGBA16 }
+}
+
+/// 내보내기 색 공간. Display P3는 RAW의 넓은 색을 남기지만 P3를 모르는 곳에서는 색이 옅게 보일 수 있다.
+public enum ExportColorSpace: String, Codable, CaseIterable, Sendable {
+    case sRGB, displayP3
+
+    public var title: String {
+        switch self {
+        case .sRGB: "sRGB"
+        case .displayP3: "Display P3"
+        }
+    }
+
+    public var cgColorSpace: CGColorSpace {
+        CGColorSpace(name: self == .sRGB ? CGColorSpace.sRGB : CGColorSpace.displayP3)!
+    }
+}
 
 public enum WatermarkPosition: String, Codable, CaseIterable, Sendable {
     case bottomRight, bottomLeft, topRight, topLeft, center
@@ -25,7 +78,9 @@ public struct Watermark: Codable, Equatable, Sendable {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return image }
         let width = image.width, height = image.height
-        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+        // 16비트 출력(HEIF·TIFF)은 16비트로 그려 계조를 잃지 않는다.
+        guard let context = CGContext(data: nil, width: width, height: height,
+                                      bitsPerComponent: image.bitsPerComponent > 8 ? 16 : 8, bytesPerRow: 0,
                                       space: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
@@ -67,14 +122,35 @@ public struct ExportOptions: Codable, Equatable, Sendable {
     public var includeLocation: Bool
     public var filenameTemplate: String
     public var watermark: Watermark?
+    public var format: ExportFormat
+    public var colorSpace: ExportColorSpace
 
     public init(maxPixel: Int? = nil, quality: Double = 0.85, includeLocation: Bool = false,
-                filenameTemplate: String = ExportOptions.defaultFilenameTemplate, watermark: Watermark? = nil) {
+                filenameTemplate: String = ExportOptions.defaultFilenameTemplate, watermark: Watermark? = nil,
+                format: ExportFormat = .jpeg, colorSpace: ExportColorSpace = .sRGB) {
         self.maxPixel = maxPixel
         self.quality = quality
         self.includeLocation = includeLocation
         self.filenameTemplate = filenameTemplate
         self.watermark = watermark
+        self.format = format
+        self.colorSpace = colorSpace
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case maxPixel, quality, includeLocation, filenameTemplate, watermark, format, colorSpace
+    }
+
+    /// 형식·색 공간이 없던 예전 설정과 프리셋은 JPEG·sRGB로 읽는다.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        maxPixel = try container.decodeIfPresent(Int.self, forKey: .maxPixel)
+        quality = try container.decode(Double.self, forKey: .quality)
+        includeLocation = try container.decode(Bool.self, forKey: .includeLocation)
+        filenameTemplate = try container.decode(String.self, forKey: .filenameTemplate)
+        watermark = try container.decodeIfPresent(Watermark.self, forKey: .watermark)
+        format = try container.decodeIfPresent(ExportFormat.self, forKey: .format) ?? .jpeg
+        colorSpace = try container.decodeIfPresent(ExportColorSpace.self, forKey: .colorSpace) ?? .sRGB
     }
 
     /// `{원본}` 원본 파일 이름, `{날짜}` 촬영일(yyyy-MM-dd), `{시간}` 촬영 시각(HHmmss), `{번호}` 이번 내보내기의 순번(001부터),

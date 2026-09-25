@@ -17,7 +17,7 @@ struct ExportSheet: View {
 
     private var targets: [PhotoAsset] { model.exportTargets(for: scope) }
     private var representative: PhotoAsset? { targets.first }
-    /// 파일 이름 규칙은 JPEG 데이터에 영향이 없으므로 미리보기를 다시 만들 때 빼고 비교한다.
+    /// 파일 이름 규칙은 파일 데이터에 영향이 없으므로 미리보기를 다시 만들 때 빼고 비교한다.
     private var renderOptions: ExportOptions {
         var copy = options
         copy.filenameTemplate = ""
@@ -50,14 +50,14 @@ struct ExportSheet: View {
             Button("저장") { savePreset() }
             Button("취소", role: .cancel) { }
         } message: {
-            Text("긴 변·품질·위치 정보·파일 이름·워터마크 설정을 저장합니다.")
+            Text("형식·색 공간·긴 변·품질·위치 정보·파일 이름·워터마크 설정을 저장합니다.")
         }
     }
 
     private var header: some View {
         HStack {
             Image(systemName: "square.and.arrow.up").font(.title2).foregroundStyle(.orange)
-            Text("JPEG 내보내기").font(.title2.weight(.semibold))
+            Text("내보내기").font(.title2.weight(.semibold))
             Spacer()
             if previewModel.isPreparing { ProgressView().controlSize(.small) }
             presetMenu
@@ -69,7 +69,7 @@ struct ExportSheet: View {
             HStack {
                 Spacer()
                 Toggle(actualSize ? "100%" : "화면 맞춤", isOn: $actualSize)
-                    .toggleStyle(.button).accessibilityLabel("JPEG 미리보기 100퍼센트")
+                    .toggleStyle(.button).accessibilityLabel("내보내기 미리보기 100퍼센트")
             }
             previewPane.frame(minWidth: 560, minHeight: 420)
             if targets.count > 1 {
@@ -85,14 +85,14 @@ struct ExportSheet: View {
                 Text(directory?.path ?? "저장 폴더를 선택하세요").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
                 Button("폴더 선택…") { chooseDirectory() }
-                    .disabled(model.isExporting).accessibilityLabel("JPEG 저장 폴더 선택")
+                    .disabled(model.isExporting).accessibilityLabel("내보내기 저장 폴더 선택")
             }
             if model.isExporting {
                 HStack {
                     ProgressView(value: model.operationProgress)
                     Button(model.isCancellingExport ? "중지하는 중…" : "중지") { model.cancelExport() }
                         .disabled(model.isCancellingExport)
-                        .accessibilityLabel("JPEG 내보내기 중지")
+                        .accessibilityLabel("내보내기 중지")
                 }
             }
             if let report = model.exportReport { Text(report).font(.caption).textSelection(.enabled) }
@@ -118,20 +118,37 @@ struct ExportSheet: View {
                 Text("선택한 사진 (\(model.selectedPhotos.count)장)").tag(ExportScope.selected)
                 Text("현재 필터 결과 (\(model.visiblePhotos.count)장)").tag(ExportScope.visible)
             }
-            .accessibilityLabel("JPEG 내보내기 대상")
+            .accessibilityLabel("내보내기 대상")
+            Picker("형식", selection: $options.format) {
+                ForEach(ExportFormat.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .accessibilityLabel("파일 형식")
+            Picker("색 공간", selection: $options.colorSpace) {
+                ForEach(ExportColorSpace.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .accessibilityLabel("색 공간")
+            if options.colorSpace == .displayP3 {
+                Text("넓은 색을 남깁니다. 웹이나 P3를 모르는 프로그램에서는 색이 옅게 보일 수 있어 공유용은 sRGB가 안전합니다.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Picker("긴 변", selection: $options.maxPixel) {
                 Text("원본 크기").tag(Int?.none)
                 ForEach([3840, 2048, 1080], id: \.self) { Text("\($0) px").tag(Optional($0)) }
             }
-            .accessibilityLabel("JPEG 긴 변")
-            HStack {
-                Text("품질")
-                Slider(value: $options.quality, in: 0.4...1).accessibilityLabel("JPEG 품질")
-                Text("\(Int(options.quality * 100))%").monospacedDigit().frame(width: 40)
+            .accessibilityLabel("긴 변")
+            if options.format.usesQuality {
+                HStack {
+                    Text("품질")
+                    Slider(value: $options.quality, in: 0.4...1).accessibilityLabel("압축 품질")
+                    Text("\(Int(options.quality * 100))%").monospacedDigit().frame(width: 40)
+                }
+            } else {
+                Text("TIFF는 압축하지 않은 16비트라 품질 설정이 없고 파일이 큽니다(2400만 화소 약 140MB).")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Toggle("위치(GPS) 정보 포함", isOn: $options.includeLocation)
-                .help("촬영일·카메라·렌즈 정보는 항상 원본에서 옮깁니다. 위치는 켠 경우에만 포함합니다.")
-                .accessibilityLabel("내보낸 JPEG에 위치 정보 포함")
+                .help("촬영일·카메라·렌즈 정보와 키워드·설명은 항상 넣습니다. 위치는 켠 경우에만 포함합니다.")
+                .accessibilityLabel("내보낸 파일에 위치 정보 포함")
             Divider()
             filenameSettings
             Divider()
@@ -150,7 +167,7 @@ struct ExportSheet: View {
                         .controlSize(.small).accessibilityLabel("\(token) 넣기")
                 }
             }
-            Text("예: \(exampleName).jpg").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text("예: \(exampleName).\(options.format.fileExtension)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             Text("가상 사본은 {사본}이 없어도 이름 끝에 ‘-사본1’처럼 붙습니다.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
@@ -223,11 +240,11 @@ struct ExportSheet: View {
             } else if let error = previewModel.error {
                 VStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle")
-                    Text("JPEG 미리보기를 만들 수 없습니다")
+                    Text("미리보기를 만들 수 없습니다")
                     Text(error).font(.caption).multilineTextAlignment(.center)
                 }.foregroundStyle(.secondary).padding()
             } else if previewModel.isPreparing {
-                ProgressView("실제 JPEG 압축 확인 중…")
+                ProgressView("실제 파일로 저장해 확인 중…")
             } else {
                 Text("미리볼 사진이 없습니다.").foregroundStyle(.secondary)
             }
@@ -249,7 +266,7 @@ struct ExportSheet: View {
         VStack {
             Spacer()
             HStack {
-                Text("\(prepared.result.width) × \(prepared.result.height) · \(formattedBytes(prepared.result.data.count))")
+                Text("\(prepared.options.format.title) · \(prepared.result.width) × \(prepared.result.height) · \(formattedBytes(prepared.result.data.count))")
                     .font(.caption.monospacedDigit()).padding(6)
                     .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 5))
                 Spacer()

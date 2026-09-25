@@ -33,7 +33,7 @@ struct LighthouseApp: App {
                     .disabled(library.selection == nil || library.hasModalPresentation)
             }
             CommandGroup(after: .saveItem) {
-                Button("JPEG 내보내기…") { library.showExport = true }
+                Button("내보내기…") { library.showExport = true }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                     .disabled(library.selection == nil || library.isExporting || library.hasModalPresentation)
                 Divider()

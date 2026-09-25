@@ -24,13 +24,13 @@ public enum ImagePipelineError: LocalizedError {
         case .unreadable(let url): "이미지를 읽을 수 없습니다: \(url.lastPathComponent)"
         case .renderFailed(let url): "이미지를 현상할 수 없습니다: \(url.lastPathComponent)"
         case .invalidDirectory(let url): "내보내기 폴더를 사용할 수 없습니다: \(url.path)"
-        case .exportFailed(let url): "JPEG 파일을 저장할 수 없습니다: \(url.path)"
+        case .exportFailed(let url): "파일을 저장할 수 없습니다: \(url.path)"
         case .invalidMaskGeometry: "영역 마스크의 이미지 크기가 올바르지 않습니다."
         case .invalidMaskData(let reason): "저장된 영역 마스크가 올바르지 않습니다: \(reason)"
         case .subjectNotFound: "자동으로 선택할 피사체를 찾지 못했습니다."
         case .subjectMaskFailed(let reason): "자동 피사체 마스크를 만들 수 없습니다: \(reason)"
         case .invalidJPEGQuality: "JPEG 품질은 유한한 값이어야 합니다."
-        case .invalidJPEGData: "JPEG 데이터가 올바르지 않습니다."
+        case .invalidJPEGData: "내보낼 이미지 데이터가 올바르지 않습니다."
         case .lutFailed(let reason): "LUT를 적용할 수 없습니다: \(reason)"
         }
     }
@@ -189,6 +189,13 @@ public final class ImagePipeline: @unchecked Sendable {
         try render(url: url, edits: edits, maxPixel: maxPixel, scale: 1, allowApproximation: false).image
     }
 
+    /// 내보내기용. 원본 해상도로 현상해 `format`(8·16비트)과 `colorSpace`로 그린다.
+    func render(url: URL, edits: EditSettings, maxPixel: Int?, format: CIFormat,
+                colorSpace outputSpace: CGColorSpace) throws -> CGImage {
+        try render(url: url, edits: edits, maxPixel: maxPixel, scale: 1, allowApproximation: false,
+                   format: format, colorSpace: outputSpace).image
+    }
+
     /// 화면 표시용. RAW는 출력에 필요한 만큼 줄여서 현상해 메모리를 아낀다. 원본 해상도로 현상해 줄인 결과와
     /// 픽셀이 같지는 않다. `allowApproximation`이면 RAW 노출·색온도·틴트만 바뀐 경우 최근 현상 결과에 차이를
     /// 덧씌워 RAW를 다시 현상하지 않고 그린다(슬라이더를 끄는 동안). 근사 결과인지 함께 돌려주므로 끝난 뒤 정확히 다시 그린다.
@@ -242,8 +249,9 @@ public final class ImagePipeline: @unchecked Sendable {
         return "\(url.path)|\(modified?.timeIntervalSinceReferenceDate ?? 0)"
     }
 
-    private func render(url: URL, edits: EditSettings, maxPixel: Int?, scale: Double,
-                        allowApproximation: Bool) throws -> (image: CGImage, isApproximate: Bool) {
+    private func render(url: URL, edits: EditSettings, maxPixel: Int?, scale: Double, allowApproximation: Bool,
+                        format: CIFormat = .RGBA8,
+                        colorSpace outputSpace: CGColorSpace? = nil) throws -> (image: CGImage, isApproximate: Bool) {
         let development = try developed(url: url, edits: edits, scale: scale, allowApproximation: allowApproximation)
         var image = development.image
         image = try RetouchProcessor.apply(to: image, strokes: edits.retouchStrokes,
@@ -297,7 +305,8 @@ public final class ImagePipeline: @unchecked Sendable {
         image = applyVignette(edits.vignette, to: image)
         let rect = CGRect(x: 0, y: 0, width: floor(image.extent.width), height: floor(image.extent.height))
         guard rect.width > 0, rect.height > 0,
-              let result = context.createCGImage(image, from: rect, format: .RGBA8, colorSpace: colorSpace) else {
+              let result = context.createCGImage(image, from: rect, format: format,
+                                                 colorSpace: outputSpace ?? colorSpace) else {
             throw ImagePipelineError.renderFailed(url)
         }
         return (result, development.isApproximate)

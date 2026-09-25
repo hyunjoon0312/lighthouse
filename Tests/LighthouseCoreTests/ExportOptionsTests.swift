@@ -88,4 +88,62 @@ final class ExportOptionsTests: XCTestCase {
         XCTAssertEqual(second.lastPathComponent, "여행-001-2.jpg")
         XCTAssertEqual(try Data(contentsOf: first), marked.data)
     }
+
+    private func writeInput(_ directory: URL) throws -> URL {
+        let input = directory.appendingPathComponent("in.png")
+        let context = try XCTUnwrap(CGContext(data: nil, width: 120, height: 80, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        for x in 0..<120 {
+            context.setFillColor(red: CGFloat(x) / 119, green: 0.4, blue: 0.8, alpha: 1)
+            context.fill(CGRect(x: x, y: 0, width: 1, height: 80))
+        }
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(input as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, try XCTUnwrap(context.makeImage()), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return input
+    }
+
+    func testEachFormatWritesItsContainerDepthAndColorSpace() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let input = try writeInput(directory)
+        let pipeline = ImagePipeline()
+        let cases: [(ExportFormat, ExportColorSpace, String, Int, String, Int)] = [
+            (.jpeg, .sRGB, "public.jpeg", 8, "sRGB IEC61966-2.1", 1),
+            (.heif, .displayP3, "public.heic", 10, "Display P3", 65535),
+            (.tiff16, .displayP3, "public.tiff", 16, "Display P3", 65535),
+        ]
+        for (format, space, type, depth, profile, exifSpace) in cases {
+            let options = ExportOptions(quality: 0.8, watermark: Watermark(text: "L"), format: format, colorSpace: space)
+            let prepared = try pipeline.prepareExport(url: input, edits: .neutral, options: options, keywords: ["바다"])
+            let source = try XCTUnwrap(CGImageSourceCreateWithData(prepared.data as CFData, nil))
+            XCTAssertEqual(CGImageSourceGetType(source) as String?, type)
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+            XCTAssertEqual(properties[kCGImagePropertyDepth] as? Int, depth, "\(format)")
+            XCTAssertEqual(properties[kCGImagePropertyProfileName] as? String, profile, "\(format)")
+            XCTAssertEqual((properties[kCGImagePropertyExifDictionary] as? [CFString: Any])?[kCGImagePropertyExifColorSpace] as? Int,
+                           exifSpace, "\(format)")
+            XCTAssertEqual((properties[kCGImagePropertyIPTCDictionary] as? [CFString: Any])?[kCGImagePropertyIPTCKeywords] as? [String],
+                           ["바다"], "\(format)")
+            XCTAssertEqual(prepared.width, 120)
+            if format == .tiff16 { XCTAssertEqual(prepared.image.bitsPerPixel, 48, "TIFF는 알파 없이 RGB만 저장한다") }
+            let written = try pipeline.writeExport(prepared.data, format: format, baseName: "out", to: directory)
+            XCTAssertEqual(written.pathExtension, format.fileExtension)
+        }
+        let jpeg = try pipeline.prepareExport(url: input, edits: .neutral, options: ExportOptions(quality: 0.8))
+        XCTAssertThrowsError(try pipeline.writeExport(jpeg.data, format: .tiff16, baseName: "wrong", to: directory),
+                             "형식과 다른 데이터는 쓰지 않는다")
+        XCTAssertEqual(try pipeline.prepareJPEG(url: input, edits: .neutral, maxPixel: nil, quality: 0.8).data, jpeg.data,
+                       "기본 설정은 예전 JPEG 경로와 같은 파일을 만든다")
+    }
+
+    func testOlderSavedOptionsReadAsJPEGInSRGB() throws {
+        let legacy = Data(#"{"quality":0.9,"includeLocation":true,"filenameTemplate":"{원본}","maxPixel":2048}"#.utf8)
+        let options = try JSONDecoder().decode(ExportOptions.self, from: legacy)
+        XCTAssertEqual(options, ExportOptions(maxPixel: 2048, quality: 0.9, includeLocation: true, filenameTemplate: "{원본}"))
+        let tiff = ExportOptions(format: .tiff16, colorSpace: .displayP3)
+        XCTAssertEqual(try JSONDecoder().decode(ExportOptions.self, from: JSONEncoder().encode(tiff)), tiff)
+    }
 }
