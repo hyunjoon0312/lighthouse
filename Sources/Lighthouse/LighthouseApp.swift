@@ -40,6 +40,9 @@ struct LighthouseApp: App {
                 Button("카탈로그 보관본 보기") { library.revealBackups() }
             }
             CommandMenu("사진") {
+                Button(library.isFocusView ? "사진만 보기 끝내기 (F)" : "사진만 보기 (F)") { library.toggleFocusView() }
+                    .disabled(library.selection == nil || library.hasModalPresentation)
+                Divider()
                 Button("가상 사본 만들기") { library.createVirtualCopy() }
                     .keyboardShortcut("'", modifiers: .command)
                     .disabled(library.selection == nil || !library.catalogLoaded || library.hasModalPresentation)

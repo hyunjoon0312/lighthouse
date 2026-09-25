@@ -205,6 +205,8 @@ final class LibraryModel: ObservableObject {
     @Published var rawCapabilities: RAWCapabilities?
     @Published var histogram: ImageHistogram?
     @Published var showsClipping = false { didSet { refreshClippingOverlay() } }
+    /// 사진만 크게 보는 보기(F). 패널을 숨기며, 그리드로 돌아가면 끝난다.
+    @Published var isFocusView = false
     @Published var clippingOverlay: NSImage?
     @Published var zoomAnchor = CGPoint(x: 0.5, y: 0.5)
     /// 비교 모드의 기준 사진을 보정한 모습으로 보인다. 끄면 보정 전 원본이다.
@@ -834,7 +836,16 @@ final class LibraryModel: ObservableObject {
             pinnedRenderedEdits = nil
         }
         mode = newMode
+        if newMode == .grid { isFocusView = false }
         requestRender()
+    }
+
+    /// 그리드에서 누르면 사진 보기로 바꿔 들어간다.
+    func toggleFocusView() {
+        if isFocusView { isFocusView = false; return }
+        guard selection != nil else { return }
+        if mode == .grid { setMode(.edit) }
+        isFocusView = true
     }
 
     func toggleOriginal() {

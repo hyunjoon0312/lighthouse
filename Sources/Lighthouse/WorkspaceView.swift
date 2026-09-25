@@ -18,28 +18,20 @@ struct WorkspaceView: View {
     /// 그리드 칸의 최소 너비. 썸네일 크기 슬라이더로 바꾸며 다음 실행에도 기억한다.
     @AppStorage("gridTileWidth") private var tileWidth = 180.0
     @State private var gridWidth: CGFloat = 0
+    /// 사진만 보기를 켜며 전체 화면으로 들어갔는지. 이미 전체 화면이었다면 나갈 때 그대로 둔다.
+    @State private var enteredFullScreen = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar.frame(width: 224)
-            Rectangle().fill(.white.opacity(0.08)).frame(width: 1)
-            VStack(spacing: 0) {
-                toolbar
-                Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
-                selectionToolbar
-                Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
-                if model.filter == .bursts {
-                    BurstBar()
-                    Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
-                }
-                mainContent.frame(maxWidth: .infinity, maxHeight: .infinity)
-                filmstrip
-            }
-            Rectangle().fill(.white.opacity(0.08)).frame(width: 1)
-            inspector.frame(width: 300)
+        Group {
+            if model.isFocusView { focusView } else { workspace }
         }
         .background(Palette.background)
         .tint(Palette.accent)
+        .onChange(of: model.isFocusView) { _, focused in setFullScreen(focused) }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
+            enteredFullScreen = false
+            if model.isFocusView { model.isFocusView = false }
+        }
         .sheet(isPresented: $model.showExport) { ExportSheet() }
         .sheet(isPresented: $model.showBatchEdit) { BatchEditSheet() }
         .sheet(isPresented: $model.showCardImport) { CardImportSheet() }
@@ -85,6 +77,56 @@ struct WorkspaceView: View {
         .onChange(of: model.minimumRating) { _, _ in model.ensureSelectionVisible() }
         .onChange(of: model.hasModalPresentation) { _, presented in
             if presented { model.cancelDraft(); model.cancelRetouchDraft() }
+        }
+    }
+
+    /// 사진만 보기. 이동·별점·표시 키는 그대로 쓴다.
+    private var focusView: some View {
+        canvasPanes
+            .overlay(alignment: .bottom) {
+                HStack(spacing: 10) {
+                    Text(model.selection?.displayName ?? "").lineLimit(1)
+                    if let rating = model.selection?.rating, rating > 0 {
+                        Text(String(repeating: "★", count: rating)).foregroundStyle(Palette.accent)
+                    }
+                    Text("F 또는 Esc로 나가기").foregroundStyle(Palette.muted)
+                }
+                .font(.caption).padding(.horizontal, 12).padding(.vertical, 6)
+                .background(.black.opacity(0.55), in: Capsule())
+                .padding(.bottom, 14)
+            }
+    }
+
+    private func setFullScreen(_ focused: Bool) {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
+        let isFullScreen = window.styleMask.contains(.fullScreen)
+        if focused, !isFullScreen {
+            enteredFullScreen = true
+            window.toggleFullScreen(nil)
+        } else if !focused, enteredFullScreen {
+            enteredFullScreen = false
+            if isFullScreen { window.toggleFullScreen(nil) }
+        }
+    }
+
+    private var workspace: some View {
+        HStack(spacing: 0) {
+            sidebar.frame(width: 224)
+            Rectangle().fill(.white.opacity(0.08)).frame(width: 1)
+            VStack(spacing: 0) {
+                toolbar
+                Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                selectionToolbar
+                Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                if model.filter == .bursts {
+                    BurstBar()
+                    Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                }
+                mainContent.frame(maxWidth: .infinity, maxHeight: .infinity)
+                filmstrip
+            }
+            Rectangle().fill(.white.opacity(0.08)).frame(width: 1)
+            inspector.frame(width: 300)
         }
     }
 
@@ -384,6 +426,11 @@ struct WorkspaceView: View {
                 Button(model.isOriginal ? "보정 보기" : "원본 보기") { model.toggleOriginal() }
             }
             .buttonStyle(.borderless).padding(.horizontal, 20).frame(height: 44)
+            canvasPanes
+        }
+    }
+
+    private var canvasPanes: some View {
             HStack(spacing: 1) {
                 if model.mode == .compare {
                     imagePane(model.pinnedImage, error: model.pinnedError,
@@ -394,7 +441,6 @@ struct WorkspaceView: View {
                           overlay: model.showsClipping ? model.clippingOverlay : nil, zoomable: true)
             }
             .background(Palette.canvas)
-        }
     }
 
     private func imagePane(_ image: NSImage?, error: String?, caption: String, overlay: NSImage?,
@@ -537,6 +583,7 @@ struct WorkspaceView: View {
                 return nil
             }
             if NSApp.keyWindow?.firstResponder is NSTextView { return event }
+            if event.keyCode == 53, model.isFocusView { model.isFocusView = false; return nil }
             // 한글 입력 상태에서도 같은 키로 동작하도록 글자 대신 키 위치로 읽는다.
             let key = ShortcutKey.resolve(characters: event.charactersIgnoringModifiers, keyCode: event.keyCode)
             if event.modifierFlags.contains(.command), key == "a" {
@@ -556,6 +603,7 @@ struct WorkspaceView: View {
                 case "c": model.setMode(.compare); return nil
                 case "\\": model.toggleOriginal(); return nil
                 case "j": model.showsClipping.toggle(); return nil
+                case "f": model.toggleFocusView(); return nil
                 default: break
                 }
                 // Delete: 내 폴더에서는 그 폴더에서만 빼고, 그 밖에서는 카탈로그에서 뺄지 묻는다.
