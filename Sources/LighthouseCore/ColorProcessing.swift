@@ -88,7 +88,7 @@ public enum AdvancedColorProcessor {
         guard let encoded = image.matchedFromWorkingSpace(to: sRGB) else {
             throw AdvancedColorProcessingError.colorSpaceConversionFailed
         }
-        guard let kernel = GrainKernel.shared.kernel else {
+        guard let kernel = CoreImageKernels.grain else {
             throw AdvancedColorProcessingError.grainKernelFailed
         }
         let seedPhase = Double(settings.seed & 0xffff) * 0.001
@@ -333,29 +333,5 @@ private final class ColorCubeCache: @unchecked Sendable {
         if entries.count > 4 { entries.removeFirst(entries.count - 4) }
         lock.unlock()
         return result
-    }
-}
-
-private final class GrainKernel: @unchecked Sendable {
-    static let shared = GrainKernel()
-
-    let kernel: CIColorKernel?
-
-    private init() {
-        kernel = CIColorKernel(source: """
-        kernel vec4 lighthouseGrain(__sample pixel, float grainSize, float amount, float seed) {
-            vec2 position = destCoord() / grainSize;
-            vec2 cell = floor(position);
-            vec2 blend = fract(position);
-            blend = blend * blend * (3.0 - 2.0 * blend);
-            float n00 = fract(sin(dot(cell, vec2(12.9898, 78.233)) + seed) * 43758.5453);
-            float n10 = fract(sin(dot(cell + vec2(1.0, 0.0), vec2(12.9898, 78.233)) + seed) * 43758.5453);
-            float n01 = fract(sin(dot(cell + vec2(0.0, 1.0), vec2(12.9898, 78.233)) + seed) * 43758.5453);
-            float n11 = fract(sin(dot(cell + vec2(1.0, 1.0), vec2(12.9898, 78.233)) + seed) * 43758.5453);
-            float noise = mix(mix(n00, n10, blend.x), mix(n01, n11, blend.x), blend.y);
-            vec3 changed = clamp(pixel.rgb + (noise - 0.5) * amount * 0.22, 0.0, 1.0);
-            return vec4(changed, pixel.a);
-        }
-        """)
     }
 }

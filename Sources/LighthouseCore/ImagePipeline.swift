@@ -46,14 +46,6 @@ public final class ImagePipeline: @unchecked Sendable {
     public static var supportedCameraModels: [String] { CIRAWFilter.supportedCameraModels }
 
     static let maximumMaskBytes = 8 * 1_024 * 1_024
-    private static let clarityKernel = CIColorKernel(source: """
-        kernel vec4 clarity(__sample image, __sample fine, __sample coarse, float amount) {
-            float luma = dot(image.rgb, vec3(0.2126, 0.7152, 0.0722));
-            float tone = pow(clamp(luma, 0.0, 1.0), 0.4545);
-            float midtones = clamp(4.0 * tone * (1.0 - tone), 0.0, 1.0);
-            return vec4(image.rgb + amount * midtones * (fine.rgb - coarse.rgb), image.a);
-        }
-        """)
 
     let context: CIContext
     let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
@@ -274,7 +266,7 @@ public final class ImagePipeline: @unchecked Sendable {
     /// 원본 짧은 변의 0.15%~1.5% 크기 대비(중간 주파수)를 중간 톤 위주로 더하거나 빼서 잔 디테일은 남긴다.
     /// 반경을 원본 크기에 맞추므로 미리보기와 내보내기가 같다.
     private func applyClarity(_ amount: Double, to image: CIImage) -> CIImage {
-        guard amount != 0, amount.isFinite, let kernel = Self.clarityKernel else { return image }
+        guard amount != 0, amount.isFinite, let kernel = CoreImageKernels.clarity else { return image }
         let shortSide = min(image.extent.width, image.extent.height)
         let small = CIFilter.gaussianBlur()
         small.inputImage = image.clampedToExtent()

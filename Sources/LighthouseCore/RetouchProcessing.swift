@@ -24,12 +24,6 @@ public enum RetouchProcessingError: LocalizedError, Equatable, Sendable {
 }
 
 enum RetouchProcessor {
-    private static let correctionKernel = CIColorKernel(source: """
-        kernel vec4 healCorrection(__sample source, __sample lowTarget, __sample lowSource) {
-            return vec4(clamp(source.rgb + lowTarget.rgb - lowSource.rgb, 0.0, 1.0), source.a);
-        }
-        """)
-
     static func apply(to source: CIImage, strokes: [RetouchStroke],
                       context: CIContext, colorSpace: CGColorSpace) throws -> CIImage {
         guard !strokes.isEmpty else { return source }
@@ -100,7 +94,7 @@ enum RetouchProcessor {
         }
         var patch = translated
         if stroke.mode == .heal {
-            guard let kernel = correctionKernel else {
+            guard let kernel = CoreImageKernels.healCorrection else {
                 throw RetouchProcessingError.processingFailed
             }
             let sigma = radius * 0.6

@@ -418,6 +418,12 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertEqual(try rgbaBytes(result.image), try rgbaBytes(ImagePipeline().render(url: input, edits: edits, maxPixel: nil)))
     }
 
+    func testMetalKernelsCompileAtRuntime() {
+        XCTAssertNotNil(CoreImageKernels.clarity)
+        XCTAssertNotNil(CoreImageKernels.grain)
+        XCTAssertNotNil(CoreImageKernels.healCorrection)
+    }
+
     func testGradientHandlesMoveInSourceSpace() {
         let linear = MaskGradient.linear(start: MaskPoint(x: 0.2, y: 0.2), end: MaskPoint(x: 0.4, y: 0.6))
         guard case .linear(let movedStart, let movedEnd) = linear.moving(.center, to: MaskPoint(x: 0.5, y: 0.5)) else {
