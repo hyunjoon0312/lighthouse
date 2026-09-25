@@ -116,7 +116,8 @@ extension LibraryModel {
         let approximate = editDragActive && !isOriginal && !actualSize
         requestedApproximation = approximate
         let thumbnailSize = renderCurrent && !isOriginal && edits.isModified ? Self.thumbnailPixels : nil
-        let job = DispatchWorkItem { [previewPipeline] in
+        // 백그라운드 큐에서 돈다. @Sendable로 표시해 화면 상태를 여기서 건드리지 않는지 컴파일러가 검사하게 한다.
+        let job = DispatchWorkItem { @Sendable [previewPipeline] in
             let preview = renderCurrent
                 ? Result { try previewPipeline.renderPreview(url: photo.url, edits: edits, maxPixel: maxPixel,
                                                              allowApproximation: approximate) } : nil

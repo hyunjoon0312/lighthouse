@@ -224,7 +224,8 @@ private final class CropPreviewModel: ObservableObject {
         let geometry = PhotoGeometry(sourceWidth: Double(source.metadata.width),
                                      sourceHeight: Double(source.metadata.height), edits: edits)
         canvasAspect = Double(geometry.canvasSize.width / max(1, geometry.canvasSize.height))
-        let job = DispatchWorkItem { [weak self, pipeline] in
+        // 백그라운드 큐에서 돈다. @Sendable로 표시해 화면 상태를 여기서 건드리지 않는지 컴파일러가 검사하게 한다.
+        let job = DispatchWorkItem { @Sendable [weak self, pipeline, edits] in
             let result = Result { try pipeline.renderPreview(url: source.url, edits: edits, maxPixel: 2200).image }
             DispatchQueue.main.async { [weak self] in
                 guard let self, token == self.generation else { return }

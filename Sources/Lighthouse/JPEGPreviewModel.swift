@@ -21,7 +21,8 @@ final class JPEGPreviewModel: ObservableObject {
         error = nil
         guard let photo else { isPreparing = false; return }
         isPreparing = true
-        let job = DispatchWorkItem { [weak self, pipeline] in
+        // 백그라운드 큐에서 돈다. @Sendable로 표시해 화면 상태를 여기서 건드리지 않는지 컴파일러가 검사하게 한다.
+        let job = DispatchWorkItem { @Sendable [weak self, pipeline] in
             let result = Result {
                 try pipeline.prepareExport(url: photo.url, edits: photo.edits, options: options,
                                            keywords: photo.keywords, caption: photo.caption)

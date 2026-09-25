@@ -160,7 +160,8 @@ public enum AdvancedColorProcessor {
         }
         var values = [Float](repeating: 1, count: dimension * dimension * dimension * 4)
         values.withUnsafeMutableBufferPointer { buffer in
-            let output = buffer.baseAddress!
+            // 파란 칸마다 서로 다른 구간만 쓰므로 여러 스레드가 같은 위치를 쓰지 않는다.
+            nonisolated(unsafe) let output = buffer.baseAddress!
             DispatchQueue.concurrentPerform(iterations: dimension) { blue in
                 for green in 0..<dimension {
                     for red in 0..<dimension {
