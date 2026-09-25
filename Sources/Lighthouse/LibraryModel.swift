@@ -2192,7 +2192,8 @@ final class LibraryModel: ObservableObject {
                                                         watermark: options.watermark).data
                     }
                     let baseName = ExportOptions.baseName(template: options.filenameTemplate, sourceURL: photo.url,
-                                                          capturedAt: photo.metadata.capturedAt, sequence: index + 1)
+                                                          capturedAt: photo.metadata.capturedAt, sequence: index + 1,
+                                                          copyName: photo.copyName)
                     _ = try pipeline.writeJPEG(data, baseName: baseName, to: directory)
                     successes += 1
                 }

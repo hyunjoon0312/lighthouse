@@ -77,10 +77,11 @@ public struct ExportOptions: Codable, Equatable, Sendable {
         self.watermark = watermark
     }
 
-    /// `{원본}` 원본 파일 이름, `{날짜}` 촬영일(yyyy-MM-dd), `{시간}` 촬영 시각(HHmmss), `{번호}` 이번 내보내기의 순번(001부터).
+    /// `{원본}` 원본 파일 이름, `{날짜}` 촬영일(yyyy-MM-dd), `{시간}` 촬영 시각(HHmmss), `{번호}` 이번 내보내기의 순번(001부터),
+    /// `{사본}` 가상 사본이면 `-사본1`처럼 사본 이름(원래 항목은 빈칸). 규칙에 `{사본}`이 없으면 사본은 이름 끝에 붙인다.
     /// 파일 이름에 쓸 수 없는 `/`와 `:`는 `-`로 바꾸고, 결과가 비면 원본 이름을 쓴다.
     public static func baseName(template: String, sourceURL: URL, capturedAt: Date?, sequence: Int,
-                                calendar: Calendar = .current) -> String {
+                                copyName: String? = nil, calendar: Calendar = .current) -> String {
         let stem = sourceURL.deletingPathExtension().lastPathComponent
         let formatter = DateFormatter()
         formatter.calendar = calendar
@@ -96,7 +97,9 @@ public struct ExportOptions: Codable, Equatable, Sendable {
             date = "날짜없음"
             time = "시간없음"
         }
-        let name = template
+        let copy = copyName.map { "-" + $0.replacingOccurrences(of: " ", with: "") } ?? ""
+        let name = (template.contains("{사본}") ? template : template + "{사본}")
+            .replacingOccurrences(of: "{사본}", with: copy)
             .replacingOccurrences(of: "{원본}", with: stem)
             .replacingOccurrences(of: "{날짜}", with: date)
             .replacingOccurrences(of: "{시간}", with: time)
@@ -105,7 +108,11 @@ public struct ExportOptions: Codable, Equatable, Sendable {
             .replacingOccurrences(of: ":", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let visible = name.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-        return visible.isEmpty ? stem : String(name.prefix(200))
+        guard !visible.isEmpty else { return stem }
+        // 파일 이름은 UTF-8 255바이트까지라 번호 접미사와 확장자 자리를 남기고 200바이트에서 자른다(한글은 글자당 3바이트).
+        var trimmed = name
+        while trimmed.utf8.count > 200 { trimmed.removeLast() }
+        return trimmed
     }
 }
 

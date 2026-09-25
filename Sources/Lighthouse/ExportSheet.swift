@@ -10,7 +10,7 @@ struct ExportSheet: View {
     @State private var scope: ExportScope = .current
     @State private var options = ExportPresetLibrary.lastOptions
     @State private var userPresets = ExportPresetLibrary.userPresets
-    @State private var directory: URL?
+    @State private var directory: URL? = ExportPresetLibrary.lastDirectory
     @State private var actualSize = false
     @State private var savingPreset = false
     @State private var newPresetName = ""
@@ -145,12 +145,14 @@ struct ExportSheet: View {
             TextField("파일 이름 규칙", text: $options.filenameTemplate)
                 .textFieldStyle(.roundedBorder).accessibilityLabel("파일 이름 규칙")
             HStack(spacing: 4) {
-                ForEach(["{원본}", "{날짜}", "{시간}", "{번호}"], id: \.self) { token in
+                ForEach(["{원본}", "{날짜}", "{시간}", "{번호}", "{사본}"], id: \.self) { token in
                     Button(token) { options.filenameTemplate += token }
                         .controlSize(.small).accessibilityLabel("\(token) 넣기")
                 }
             }
             Text("예: \(exampleName).jpg").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text("가상 사본은 {사본}이 없어도 이름 끝에 ‘-사본1’처럼 붙습니다.")
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 
@@ -210,7 +212,7 @@ struct ExportSheet: View {
     private var exampleName: String {
         guard let photo = representative else { return options.filenameTemplate }
         return ExportOptions.baseName(template: options.filenameTemplate, sourceURL: photo.url,
-                                      capturedAt: photo.metadata.capturedAt, sequence: 1)
+                                      capturedAt: photo.metadata.capturedAt, sequence: 1, copyName: photo.copyName)
     }
 
     @ViewBuilder private var previewPane: some View {
@@ -282,7 +284,10 @@ struct ExportSheet: View {
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.prompt = "선택"
-        if panel.runModal() == .OK { directory = panel.url }
+        if panel.runModal() == .OK, let url = panel.url {
+            directory = url
+            ExportPresetLibrary.lastDirectory = url
+        }
     }
 }
 
@@ -298,6 +303,17 @@ enum ExportPresetLibrary {
     static var userPresets: [ExportPreset] {
         get { decode([ExportPreset].self, key: "exportPresets") ?? [] }
         set { encode(newValue, key: "exportPresets") }
+    }
+
+    /// 마지막으로 고른 저장 폴더. 폴더가 사라졌으면 nil이다.
+    static var lastDirectory: URL? {
+        get {
+            guard let path = UserDefaults.standard.string(forKey: "lastExportDirectory") else { return nil }
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        set { UserDefaults.standard.set(newValue?.path, forKey: "lastExportDirectory") }
     }
 
     static var lastOptions: ExportOptions {

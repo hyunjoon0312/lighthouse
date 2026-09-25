@@ -21,6 +21,18 @@ final class ExportOptionsTests: XCTestCase {
                        "P1000123")
         XCTAssertEqual(ExportOptions.baseName(template: "{날짜}", sourceURL: source, capturedAt: nil, sequence: 1),
                        "날짜없음")
+
+        XCTAssertEqual(ExportOptions.baseName(template: ExportOptions.defaultFilenameTemplate, sourceURL: source,
+                                              capturedAt: nil, sequence: 1, copyName: "사본 2"),
+                       "P1000123-edited-사본2", "규칙에 {사본}이 없으면 사본 이름을 끝에 붙인다")
+        XCTAssertEqual(ExportOptions.baseName(template: "{원본}{사본}_{번호}", sourceURL: source, capturedAt: nil,
+                                              sequence: 4, copyName: "사본 1"), "P1000123-사본1_004")
+        XCTAssertEqual(ExportOptions.baseName(template: "{원본}{사본}_{번호}", sourceURL: source, capturedAt: nil,
+                                              sequence: 4), "P1000123_004", "원래 항목은 빈칸")
+        let long = ExportOptions.baseName(template: String(repeating: "가", count: 150), sourceURL: source,
+                                          capturedAt: nil, sequence: 1)
+        XCTAssertLessThanOrEqual(long.utf8.count, 200)
+        XCTAssertEqual(long, String(repeating: "가", count: 66))
     }
 
     func testWatermarkDrawsOnlyNearChosenCorner() throws {
