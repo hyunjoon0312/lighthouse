@@ -18,6 +18,7 @@ Astra가 확정한 구현 인터페이스. 각 작업자는 자신의 파일만 
 - `PhotoMetadata: Codable, Equatable, Sendable` — `width: Int = 0`, `height: Int = 0`, `camera: String?`, `lens: String?`, `iso: Int?`, `aperture: Double?`, `shutter: Double?`, `capturedAt: Date?`; 모든 기본값을 제공하는 public init.
 - `PhotoAsset: Identifiable, Codable, Equatable, Sendable` — `id: UUID`, `path: String`, `importedAt: Date`, `metadata: PhotoMetadata`, `rating: Int`, `flag: PhotoFlag`, `edits: EditSettings`; init `init(id: UUID = UUID(), url: URL, metadata: PhotoMetadata = PhotoMetadata(), importedAt: Date = Date())`; computed `url: URL`, `filename: String`, `isRAW: Bool`. 경로는 standardizedFileURL.resolvingSymlinksInPath로 정규화. 원본 파일은 이동하지 않는다.
 - `CatalogStore`: `init(url: URL)`, static `defaultURL: URL` (`LIGHTHOUSE_DATA_DIR`가 있으면 그 폴더 아래 `catalog.json`), `load() throws -> [PhotoAsset]`, `save(_ photos: [PhotoAsset]) throws`. 내부에 버전 1 봉투 사용. 파일 없음만 빈 배열, 손상·미지원 버전은 오류. 폴더 생성 후 원자적 저장. 호출자는 직렬화한다.
+- `CatalogBackup`: `init(directory:)`, static `defaultDirectory`(카탈로그 옆 `Backups`), `backUpIfNeeded(photos:copying:now:) throws -> Bool`, `backups() -> [URL]`. 그날 이름(`yyyy-MM-dd`) 폴더가 없을 때만 임시 폴더에 마스크를 넣은 카탈로그와 주어진 파일을 쓰고 이름을 바꾼다. 날짜 이름 폴더는 최근 7개만 남기고, 날짜 이름이 아닌 폴더는 지우지 않는다.
 
 ### 공개 이미지 API
 

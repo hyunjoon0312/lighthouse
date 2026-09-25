@@ -44,6 +44,13 @@ public struct CatalogStore: Sendable {
         masks.removeFiles(notIn: referenced)
     }
 
+    /// 마스크 PNG까지 안에 넣은 카탈로그. 이 파일 하나를 `catalog.json` 자리에 두면 그대로 열린다.
+    static func selfContainedData(_ photos: [PhotoAsset]) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(Envelope(version: 1, photos: photos))
+    }
+
     private struct Envelope: Codable {
         let version: Int
         let photos: [PhotoAsset]

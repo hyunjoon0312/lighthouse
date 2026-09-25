@@ -236,6 +236,8 @@ final class LibraryModel: ObservableObject {
     private let catalog = CatalogStore(url: CatalogStore.defaultURL)
     private let folderStore = PhotoFolderStore(url: PhotoFolderStore.defaultURL)
     private let presetStore = EditPresetStore(url: EditPresetStore.defaultURL)
+    private let backup = CatalogBackup(directory: CatalogBackup.defaultDirectory)
+    private var backupFailureReported = false
     private let previewQueue = DispatchQueue(label: "com.rian.lighthouse.preview", qos: .userInitiated)
     private let thumbnailQueue = DispatchQueue(label: "com.rian.lighthouse.thumbnails", qos: .utility)
     private let placeholderQueue = DispatchQueue(label: "com.rian.lighthouse.placeholder", qos: .userInitiated)
@@ -575,6 +577,8 @@ final class LibraryModel: ObservableObject {
                     if let first = photos.first {
                         self.photoSelection.select(first.id, in: photos.map(\.id))
                     }
+                    // 오늘 처음 연 상태를 남긴다. 이날 작업을 되돌리고 싶을 때 쓸 수 있다.
+                    self.saveQueue.async { self.backUpIfNeeded(photos) }
                     self.refreshLUTLibrary()
                     self.requestRender()
                     let arguments = ProcessInfo.processInfo.arguments
@@ -582,7 +586,14 @@ final class LibraryModel: ObservableObject {
                         self.importURLs([URL(fileURLWithPath: arguments[index + 1])])
                     }
                 case .failure(let error):
-                    self.loadError = "카탈로그를 열 수 없습니다. 파일을 확인한 뒤 앱을 다시 실행하세요.\n\(error.localizedDescription)"
+                    self.loadError = """
+                        카탈로그를 열 수 없습니다. 파일을 확인한 뒤 앱을 다시 실행하세요.
+                        \(error.localizedDescription)
+
+                        날짜별 보관본이 \(self.backup.directory.path)에 있습니다(파일 메뉴 › 카탈로그 보관본 보기). \
+                        앱을 끝낸 뒤 원하는 날짜 폴더의 파일을 \(self.catalog.url.deletingLastPathComponent().path)에 \
+                        덮어 두면 그날 처음 연 상태로 돌아갑니다.
+                        """
                 }
             }
         }
@@ -1678,7 +1689,27 @@ final class LibraryModel: ObservableObject {
                 if canSaveFolders { try folderStore.save(folderSnapshot) }
             }
             catch { DispatchQueue.main.async { self.operationMessage = "사진 또는 폴더 정보 저장 실패: \(error.localizedDescription)" } }
+            // 앱을 켜 둔 채 날짜가 바뀌면 그날 첫 저장 때 보관본을 만든다.
+            self.backUpIfNeeded(snapshot)
         }
+    }
+
+    /// `saveQueue`에서 부른다. 실패는 한 번만 알린다.
+    nonisolated private func backUpIfNeeded(_ photos: [PhotoAsset]) {
+        do {
+            try backup.backUpIfNeeded(photos: photos, copying: [folderStore.url, presetStore.url])
+        } catch {
+            DispatchQueue.main.async {
+                guard !self.backupFailureReported else { return }
+                self.backupFailureReported = true
+                self.operationMessage = "카탈로그 보관본을 만들지 못했습니다: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func revealBackups() {
+        try? FileManager.default.createDirectory(at: backup.directory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(backup.directory)
     }
 
     func flushSave() throws {
