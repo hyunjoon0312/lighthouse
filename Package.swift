@@ -14,5 +14,5 @@ let package = Package(
         .testTarget(name: "LighthouseCoreTests", dependencies: ["LighthouseCore"]),
         .testTarget(name: "LighthouseTests", dependencies: ["Lighthouse", "LighthouseCore"]),
     ],
-    swiftLanguageModes: [.v5]
+    swiftLanguageModes: [.v6]
 )

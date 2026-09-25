@@ -21,8 +21,8 @@
 
 ## 기술 구조
 
-- Swift 6 도구 체인, Swift 5 언어 모드, macOS 15 이상. Swift Package Manager로 외부 의존성 없이 빌드한다.
-  - Swift 6 언어 모드 평가(2026-09-25, Swift 6.3.2): 처음 시험에서 실제 `LibraryModel`을 쓰는 검사가 `requestRender`에서 멈췄다. `DispatchWorkItem`에 넘긴 클로저는 SDK가 `@Sendable`로 받지 않아 메인 스레드용으로 추론되는데, 실제로는 백그라운드 큐에서 돌아 실행 시간 격리 검사에 걸린 것이다. 백그라운드에서 도는 `DispatchWorkItem` 3곳(편집 미리보기·크롭 창·내보내기 미리보기)을 확인했다. 모두 미리 복사한 값만 쓰고 화면 상태는 `DispatchQueue.main.async` 안에서만 바꿔 실제 경합은 없었다. 이 3곳에 `@Sendable`을 명시해 이제 컴파일러가 검사한다(크롭 창이 `var`를 참조로 잡던 것을 값으로 바꿈). `queue.async { }`는 SDK가 이미 `@Sendable`로 받아 검사된다. 그 뒤 Swift 6 모드에서 `swift test` 108개(실제 모델 흐름·S9 RAW 포함)가 실행 시간 검사까지 통과했다. 남은 경고는 SwiftUI `Binding` 설정 클로저 2곳이다. 이 클로저는 메인 스레드에서만 불리지만 `@MainActor`로 표시하면 이 컴파일러가 IR 생성 중 멈춘다. 테스트가 닿지 않는 화면 흐름을 확인하기 전까지 Swift 5 모드를 유지한다.
+- Swift 6 도구 체인, Swift 6 언어 모드(2026-09-25 전환), macOS 15 이상. Swift Package Manager로 외부 의존성 없이 빌드한다.
+  - Swift 6 모드에서는 데이터 경합이 컴파일 오류가 되고, 메인 스레드용으로 추론된 코드가 다른 스레드에서 돌면 실행 중에 멈춘다. 지킬 규칙: 백그라운드 큐에서 도는 `DispatchWorkItem` 클로저에는 `@Sendable`을 직접 붙인다(SDK가 붙여 주지 않아 메인 스레드용으로 추론됨. `queue.async { }`는 SDK가 붙여 준다). 화면 상태는 `DispatchQueue.main.async` 안에서만 바꾼다. 캡처하는 값은 `var` 참조가 아닌 값으로 잡는다. 저장해 둔 클로저를 SwiftUI `Binding`에 그대로 넘기지 말고 `{ set($0) }`처럼 감싼다(`@MainActor` 클로저를 그대로 넘기면 Swift 6.3.2 컴파일러가 멈춘다). 전환 과정은 [검증 기록](verification.md)에 있다.
 - SwiftUI 화면과 AppKit 파일 선택·메뉴·키보드 이벤트를 사용한다.
 - `LighthouseCore`: Codable 모델, 원자적 JSON 카탈로그 저장, Image I/O 메타데이터·썸네일, Core Image RAW 현상과 JPEG 출력.
 - `Lighthouse` 실행 타깃: 메인 액터의 화면 상태와 저장·렌더 작업 조율. 무거운 파일 읽기와 렌더는 백그라운드에서 실행한다.

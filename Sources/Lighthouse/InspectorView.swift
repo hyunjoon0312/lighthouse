@@ -449,14 +449,14 @@ struct InspectorView: View {
     }
 
     private func localSlider(_ title: String, value: Double, range: ClosedRange<Double>, format: String,
-                             set: @escaping (Double) -> Void) -> some View {
+                             set: @escaping @MainActor (Double) -> Void) -> some View {
         VStack(spacing: 3) {
             HStack {
                 Text(title).font(.caption)
                 Spacer()
                 Text(String(format: format, value)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
-            Slider(value: Binding(get: { value }, set: set), in: range) { editing in
+            Slider(value: Binding(get: { value }, set: { set($0) }), in: range) { editing in
                 if !editing { model.endContinuousEdit() }
             }
             .accessibilityLabel(title)
