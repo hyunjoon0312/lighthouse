@@ -15,6 +15,9 @@ struct WorkspaceView: View {
     @State private var keyMonitor: Any?
     @State private var folderToDelete: PhotoFolder?
     @State private var zoomPosition = ScrollPosition(edge: .top)
+    /// 그리드 칸의 최소 너비. 썸네일 크기 슬라이더로 바꾸며 다음 실행에도 기억한다.
+    @AppStorage("gridTileWidth") private var tileWidth = 180.0
+    @State private var gridWidth: CGFloat = 0
 
     var body: some View {
         HStack(spacing: 0) {
@@ -249,6 +252,16 @@ struct WorkspaceView: View {
             Button("전체 선택") { model.selectAllVisible() }
                 .accessibilityLabel("보이는 사진 전체 선택")
                 .disabled(model.visiblePhotos.isEmpty)
+            if model.mode == .grid {
+                HStack(spacing: 4) {
+                    Image(systemName: "square.grid.3x3").font(.caption2).foregroundStyle(Palette.muted)
+                    Slider(value: $tileWidth, in: 130...260).frame(width: 90)
+                    Image(systemName: "square.grid.2x2").font(.caption).foregroundStyle(Palette.muted)
+                }
+                .help("썸네일 크기")
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("썸네일 크기")
+            }
             Toggle("RAW+JPEG 한 장으로", isOn: $model.collapsesRAWJPEGPairs)
                 .toggleStyle(.checkbox)
                 .help("RAW와 함께 찍힌 JPEG를 숨기고 RAW만 보여 줍니다. JPEG는 카탈로그에 남아 있으며 끄면 다시 보입니다.")
@@ -323,26 +336,29 @@ struct WorkspaceView: View {
                     .onChange(of: model.selectedID) { _, id in scroll(proxy, to: id) }
             }
             .onChange(of: geometry.size.width, initial: true) { _, width in
-                model.gridColumnCount = Self.gridColumns(for: width)
+                gridWidth = width
+                model.gridColumnCount = gridColumns(for: width)
             }
+            .onChange(of: tileWidth) { _, _ in model.gridColumnCount = gridColumns(for: gridWidth) }
         }
         .background(Palette.canvas)
     }
 
     private var gridContent: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 14)], spacing: 14) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: tileWidth, maximum: tileWidth + 80), spacing: 14)], spacing: 14) {
             ForEach(model.visiblePhotos) { photo in
                 PhotoTile(photo: photo,
                           selected: model.selectedPhotoIDs.contains(photo.id),
-                          active: model.selectedID == photo.id)
+                          active: model.selectedID == photo.id,
+                          imageHeight: (tileWidth * 0.83).rounded())
                     .id(photo.id)
             }
         }
         .padding(22)
     }
 
-    private static func gridColumns(for width: CGFloat) -> Int {
-        max(1, Int((width - 44 + 14) / (180 + 14)))
+    private func gridColumns(for width: CGFloat) -> Int {
+        max(1, Int((width - 44 + 14) / (tileWidth + 14)))
     }
 
     private func scroll(_ proxy: ScrollViewProxy, to id: UUID?) {
@@ -568,6 +584,7 @@ private struct PhotoTile: View {
     let photo: PhotoAsset
     let selected: Bool
     let active: Bool
+    let imageHeight: CGFloat
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -613,7 +630,7 @@ private struct PhotoTile: View {
                         }
                     }.padding(8)
                 }
-                .frame(height: 150)
+                .frame(height: imageHeight)
                 HStack {
                     Text(photo.displayName).lineLimit(1).font(.system(size: 12, weight: .medium))
                     if active { Text("기준").font(.caption2.weight(.bold)).foregroundStyle(Palette.accent) }
