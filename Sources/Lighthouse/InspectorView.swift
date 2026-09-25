@@ -46,6 +46,7 @@ struct InspectorView: View {
                     flagButton("제외", icon: "xmark", flag: .reject)
                     Button("해제") { model.setFlag(.none) }.accessibilityLabel("선택과 제외 표시 해제").disabled(photo.flag == .none)
                 }.buttonStyle(.bordered)
+                DescriptionFields(photo: photo)
                 if model.selectedPhotoIDs.count >= 2 {
                     Text("슬라이더는 기준 사진에 적용됩니다.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -520,5 +521,77 @@ struct InspectorView: View {
         guard seconds > 0 else { return "—" }
         if seconds < 1 { return "1/\(Int((1 / seconds).rounded()))초" }
         return String(format: "%.1f초", seconds)
+    }
+}
+
+/// 키워드와 설명. 입력을 시작한 사진에 적용하므로 입력 중 다른 사진을 골라도 섞이지 않는다.
+private struct DescriptionFields: View {
+    @EnvironmentObject private var model: LibraryModel
+    let photo: PhotoAsset
+    @State private var keywordText = ""
+    @State private var captionText = ""
+    @State private var addText = ""
+    @State private var editingID: UUID?
+    @FocusState private var focus: Field?
+
+    private enum Field { case keywords, caption, add }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("키워드 (쉼표로 구분)", text: $keywordText)
+                .focused($focus, equals: .keywords)
+                .onSubmit { commit(.keywords) }
+                .accessibilityLabel("키워드")
+            TextField("설명", text: $captionText, axis: .vertical)
+                .lineLimit(1...4)
+                .focused($focus, equals: .caption)
+                .onSubmit { commit(.caption) }
+                .accessibilityLabel("설명")
+            if model.selectedPhotoIDs.count >= 2 {
+                HStack {
+                    TextField("선택한 \(model.selectedPhotoIDs.count)장에 키워드 추가", text: $addText)
+                        .focused($focus, equals: .add)
+                        .onSubmit(addToSelection)
+                    Button("추가", action: addToSelection).disabled(PhotoKeywords.parse(addText).isEmpty)
+                }
+            }
+        }
+        .textFieldStyle(.roundedBorder)
+        .font(.caption)
+        .onAppear(perform: load)
+        .onChange(of: photo.id) { _, _ in
+            // 입력 중에 다른 사진을 고르면 입력을 시작한 사진에 먼저 저장한다.
+            if let field = focus, field != .add { commit(field) }
+            load()
+        }
+        .onChange(of: photo.keywords) { _, _ in if focus != .keywords { keywordText = PhotoKeywords.text(photo.keywords) } }
+        .onChange(of: photo.caption) { _, _ in if focus != .caption { captionText = photo.caption } }
+        .onChange(of: focus) { old, new in
+            if let old, old != .add { commit(old) }
+            if new == .keywords || new == .caption { editingID = photo.id }
+        }
+    }
+
+    private func load() {
+        keywordText = PhotoKeywords.text(photo.keywords)
+        captionText = photo.caption
+        editingID = focus == nil ? nil : photo.id
+    }
+
+    private func commit(_ field: Field) {
+        let id = editingID ?? photo.id
+        switch field {
+        case .keywords: model.setKeywords(keywordText, for: id)
+        case .caption: model.setCaption(captionText, for: id)
+        case .add: break
+        }
+        if id == photo.id {
+            keywordText = PhotoKeywords.text(model.photo(withID: id)?.keywords ?? [])
+        }
+    }
+
+    private func addToSelection() {
+        model.addKeywordsToSelection(addText)
+        addText = ""
     }
 }

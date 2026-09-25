@@ -25,15 +25,16 @@ final class JPEGPreviewModel: ObservableObject {
             let result = Result {
                 try pipeline.prepareJPEG(url: photo.url, edits: photo.edits,
                                          maxPixel: options.maxPixel, quality: options.quality,
-                                         includeLocation: options.includeLocation, watermark: options.watermark)
+                                         includeLocation: options.includeLocation, watermark: options.watermark,
+                                         keywords: photo.keywords, caption: photo.caption)
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self, token == self.generation else { return }
                 self.isPreparing = false
                 switch result {
                 case .success(let jpeg):
-                    self.preview = PreparedJPEGExport(photoID: photo.id, edits: photo.edits,
-                                                      options: options, result: jpeg)
+                    self.preview = PreparedJPEGExport(photoID: photo.id, edits: photo.edits, keywords: photo.keywords,
+                                                      caption: photo.caption, options: options, result: jpeg)
                 case .failure(let error):
                     self.error = error.localizedDescription
                 }

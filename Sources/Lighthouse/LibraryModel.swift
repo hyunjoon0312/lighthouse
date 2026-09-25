@@ -81,6 +81,8 @@ enum ExportScope: String, CaseIterable {
 struct PreparedJPEGExport: @unchecked Sendable {
     let photoID: UUID
     let edits: EditSettings
+    let keywords: [String]
+    let caption: String
     let options: ExportOptions
     let result: JPEGPreview
 
@@ -89,7 +91,8 @@ struct PreparedJPEGExport: @unchecked Sendable {
         var mine = options, theirs = other
         mine.filenameTemplate = ""
         theirs.filenameTemplate = ""
-        return photoID == photo.id && edits == photo.edits && mine == theirs
+        return photoID == photo.id && edits == photo.edits && keywords == photo.keywords &&
+            caption == photo.caption && mine == theirs
     }
 }
 
@@ -577,7 +580,9 @@ final class LibraryModel: ObservableObject {
             case .collection: matchesFilter = members?.contains(photo.id) ?? false
             }
             return matchesFilter && photo.rating >= minimumRating &&
-                (search.isEmpty || photo.displayName.localizedCaseInsensitiveContains(search))
+                (search.isEmpty || photo.displayName.localizedCaseInsensitiveContains(search) ||
+                 photo.keywords.contains { $0.localizedCaseInsensitiveContains(search) } ||
+                 photo.caption.localizedCaseInsensitiveContains(search))
         }
         // 같은 값끼리는 촬영 시각 순서를 지킨다.
         switch sortOrder {
@@ -986,20 +991,47 @@ final class LibraryModel: ObservableObject {
     }
 
     private func changeMarks(of id: UUID, _ change: (inout PhotoMarks) -> Void) {
-        guard catalogLoaded, loadError == nil, let photo = photo(withID: id) else { return }
-        let before = PhotoMarks(rating: photo.rating, flag: photo.flag)
-        var after = before
-        change(&after)
-        guard after != before else { return }
-        editHistory.recordMarks([PhotoMarkChange(id: id, before: before, after: after)])
-        applyMarks(after, to: id)
+        changeMarks(of: [id], change)
+    }
+
+    /// 여러 장의 별점·표시·키워드·설명을 한 번의 실행 취소 단계로 바꾼다.
+    private func changeMarks(of ids: [UUID], _ change: (inout PhotoMarks) -> Void) {
+        guard catalogLoaded, loadError == nil else { return }
+        var changes: [PhotoMarkChange] = []
+        for id in ids {
+            guard let photo = photo(withID: id) else { continue }
+            var after = photo.marks
+            change(&after)
+            if after != photo.marks { changes.append(PhotoMarkChange(id: id, before: photo.marks, after: after)) }
+        }
+        guard !changes.isEmpty else { return }
+        editHistory.recordMarks(changes)
+        for change in changes { applyMarks(change.after, to: change.id) }
     }
 
     private func applyMarks(_ marks: PhotoMarks, to id: UUID) {
-        updatePhoto(id) {
-            $0.rating = marks.rating
-            $0.flag = marks.flag
-        }
+        updatePhoto(id) { $0.marks = marks }
+    }
+
+    // MARK: 키워드·설명
+
+    /// 쉼표로 구분한 키워드로 바꾼다. 입력하는 동안 다른 사진으로 옮겨도 입력을 시작한 사진에 적용한다.
+    func setKeywords(_ text: String, for id: UUID) {
+        changeMarks(of: id) { $0.keywords = PhotoKeywords.parse(text) }
+    }
+
+    func setCaption(_ text: String, for id: UUID) {
+        let caption = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2_000))
+        changeMarks(of: id) { $0.caption = caption }
+    }
+
+    /// 선택한 사진마다 기존 키워드 뒤에 붙인다. 한 번에 실행 취소된다.
+    func addKeywordsToSelection(_ text: String) {
+        let added = PhotoKeywords.parse(text)
+        guard !added.isEmpty else { return }
+        let ids = actionTargets.map(\.id)
+        changeMarks(of: ids) { $0.keywords = PhotoKeywords.merge($0.keywords, added) }
+        operationMessage = "\(ids.count)장에 키워드 \(PhotoKeywords.text(added))를 붙였습니다."
     }
 
     // MARK: 연속 촬영
@@ -1147,7 +1179,7 @@ final class LibraryModel: ObservableObject {
             for (shotIndex, shot) in group.shots.enumerated() where recommendation.scores[shotIndex] != nil {
                 for id in shot where visible.contains(id) {
                     guard let photo = photo(withID: id), photo.flag == .none else { continue }
-                    let before = PhotoMarks(rating: photo.rating, flag: photo.flag)
+                    let before = photo.marks
                     var after = before
                     after.flag = shotIndex == recommendation.bestShot ? .pick : .reject
                     changes.append(PhotoMarkChange(id: id, before: before, after: after))
@@ -2375,7 +2407,8 @@ final class LibraryModel: ObservableObject {
                     } else {
                         data = try pipeline.prepareJPEG(url: photo.url, edits: photo.edits, maxPixel: options.maxPixel,
                                                         quality: options.quality, includeLocation: options.includeLocation,
-                                                        watermark: options.watermark).data
+                                                        watermark: options.watermark, keywords: photo.keywords,
+                                                        caption: photo.caption).data
                     }
                     let baseName = ExportOptions.baseName(template: options.filenameTemplate, sourceURL: photo.url,
                                                           capturedAt: photo.metadata.capturedAt, sequence: index + 1,

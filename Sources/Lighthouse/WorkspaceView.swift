@@ -204,7 +204,7 @@ struct WorkspaceView: View {
                 }
             }
             .padding(3).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-            TextField("파일명 검색", text: $model.search)
+            TextField("파일명·키워드 검색", text: $model.search)
                 .textFieldStyle(.roundedBorder).frame(width: 165)
             Picker("별점", selection: $model.minimumRating) {
                 Text("모든 별점").tag(0)

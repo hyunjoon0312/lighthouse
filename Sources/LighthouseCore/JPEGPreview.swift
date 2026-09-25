@@ -19,7 +19,8 @@ public struct JPEGPreview: @unchecked Sendable {
 
 public extension ImagePipeline {
     func prepareJPEG(url: URL, edits: EditSettings, maxPixel: Int?,
-                     quality: Double, includeLocation: Bool = false, watermark: Watermark? = nil) throws -> JPEGPreview {
+                     quality: Double, includeLocation: Bool = false, watermark: Watermark? = nil,
+                     keywords: [String] = [], caption: String = "") throws -> JPEGPreview {
         guard quality.isFinite else { throw ImagePipelineError.invalidJPEGQuality }
         var rendered = try render(url: url, edits: edits, maxPixel: maxPixel)
         if let watermark {
@@ -33,7 +34,7 @@ public extension ImagePipeline {
             throw ImagePipelineError.exportFailed(url)
         }
         var properties = Self.exportMetadata(from: url, width: rendered.width, height: rendered.height,
-                                             includeLocation: includeLocation)
+                                             includeLocation: includeLocation, keywords: keywords, caption: caption)
         properties[kCGImageDestinationLossyCompressionQuality] = min(1, max(0, quality))
         CGImageDestinationAddImage(destination, rendered, properties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {
@@ -48,8 +49,9 @@ public extension ImagePipeline {
     }
 
     /// 원본의 촬영 메타데이터를 옮긴다. 픽셀은 이미 회전되어 있으므로 방향은 1로 둔다.
-    static func exportMetadata(from url: URL, width: Int, height: Int,
-                               includeLocation: Bool) -> [CFString: Any] {
+    /// 앱에서 붙인 키워드와 설명은 IPTC에 넣는다(원본에 있던 값보다 우선).
+    static func exportMetadata(from url: URL, width: Int, height: Int, includeLocation: Bool,
+                               keywords: [String] = [], caption: String = "") -> [CFString: Any] {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let original = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
             return [:]
@@ -71,6 +73,12 @@ public extension ImagePipeline {
         metadata[kCGImagePropertyTIFFDictionary] = tiff
         for key in [kCGImagePropertyExifAuxDictionary, kCGImagePropertyIPTCDictionary] {
             if let dictionary = original[key] { metadata[key] = dictionary }
+        }
+        if !keywords.isEmpty || !caption.isEmpty {
+            var iptc = metadata[kCGImagePropertyIPTCDictionary] as? [CFString: Any] ?? [:]
+            if !keywords.isEmpty { iptc[kCGImagePropertyIPTCKeywords] = keywords }
+            if !caption.isEmpty { iptc[kCGImagePropertyIPTCCaptionAbstract] = caption }
+            metadata[kCGImagePropertyIPTCDictionary] = iptc
         }
         if includeLocation, let gps = original[kCGImagePropertyGPSDictionary] {
             metadata[kCGImagePropertyGPSDictionary] = gps

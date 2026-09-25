@@ -255,6 +255,9 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
     public var edits: EditSettings
     /// 가상 사본의 이름("사본 1"). nil이면 가져온 원래 항목이다. 사본은 같은 원본 파일을 가리키고 보정만 따로 가진다.
     public var copyName: String?
+    /// 검색과 내보내기(IPTC)에 쓰는 키워드와 설명. 비어 있으면 카탈로그에 쓰지 않는다.
+    public var keywords: [String] = []
+    public var caption: String = ""
 
     public init(id: UUID = UUID(), url: URL, metadata: PhotoMetadata = PhotoMetadata(),
                 importedAt: Date = Date()) {
@@ -265,6 +268,49 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
         self.rating = 0
         self.flag = .none
         self.edits = .neutral
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, path, importedAt, metadata, rating, flag, edits, copyName, keywords, caption
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        path = try container.decode(String.self, forKey: .path)
+        importedAt = try container.decode(Date.self, forKey: .importedAt)
+        metadata = try container.decode(PhotoMetadata.self, forKey: .metadata)
+        rating = try container.decode(Int.self, forKey: .rating)
+        flag = try container.decode(PhotoFlag.self, forKey: .flag)
+        edits = try container.decode(EditSettings.self, forKey: .edits)
+        copyName = try container.decodeIfPresent(String.self, forKey: .copyName)
+        keywords = try container.decodeIfPresent([String].self, forKey: .keywords) ?? []
+        caption = try container.decodeIfPresent(String.self, forKey: .caption) ?? ""
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(path, forKey: .path)
+        try container.encode(importedAt, forKey: .importedAt)
+        try container.encode(metadata, forKey: .metadata)
+        try container.encode(rating, forKey: .rating)
+        try container.encode(flag, forKey: .flag)
+        try container.encode(edits, forKey: .edits)
+        try container.encodeIfPresent(copyName, forKey: .copyName)
+        if !keywords.isEmpty { try container.encode(keywords, forKey: .keywords) }
+        if !caption.isEmpty { try container.encode(caption, forKey: .caption) }
+    }
+
+    /// 실행 취소 단위로 함께 바뀌는 별점·표시·키워드·설명.
+    public var marks: PhotoMarks {
+        get { PhotoMarks(rating: rating, flag: flag, keywords: keywords, caption: caption) }
+        set {
+            rating = newValue.rating
+            flag = newValue.flag
+            keywords = newValue.keywords
+            caption = newValue.caption
+        }
     }
 
     public var url: URL { URL(fileURLWithPath: path) }
@@ -289,4 +335,29 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
         copy.copyName = "사본 \(number)"
         return copy
     }
+}
+
+/// 쉼표나 줄바꿈으로 구분한 키워드. 앞뒤 공백을 지우고 대소문자만 다른 중복은 처음 것만 남긴다.
+public enum PhotoKeywords {
+    public static let maximumCount = 64
+    public static let maximumLength = 64
+
+    public static func parse(_ text: String) -> [String] {
+        merge([], text.components(separatedBy: CharacterSet(charactersIn: ",，;\n")))
+    }
+
+    /// `existing` 뒤에 `added`를 붙인다. 이미 있는 키워드는 다시 넣지 않는다.
+    public static func merge(_ existing: [String], _ added: [String]) -> [String] {
+        var result: [String] = []
+        var seen = Set<String>()
+        for raw in existing + added {
+            let keyword = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maximumLength))
+            guard !keyword.isEmpty, result.count < maximumCount,
+                  seen.insert(keyword.lowercased()).inserted else { continue }
+            result.append(keyword)
+        }
+        return result
+    }
+
+    public static func text(_ keywords: [String]) -> String { keywords.joined(separator: ", ") }
 }
