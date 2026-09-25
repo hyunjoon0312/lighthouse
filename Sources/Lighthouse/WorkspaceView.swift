@@ -502,14 +502,16 @@ struct WorkspaceView: View {
                 return nil
             }
             if NSApp.keyWindow?.firstResponder is NSTextView { return event }
-            if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "a" {
+            // 한글 입력 상태에서도 같은 키로 동작하도록 글자 대신 키 위치로 읽는다.
+            let key = ShortcutKey.resolve(characters: event.charactersIgnoringModifiers, keyCode: event.keyCode)
+            if event.modifierFlags.contains(.command), key == "a" {
                 model.selectAllVisible()
                 return nil
             }
             if event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
-                switch event.charactersIgnoringModifiers?.lowercased() {
+                switch key {
                 case "0", "1", "2", "3", "4", "5":
-                    model.markFromKeyboard(rating: Int(event.charactersIgnoringModifiers!)!); return nil
+                    model.markFromKeyboard(rating: Int(key!)!); return nil
                 case "p": model.markFromKeyboard(flag: .pick); return nil
                 case "x": model.markFromKeyboard(flag: .reject); return nil
                 case "u": model.markFromKeyboard(flag: PhotoFlag.none); return nil
