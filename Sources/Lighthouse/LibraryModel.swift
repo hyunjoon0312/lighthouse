@@ -13,6 +13,19 @@ enum LibraryFilter: Hashable {
     case all, picks, rejects, edited, bursts, missing, folder(String), collection(UUID)
 }
 
+/// 사진 목록 정렬. 카탈로그는 촬영 시각 순으로 보관하고 보이는 목록만 다시 정렬한다.
+enum PhotoSortOrder: String, CaseIterable, Identifiable {
+    case captureTime, fileName, rating
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .captureTime: "촬영 시각 순"
+        case .fileName: "파일 이름 순"
+        case .rating: "별점 높은 순"
+        }
+    }
+}
+
 /// 촬영 시각으로 묶은 연속 촬영과 사진마다의 위치(몇 번째 묶음의 몇 번째 컷).
 struct BurstIndex {
     var groups: [BurstGroup] = []
@@ -205,6 +218,12 @@ final class LibraryModel: ObservableObject {
             visibleCache = nil
             countsCache = nil
             ensureSelectionVisible()
+        }
+    }
+    @Published var sortOrder = PhotoSortOrder(rawValue: UserDefaults.standard.string(forKey: "photoSortOrder") ?? "") ?? .captureTime {
+        didSet {
+            UserDefaults.standard.set(sortOrder.rawValue, forKey: "photoSortOrder")
+            visibleCache = nil
         }
     }
     @Published var autoAdvance = UserDefaults.standard.bool(forKey: "autoAdvanceAfterMark") {
@@ -545,7 +564,7 @@ final class LibraryModel: ObservableObject {
         let search = search, filter = filter, minimumRating = minimumRating
         let positions = filter == .bursts ? burstIndex.positions : [:]
         let missing = filter == .missing ? missingPaths : []
-        let computed = collapsedFilter { photo in
+        var computed = collapsedFilter { photo in
             let matchesFilter: Bool
             switch filter {
             case .all: matchesFilter = true
@@ -559,6 +578,20 @@ final class LibraryModel: ObservableObject {
             }
             return matchesFilter && photo.rating >= minimumRating &&
                 (search.isEmpty || photo.displayName.localizedCaseInsensitiveContains(search))
+        }
+        // 같은 값끼리는 촬영 시각 순서를 지킨다.
+        switch sortOrder {
+        case .captureTime: break
+        case .fileName:
+            computed = computed.enumerated().sorted { first, second in
+                let order = first.element.displayName.localizedStandardCompare(second.element.displayName)
+                return order != .orderedSame ? order == .orderedAscending : first.offset < second.offset
+            }.map(\.element)
+        case .rating:
+            computed = computed.enumerated().sorted { first, second in
+                first.element.rating != second.element.rating
+                    ? first.element.rating > second.element.rating : first.offset < second.offset
+            }.map(\.element)
         }
         visibleCache = computed
         return computed
