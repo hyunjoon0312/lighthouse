@@ -42,7 +42,7 @@ public enum AdvancedColorProcessor {
     public static func curveValue(_ value: Double, points: [CurvePoint]) throws -> Double {
         guard value.isFinite else { throw AdvancedColorProcessingError.invalidCurve }
         try validateCurve(points)
-        return evaluateCurve(min(1, max(0, value)), points: points)
+        return Curve(points).value(at: min(1, max(0, value)))
     }
 
     public static func transformRGB(_ rgb: SIMD3<Double>, curves: ToneCurves,
@@ -150,21 +150,27 @@ public enum AdvancedColorProcessor {
 
     private static func makeCubeData(curves: ToneCurves,
                                      ranges: [ColorRangeAdjustment]) -> Data {
-        let maximum = Double(cubeDimension - 1)
-        var values = [Float]()
-        values.reserveCapacity(cubeDimension * cubeDimension * cubeDimension * 4)
-        for blue in 0..<cubeDimension {
-            for green in 0..<cubeDimension {
-                for red in 0..<cubeDimension {
-                    let transformed = transformValidated(
-                        SIMD3(Double(red) / maximum, Double(green) / maximum, Double(blue) / maximum),
-                        curves: curves,
-                        ranges: ranges
-                    )
-                    values.append(Float(transformed.x))
-                    values.append(Float(transformed.y))
-                    values.append(Float(transformed.z))
-                    values.append(1)
+        let dimension = cubeDimension
+        let maximum = Double(dimension - 1)
+        // 곡선 결과는 각 채널의 격자 위치에만 달려 있으므로 채널마다 64칸만 계산해 둔다.
+        let master = Curve(curves.master)
+        let tables = [curves.red, curves.green, curves.blue].map { points in
+            let curve = Curve(points)
+            return (0..<dimension).map { curve.value(at: master.value(at: Double($0) / maximum)) }
+        }
+        var values = [Float](repeating: 1, count: dimension * dimension * dimension * 4)
+        values.withUnsafeMutableBufferPointer { buffer in
+            let output = buffer.baseAddress!
+            DispatchQueue.concurrentPerform(iterations: dimension) { blue in
+                for green in 0..<dimension {
+                    for red in 0..<dimension {
+                        let transformed = applyingRanges(ranges, to: SIMD3(tables[0][red], tables[1][green],
+                                                                           tables[2][blue]))
+                        let index = ((blue * dimension + green) * dimension + red) * 4
+                        output[index] = Float(transformed.x)
+                        output[index + 1] = Float(transformed.y)
+                        output[index + 2] = Float(transformed.z)
+                    }
                 }
             }
         }
@@ -173,21 +179,17 @@ public enum AdvancedColorProcessor {
 
     private static func transformValidated(_ rgb: SIMD3<Double>, curves: ToneCurves,
                                            ranges: [ColorRangeAdjustment]) -> SIMD3<Double> {
-        let clamped = SIMD3(
-            min(1, max(0, rgb.x)),
-            min(1, max(0, rgb.y)),
-            min(1, max(0, rgb.z))
-        )
-        let mastered = SIMD3(
-            evaluateCurve(clamped.x, points: curves.master),
-            evaluateCurve(clamped.y, points: curves.master),
-            evaluateCurve(clamped.z, points: curves.master)
-        )
+        let master = Curve(curves.master)
         let curved = SIMD3(
-            evaluateCurve(mastered.x, points: curves.red),
-            evaluateCurve(mastered.y, points: curves.green),
-            evaluateCurve(mastered.z, points: curves.blue)
+            Curve(curves.red).value(at: master.value(at: min(1, max(0, rgb.x)))),
+            Curve(curves.green).value(at: master.value(at: min(1, max(0, rgb.y)))),
+            Curve(curves.blue).value(at: master.value(at: min(1, max(0, rgb.z))))
         )
+        return applyingRanges(ranges, to: curved)
+    }
+
+    private static func applyingRanges(_ ranges: [ColorRangeAdjustment],
+                                       to curved: SIMD3<Double>) -> SIMD3<Double> {
         guard !ranges.isEmpty else { return curved }
 
         let original = rgbToHSL(curved)
@@ -212,39 +214,46 @@ public enum AdvancedColorProcessor {
         return hslToRGB(adjusted)
     }
 
-    private static func evaluateCurve(_ value: Double, points: [CurvePoint]) -> Double {
-        if value <= points[0].x { return points[0].y }
-        if value >= points[points.count - 1].x { return points[points.count - 1].y }
+    /// 단조 Hermite 곡선. 점마다의 기울기를 한 번만 계산해 두고 값을 여러 번 읽는다.
+    private struct Curve {
+        let points: [CurvePoint]
+        let tangents: [Double]
 
-        var segment = 0
-        while segment + 1 < points.count && value > points[segment + 1].x {
-            segment += 1
+        init(_ points: [CurvePoint]) {
+            self.points = points
+            let slopes = (0..<(points.count - 1)).map {
+                (points[$0 + 1].y - points[$0].y) / (points[$0 + 1].x - points[$0].x)
+            }
+            tangents = (0..<points.count).map { index in
+                if index == 0 { return slopes[0] }
+                if index == slopes.count { return slopes[slopes.count - 1] }
+                let before = slopes[index - 1]
+                let after = slopes[index]
+                guard before != 0, after != 0, before.sign == after.sign else { return 0 }
+                return 2 * before * after / (before + after)
+            }
         }
-        let left = points[segment]
-        let right = points[segment + 1]
-        let width = right.x - left.x
-        let t = (value - left.x) / width
-        let slopes = (0..<(points.count - 1)).map {
-            (points[$0 + 1].y - points[$0].y) / (points[$0 + 1].x - points[$0].x)
-        }
-        let leftTangent = tangent(at: segment, slopes: slopes)
-        let rightTangent = tangent(at: segment + 1, slopes: slopes)
-        let t2 = t * t
-        let t3 = t2 * t
-        let value = (2 * t3 - 3 * t2 + 1) * left.y
-            + (t3 - 2 * t2 + t) * width * leftTangent
-            + (-2 * t3 + 3 * t2) * right.y
-            + (t3 - t2) * width * rightTangent
-        return min(max(left.y, right.y), max(min(left.y, right.y), value))
-    }
 
-    private static func tangent(at index: Int, slopes: [Double]) -> Double {
-        if index == 0 { return slopes[0] }
-        if index == slopes.count { return slopes[slopes.count - 1] }
-        let before = slopes[index - 1]
-        let after = slopes[index]
-        guard before != 0, after != 0, before.sign == after.sign else { return 0 }
-        return 2 * before * after / (before + after)
+        func value(at value: Double) -> Double {
+            if value <= points[0].x { return points[0].y }
+            if value >= points[points.count - 1].x { return points[points.count - 1].y }
+
+            var segment = 0
+            while segment + 1 < points.count && value > points[segment + 1].x {
+                segment += 1
+            }
+            let left = points[segment]
+            let right = points[segment + 1]
+            let width = right.x - left.x
+            let t = (value - left.x) / width
+            let t2 = t * t
+            let t3 = t2 * t
+            let value = (2 * t3 - 3 * t2 + 1) * left.y
+                + (t3 - 2 * t2 + t) * width * tangents[segment]
+                + (-2 * t3 + 3 * t2) * right.y
+                + (t3 - t2) * width * tangents[segment + 1]
+            return min(max(left.y, right.y), max(min(left.y, right.y), value))
+        }
     }
 
     private struct HSL {
