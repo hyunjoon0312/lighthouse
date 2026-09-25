@@ -96,6 +96,7 @@ LIGHTHOUSE_DATA_DIR="$PWD/.artifacts/test-catalog" swift run Lighthouse
 - [폴더 관리 계약](docs/photo-folders-contract.md)
 - [고급 보정 계약](docs/advanced-editing-contract.md)
 - [검증 기록](docs/verification.md)
+- [화면 수동 점검표](docs/manual-qa.md)
 - [프로젝트 작업 지침](AGENTS.md)
 - [Lighthouse 개발 하네스 팀](docs/harness.md)
 - [하네스 검증 기록](docs/harness-verification.md)
