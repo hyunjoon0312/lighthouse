@@ -1,6 +1,6 @@
 # 화면 수동 점검표
 
-자동 검사(`swift test`의 `LighthouseCoreTests`·`LighthouseTests`)는 코어와 `LibraryModel`의 동작을 확인하지만, 실제 화면의 모습과 클릭·키 입력은 확인하지 못한다. 2026-09-25 현재 이 개발 Mac에서는 화면 접근이 막혀 있다(`screencapture` 결과가 검은 화면이고 Orca의 접근성 읽기가 막힘). 아래 항목은 사람이 직접 확인해야 한다.
+자동 검사(`swift test`의 `LighthouseCoreTests`·`LighthouseTests`)는 코어와 `LibraryModel`의 동작을 확인하지만, 실제 화면의 모습과 클릭·키 입력은 확인하지 못한다. 2026-09-26 다시 시도했을 때도 이 개발 Mac에서는 화면 접근이 막혀 있었다(`screencapture` 결과가 검은 화면이고 Orca의 접근성 읽기가 막힘. Orca는 시스템 설정 › 개인정보 보호 및 보안 › 손쉬운 사용에서 Orca Computer Use를 껐다 켜라고 안내한다). 아래 항목은 사람이 직접 확인해야 한다.
 
 ## 준비
 
