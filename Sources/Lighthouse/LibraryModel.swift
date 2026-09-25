@@ -1802,7 +1802,7 @@ final class LibraryModel: ObservableObject {
         let approximate = editDragActive && !isOriginal && !actualSize
         requestedApproximation = approximate
         let thumbnailSize = renderCurrent && !isOriginal && edits.isModified ? Self.thumbnailPixels : nil
-        let job = DispatchWorkItem { [previewPipeline, pipeline] in
+        let job = DispatchWorkItem { [previewPipeline] in
             let preview = renderCurrent
                 ? Result { try previewPipeline.renderPreview(url: photo.url, edits: edits, maxPixel: maxPixel,
                                                              allowApproximation: approximate) } : nil
