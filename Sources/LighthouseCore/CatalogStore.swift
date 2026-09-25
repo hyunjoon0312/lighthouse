@@ -37,7 +37,8 @@ public struct CatalogStore: Sendable {
         let masks = MaskFileStore(directory: maskDirectory)
         let referenced = try masks.write(photos.flatMap { $0.edits.localAdjustments.compactMap(\.baseMask) })
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        // 사진 수천 장의 카탈로그는 자주 저장되므로 들여쓰기 없이 쓴다(보정한 사진 절반을 포함한 5000장 15.5MB → 5.4MB).
+        encoder.outputFormatting = [.sortedKeys]
         encoder.userInfo[.rasterMaskDirectory] = maskDirectory
         try encoder.encode(Envelope(version: 1, photos: photos)).write(to: url, options: .atomic)
         masks.removeFiles(notIn: referenced)
