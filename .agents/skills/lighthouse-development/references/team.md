@@ -16,7 +16,7 @@
 ## 공통 소유권
 
 - 메인: `AGENTS.md`, `.codex/`, `.agents/`, `Package.swift`, `Resources/Info.plist`, `.gitignore`, 빌드 스크립트, 정책·아키텍처·기능 계약, 실행 장부와 통합 결정. 확정된 기계적 변경은 명시적인 단일 Sol 소유자에게 배정할 수 있다.
-- `Sources/Lighthouse/LibraryModel.swift`: 선택, 필터, 카탈로그, 일괄 편집, LUT, 폴더와 내보내기가 만나는 공통 소비자다. 한 명의 앱 작업자에게만 배정한다. 독립 패널 작업자는 이 파일을 동시에 수정하지 않는다.
+- `Sources/Lighthouse/LibraryModel.swift`와 기능별 확장 `LibraryModel+*.swift`(파일·별점·연속 촬영·카탈로그·LUT·부분 보정·복구·렌더·가져오기·내보내기): 선택, 필터, 카탈로그, 일괄 편집, LUT, 폴더와 내보내기가 만나는 공통 소비자다. 저장 속성은 본 파일에만 있고 확장 파일이 서로의 상태를 쓰므로 한 묶음으로 보고 한 명의 앱 작업자에게만 배정한다. 독립 패널 작업자는 이 파일들을 동시에 수정하지 않는다.
 - `Sources/LighthouseCore/PhotoModels.swift`: Codable 저장 계약과 편집 설정의 공통 타입이다. 메인이 호환·기본값·오류 정책을 확정한 뒤 한 소유자에게 먼저 구현시킨다. 소비자는 승인된 인터페이스를 받는다.
 - `Tests/LighthouseCoreTests/CoreTests.swift`: 여러 코어 경계가 공유한다. imager와 catalog 작업자에게 통째로 동시에 배정하지 않는다. 새 회귀 테스트가 필요하면 목적이 다른 새 테스트 파일을 각각 소유하게 한다.
 - `.build/`, `dist/`: 실행 부작용도 소유권이다. 코드 소유권이 달라도 동시에 같은 빌드·패키징을 실행하지 않는다.

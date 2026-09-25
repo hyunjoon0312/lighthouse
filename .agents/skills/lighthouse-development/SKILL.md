@@ -38,7 +38,7 @@ python3 .agents/skills/harness/scripts/run.py --project . ready --run feature-v1
 2. 첫 자식 하나를 본 작업 없는 대기 상태로 생성한다. 실제 반환 ID를 확인한 뒤 첫 준비 작업에 재사용한다. `collab spawn failed: no thread with id`처럼 ID 없이 부모 조회가 실패하면 추가 생성을 멈춘다. 기존 메인에서 가능한 작업을 순차 수행하며 네이티브 작업은 `pending`으로 남긴다. 가짜 ID로 `start`하지 않는다.
 3. 실제 자식 ID를 `run.py start --run RUN --task TASK --agent-id ACTUAL_ID`에 등록한 후 갱신된 `input.md`를 실제 후속 실행 도구로 전달한다. 본 작업 전에 패킷·입력 지문·계약 버전·필수 스킬·동료 ID와 책임을 읽고 수신 확인하게 한다.
 4. 준비된 독립 쓰기 범위만 최대 3개 자식으로 넓힌다. 실제 런타임 한도가 더 작으면 그 한도를 따른다. 5개 역할을 항상 동시에 띄우지 않는다. 메인은 공통 계약과 통합을 맡고 자식은 재위임하지 않는다.
-5. 같은 파일은 한 명만 수정한다. 특히 `LibraryModel.swift`와 `PhotoModels.swift`는 매 작업의 단일 소유자를 명시한다. 공유 코드를 바꿀 때는 계약 확정 → 코어 → 앱 소비자 → QA 순서를 지킨다. 준비된 입력으로 분리 가능한 UI 파일만 먼저 진행한다. 전체 Sources 디렉터리 소유권을 여러 명에게 나눠 주지 않는다.
+5. 같은 파일은 한 명만 수정한다. 특히 `LibraryModel.swift`(기능별 확장 `LibraryModel+*.swift` 포함)와 `PhotoModels.swift`는 매 작업의 단일 소유자를 명시한다. 공유 코드를 바꿀 때는 계약 확정 → 코어 → 앱 소비자 → QA 순서를 지킨다. 준비된 입력으로 분리 가능한 UI 파일만 먼저 진행한다. 전체 Sources 디렉터리 소유권을 여러 명에게 나눠 주지 않는다.
 6. 중요한 발견·질문·답변·차단·인계는 `communication.py`로 `_workspace/communications/`에 기록한 후 실제 도구로 전달한다. 전송 결과는 `sent`/`failed`, 실제 수신은 `received`로 원래 이벤트 ID와 연결한다. 읽기 전용 리뷰어의 기록은 메인이 대신한다. 로그 작성은 메시지 전송이나 수신 확인이 아니다.
 7. 작업자는 첫 편집·단계 전환·완료 전 새 메시지의 본문까지 읽는다. 메인만 계약과 소유권을 변경한다. 작업 결과를 받았어도 실제 유휴·중단 상태를 확인하기 전 다른 작성자에게 소유권을 넘기지 않는다. `interrupt_agent`는 중단이며 종료와 다르다.
 

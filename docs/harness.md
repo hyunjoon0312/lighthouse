@@ -10,7 +10,7 @@
 | 독립 리뷰 | gpt-6-astra | 원본 보존, 저장 호환, 색 공간, 비동기·모듈 경계 검토 |
 | 실행 QA | gpt-6-astra | 실제 테스트·이미지·UI·패키징 검증과 근거 기록 |
 
-Sol은 medium, 독립 리뷰·QA는 high를 시작점으로 쓴다. 개별 작업에서 사용자가 지정한 모델·effort가 우선한다. 메인은 파일 소유권과 의존성을 정하고 자식 최대 3개를 조율한다. `LibraryModel.swift`와 `PhotoModels.swift`는 매 작업에 한 소유자만 배정한다. 전체 빌드와 패키징도 한 번에 한 담당자만 실행한다.
+Sol은 medium, 독립 리뷰·QA는 high를 시작점으로 쓴다. 개별 작업에서 사용자가 지정한 모델·effort가 우선한다. 메인은 파일 소유권과 의존성을 정하고 자식 최대 3개를 조율한다. `LibraryModel.swift`(기능별 확장 `LibraryModel+*.swift` 포함)와 `PhotoModels.swift`는 매 작업에 한 소유자만 배정한다. 전체 빌드와 패키징도 한 번에 한 담당자만 실행한다.
 
 ## 사용
 

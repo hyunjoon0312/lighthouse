@@ -1,0 +1,146 @@
+import AppKit
+import Foundation
+import LighthouseCore
+
+/// 가상 사본, 카탈로그에서 빼기, 저장과 날짜별 보관본.
+@MainActor
+extension LibraryModel {
+    // MARK: 가상 사본
+
+    /// 현재 사진의 가상 사본을 원래 항목 바로 뒤에 만들고 선택한다. 원본 파일은 복제하지 않는다.
+    /// 지금 내 폴더를 보고 있으면 사본도 그 폴더에 넣어 목록에서 사라지지 않게 한다.
+    func createVirtualCopy() {
+        guard catalogLoaded, loadError == nil, let source = selection else { return }
+        let copy = source.virtualCopy(among: photos)
+        let insertAt = (photos.lastIndex { $0.path == source.path } ?? photos.count - 1) + 1
+        photos.insert(copy, at: insertAt)
+        if case .collection(let folderID) = filter, foldersLoaded, folderLoadError == nil,
+           let index = photoFolders.firstIndex(where: { $0.id == folderID }) {
+            photoFolders[index].add([copy.id])
+        }
+        scheduleSave()
+        focusPhoto(copy)
+        operationMessage = "\(copy.displayName)을 만들었습니다. 원본 파일은 하나이며 보정·별점만 따로 저장됩니다."
+    }
+
+    // MARK: 카탈로그에서 빼기
+
+    /// 여러 장을 골랐으면 그 사진들, 아니면 보고 있는 사진.
+    var actionTargets: [PhotoAsset] {
+        selectedPhotos.isEmpty ? selection.map { [$0] } ?? [] : selectedPhotos
+    }
+
+    /// 선택한 사진 중 가상 사본만. 원본 파일과 원래 항목은 그대로다.
+    var selectedVirtualCopies: [PhotoAsset] { actionTargets.filter(\.isVirtualCopy) }
+
+    func requestDeleteVirtualCopies() {
+        let copies = selectedVirtualCopies
+        guard !copies.isEmpty else { return }
+        catalogRemoval = CatalogRemoval(photos: copies, hiddenCompanions: 0)
+    }
+
+    /// 선택한 사진을 카탈로그에서 빼도록 확인을 요청한다. RAW+JPEG를 한 장으로 보고 있으면
+    /// 뺄 RAW 뒤에 숨어 있던 JPEG도 함께 뺀다. 남겨 두면 RAW가 사라진 뒤 따로 나타나기 때문이다.
+    func requestRemoveFromCatalog() {
+        guard catalogLoaded, loadError == nil else { return }
+        let targets = actionTargets
+        guard !targets.isEmpty else { return }
+        let ids = Set(targets.map(\.id))
+        let companions = activeCompanions
+        let hidden = photos.filter { photo in
+            guard !ids.contains(photo.id), let raws = companions[photo.id] else { return false }
+            return raws.allSatisfy(ids.contains)
+        }
+        catalogRemoval = CatalogRemoval(photos: targets + hidden, hiddenCompanions: hidden.count)
+    }
+
+    /// 항목을 카탈로그에서 뺀다. 원본 파일은 지우거나 옮기지 않는다. 실행 취소할 수 없다.
+    func removeFromCatalog(_ ids: Set<UUID>) {
+        guard catalogLoaded, loadError == nil else { return }
+        let removed = photos.filter { ids.contains($0.id) }
+        guard !removed.isEmpty else { return }
+        let removedIDs = Set(removed.map(\.id))
+        let fallbackPath = selection.flatMap { removedIDs.contains($0.id) ? $0.path : nil }
+        photos.removeAll { removedIDs.contains($0.id) }
+        if foldersLoaded, folderLoadError == nil {
+            for index in photoFolders.indices { photoFolders[index].remove(removedIDs) }
+        }
+        for id in removedIDs {
+            burstQualities[id] = nil
+            burstFailedIDs.remove(id)
+            thumbnailCache.removeObject(forKey: id.uuidString as NSString)
+        }
+        editHistory.removeChanges(for: removedIDs)
+        thumbnailQueue.async { [thumbnailStore] in
+            for id in removedIDs { thumbnailStore.remove(photoID: id) }
+        }
+        if pinnedID.map(removedIDs.contains) == true { pinnedID = nil }
+        scheduleSave()
+        ensureSelectionVisible()
+        // 보고 있던 사본을 지우면 같은 파일의 남은 항목으로 옮긴다.
+        if selectedID == nil, let fallbackPath, let sibling = visiblePhotos.first(where: { $0.path == fallbackPath }) {
+            focusPhoto(sibling)
+        }
+        operationMessage = removed.allSatisfy(\.isVirtualCopy)
+            ? "가상 사본 \(removed.count)개를 지웠습니다. 원본 파일은 그대로입니다."
+            : "카탈로그에서 \(removed.count)장을 뺐습니다. 원본 파일은 그대로입니다."
+    }
+
+    func scheduleSave(debounce: Bool = false) {
+        guard catalogLoaded, loadError == nil else { return }
+        saveDelay?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.saveNow() }
+        saveDelay = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + (debounce ? 0.45 : 0.05), execute: item)
+    }
+
+    private func saveNow() {
+        guard catalogLoaded, loadError == nil else { return }
+        let snapshot = photos
+        let folderSnapshot = photoFolders
+        let canSaveFolders = foldersLoaded && folderLoadError == nil
+        saveQueue.async { [catalog, folderStore] in
+            do {
+                try catalog.save(snapshot)
+                if canSaveFolders { try folderStore.save(folderSnapshot) }
+            }
+            catch {
+                AppLog.catalog.error("catalog save failed: \(error.localizedDescription, privacy: .private)")
+                DispatchQueue.main.async { self.operationMessage = "사진 또는 폴더 정보 저장 실패: \(error.localizedDescription)" }
+            }
+            // 앱을 켜 둔 채 날짜가 바뀌면 그날 첫 저장 때 보관본을 만든다.
+            self.backUpIfNeeded(snapshot)
+        }
+    }
+
+    /// `saveQueue`에서 부른다. 실패는 한 번만 알린다.
+    nonisolated func backUpIfNeeded(_ photos: [PhotoAsset]) {
+        do {
+            try backup.backUpIfNeeded(photos: photos, copying: [folderStore.url, presetStore.url])
+        } catch {
+            AppLog.catalog.error("daily backup failed: \(error.localizedDescription, privacy: .private)")
+            DispatchQueue.main.async {
+                guard !self.backupFailureReported else { return }
+                self.backupFailureReported = true
+                self.operationMessage = "카탈로그 보관본을 만들지 못했습니다: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func revealBackups() {
+        try? FileManager.default.createDirectory(at: backup.directory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(backup.directory)
+    }
+
+    func flushSave() throws {
+        guard catalogLoaded, loadError == nil else { return }
+        saveDelay?.cancel()
+        let snapshot = photos
+        let folderSnapshot = photoFolders
+        let canSaveFolders = foldersLoaded && folderLoadError == nil
+        try saveQueue.sync {
+            try catalog.save(snapshot)
+            if canSaveFolders { try folderStore.save(folderSnapshot) }
+        }
+    }
+}
