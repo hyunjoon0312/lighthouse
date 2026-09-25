@@ -1297,7 +1297,20 @@ final class LibraryModel: ObservableObject {
             : "카탈로그에서 \(removed.count)장을 뺐습니다. 원본 파일은 그대로입니다."
     }
 
-    func copyEdits() { clipboard = selection?.edits }
+    func copyEdits() {
+        guard let selection else { return }
+        clipboard = selection.edits
+        operationMessage = "\(selection.displayName)의 보정을 복사했습니다. ⇧⌘V로 전체 보정과 LUT를 붙여넣습니다."
+    }
+
+    /// 복사한 보정 중 전체 보정·LUT를 선택한 사진(없으면 보고 있는 사진)에 붙여넣는다. 한 번에 실행 취소된다.
+    /// 크롭·부분 보정·복구는 사진마다 달라 제외한다.
+    func pasteEditsToSelection() {
+        guard let clipboard else { return }
+        let ids = actionTargets.map(\.id)
+        guard !ids.isEmpty else { return }
+        applyBatchEdits(source: clipboard, to: ids, components: Self.pasteComponents)
+    }
 
     private func knownLUTNames() -> [String: String] {
         var names: [String: String] = [:]

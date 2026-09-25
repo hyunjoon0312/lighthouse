@@ -61,6 +61,13 @@ struct LighthouseApp: App {
                 Button("다시 실행") { library.redo() }
                     .keyboardShortcut("z", modifiers: [.command, .shift])
                     .disabled(!library.canRedo || library.hasModalPresentation)
+                Divider()
+                Button("보정 복사") { library.copyEdits() }
+                    .keyboardShortcut("c", modifiers: [.command, .shift])
+                    .disabled(library.selection == nil || library.hasModalPresentation)
+                Button("보정 붙여넣기") { library.pasteEditsToSelection() }
+                    .keyboardShortcut("v", modifiers: [.command, .shift])
+                    .disabled(library.clipboard == nil || library.selection == nil || library.hasModalPresentation)
             }
         }
     }
