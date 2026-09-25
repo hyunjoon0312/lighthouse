@@ -451,11 +451,15 @@ final class ModelFlowTests: XCTestCase {
             let editedRaw = model.selection!
             model.requestThumbnail(for: editedRaw)
             let thumbStart = Date()
+            let thumbKey = ThumbnailStore.key(for: editedRaw)!
+            let thumbFolder = ThumbnailStore().directory.appendingPathComponent(editedRaw.id.uuidString)
+            let thumbFile = thumbFolder.appendingPathComponent(thumbKey + ".jpg")
             try await waitFor("raw edited thumbnail") {
-                (try? FileManager.default.contentsOfDirectory(atPath: ThumbnailStore().directory
-                    .appendingPathComponent(editedRaw.id.uuidString).path).count) == 1 && model.thumbnail(for: editedRaw) != nil
+                FileManager.default.fileExists(atPath: thumbFile.path) &&
+                    model.thumbnailCache.object(forKey: editedRaw.id.uuidString as NSString)?.edits == editedRaw.edits
             }
             let renderedThumbTime = Date().timeIntervalSince(thumbStart)
+            let storedAt = try FileManager.default.attributesOfItem(atPath: thumbFile.path)[.modificationDate] as? Date
             try model.flushSave()
             let restarted = LibraryModel()
             restarted.start()
@@ -466,7 +470,10 @@ final class ModelFlowTests: XCTestCase {
             try await waitFor("disk thumbnail") { restarted.thumbnail(for: again) != nil }
             let diskTime = Date().timeIntervalSince(diskStart)
             print(String(format: "  edited RAW thumbnail: render %.3fs, from disk after restart %.3fs", renderedThumbTime, diskTime))
-            check(diskTime < renderedThumbTime / 3, "restart reads edited thumbnail from disk")
+            // 걸린 시간 대신, 보관한 파일을 다시 쓰지 않고 그대로 읽었는지로 확인한다.
+            check(try FileManager.default.attributesOfItem(atPath: thumbFile.path)[.modificationDate] as? Date == storedAt &&
+                  (try? FileManager.default.contentsOfDirectory(atPath: thumbFolder.path)) == [thumbKey + ".jpg"],
+                  "restart reads edited thumbnail from disk")
         }
 
         // 7. 사진이 많을 때 반복 읽기 비용.
@@ -479,19 +486,18 @@ final class ModelFlowTests: XCTestCase {
         let big = LibraryModel()
         big.photos = many
         big.search = "many-1"
-        var timer = Date()
+        let timer = Date()
         for _ in 0..<50 { _ = big.visiblePhotos.count; _ = big.counts.picks; _ = big.folders.count; _ = big.photo(withID: many[4999].id) }
-        let cachedCost = Date().timeIntervalSince(timer)
-        timer = Date()
-        for _ in 0..<50 {
-            _ = many.filter { $0.filename.localizedCaseInsensitiveContains("many-1") }.count
-            _ = many.filter { $0.flag == .pick }.count
-            _ = Array(Set(many.map { $0.url.deletingLastPathComponent().path })).sorted().count
-            _ = many.first { $0.id == many[4999].id }
-        }
-        let uncachedCost = Date().timeIntervalSince(timer)
-        print(String(format: "  5000 photos x50 reads: cached %.4fs, recomputed %.4fs", cachedCost, uncachedCost))
-        check(cachedCost * 10 < uncachedCost, "library reads are cached")
+        print(String(format: "  5000 photos x50 reads: %.4fs", Date().timeIntervalSince(timer)))
+        // 걸린 시간 대신, 한 번 계산한 값을 보관하고 사진 목록이 바뀌면 버리는지 확인한다.
+        check(big.visibleCache?.count == big.visiblePhotos.count && big.countsCache != nil &&
+              big.foldersCache != nil && big.indexCache?.count == many.count, "library reads are cached")
+        big.photos[0].rating = 0
+        check(big.visibleCache == nil && big.countsCache == nil && big.foldersCache == nil && big.indexCache == nil,
+              "changing photos clears the cached reads")
+        check(big.counts.picks == many.filter { $0.flag == .pick }.count &&
+              big.visiblePhotos.count == many.filter { $0.filename.localizedCaseInsensitiveContains("many-1") }.count,
+              "recomputed reads match the photos")
 
         if rawSample != nil {
             // 8. 카드에서 복사해 가져오기.
@@ -926,6 +932,9 @@ final class ModelFlowTests: XCTestCase {
         model.importURLs([oldTrip])
         try await waitFor("trip import") { !model.isImporting && model.photos.contains { $0.path.hasSuffix("Day2/m2.png") } }
         let e1 = model.photos.first { $0.path.hasSuffix("Day1/m1.png") }!, e2 = model.photos.first { $0.path.hasSuffix("Day2/m2.png") }!
+        model.requestThumbnail(for: e1)
+        model.requestThumbnail(for: e2)
+        try await waitFor("trip thumbnails") { model.thumbnail(for: e1) != nil && model.thumbnail(for: e2) != nil }
         model.focusPhoto(e1)
         model.createVirtualCopy()
         let e1Copy = model.selection!
@@ -937,11 +946,31 @@ final class ModelFlowTests: XCTestCase {
         model.filter = .missing
         check(Set(model.visiblePhotos.map(\.id)) == [e1.id, e1Copy.id, e2.id] && model.isMissing(e1Copy),
               "moved originals show as missing after returning to the app")
+        // 다시 실행한 것처럼 메모리 캐시를 비우면 원본 없이도 보관한 마지막 썸네일이 보인다.
+        model.thumbnailCache.removeAllObjects()
+        for photo in [e1, e1Copy, e2] { model.requestThumbnail(for: photo) }
+        try await waitFor("fallback thumbnails") {
+            model.thumbnail(for: e1) != nil && model.thumbnail(for: e2) != nil && model.unavailableThumbnails.contains(e1Copy.id)
+        }
+        check(model.thumbnailCache.object(forKey: e1.id.uuidString as NSString)?.isFallback == true &&
+              model.thumbnail(for: e1)?.size == NSSize(width: 30, height: 20),
+              "missing original shows its last stored thumbnail")
+        model.requestThumbnail(for: e1Copy)
+        model.requestThumbnail(for: e1)
+        check(!model.loadingThumbnails.contains(e1Copy.id.uuidString) && !model.loadingThumbnails.contains(e1.id.uuidString),
+              "missing originals are not retried on every appearance")
         model.relocateMissing(from: e1, to: newTrip.appendingPathComponent("Day1"))
         check(model.photo(withID: e1.id)!.path.hasSuffix("NewTrip/Day1/m1.png") &&
               model.photo(withID: e1Copy.id)!.path == model.photo(withID: e1.id)!.path &&
               model.isMissing(model.photo(withID: e2.id)!) && model.counts.missing == 1,
               "choosing the file's folder relinks that folder and its copies only")
+        try await waitFor("relinked thumbnails") {
+            model.thumbnailCache.object(forKey: e1.id.uuidString as NSString)?.isFallback == false &&
+                model.thumbnail(for: e1Copy) != nil
+        }
+        check(model.thumbnailCache.object(forKey: e2.id.uuidString as NSString)?.isFallback == true &&
+              !model.unavailableThumbnails.contains(e1Copy.id),
+              "relinking refreshes that folder's thumbnails and leaves still-missing ones as they were")
         model.relocateMissing(from: model.photo(withID: e2.id)!, to: newTrip)
         check(model.photo(withID: e2.id)!.path.hasSuffix("NewTrip/Day2/m2.png") && model.counts.missing == 0,
               "choosing a parent folder relinks through the date folders")

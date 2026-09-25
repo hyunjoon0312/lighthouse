@@ -338,6 +338,27 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertNil(ThumbnailStore.key(for: PhotoAsset(url: directory.appendingPathComponent("missing.png"))))
     }
 
+    func testThumbnailStoreKeepsLatestThumbnailWhenOriginalIsGone() throws {
+        let input = try temporaryPNG(width: 40, height: 30) { _, _ in (50, 60, 70, 255) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            try? FileManager.default.removeItem(at: input)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = ThumbnailStore(directory: directory)
+        let photo = PhotoAsset(url: input)
+        XCTAssertNil(store.latest(photoID: photo.id))
+        let key = try XCTUnwrap(ThumbnailStore.key(for: photo), "보정하지 않은 사진도 키가 있다")
+        store.store(try makeImage(width: 20, height: 15) { _, _ in (200, 100, 50, 255) }, photoID: photo.id, key: key)
+
+        try FileManager.default.removeItem(at: input)
+        XCTAssertNil(ThumbnailStore.key(for: photo))
+        let latest = try XCTUnwrap(store.latest(photoID: photo.id))
+        XCTAssertEqual(latest.width, 20)
+        XCTAssertEqual(latest.height, 15)
+        XCTAssertNil(store.latest(photoID: UUID()))
+    }
+
     func testHistogramCountsChannelsAndClipping() throws {
         let image = try makeImage(width: 10, height: 10) { x, _ in
             switch x {

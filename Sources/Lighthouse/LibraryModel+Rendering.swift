@@ -10,31 +10,39 @@ extension LibraryModel {
     }
 
     /// 보정한 사진은 보정 결과로 썸네일을 만든다. 편집 화면의 사진은 미리보기 렌더가 썸네일을 갱신한다.
-    /// 보정 썸네일은 디스크에도 보관해 다음 실행 때 RAW를 다시 현상하지 않는다.
+    /// 썸네일은 디스크에도 보관해 다음 실행 때 RAW를 다시 현상하지 않고, 원본이 없어도 마지막 모습을 보여 준다.
     func requestThumbnail(for photo: PhotoAsset) {
         let wanted: EditSettings? = photo.edits.isModified ? photo.edits : nil
         // 가상 사본은 같은 파일을 가리키므로 파일 경로가 아니라 항목 ID로 캐시한다.
         let cacheKey = photo.id.uuidString
         let entry = thumbnailCache.object(forKey: cacheKey as NSString)
-        if let entry, entry.edits == wanted { return }
+        // 대신 보여 주던 마지막 썸네일은 원본이 없다고 확인된 동안만 그대로 둔다.
+        if let entry, entry.edits == wanted, !entry.isFallback || isMissing(photo) { return }
         if entry != nil, wanted != nil, photo.id == selectedID, mode != .grid, !isOriginal { return }
-        guard !loadingThumbnails.contains(cacheKey) else { return }
+        guard !loadingThumbnails.contains(cacheKey), !unavailableThumbnails.contains(photo.id) else { return }
         loadingThumbnails.insert(cacheKey)
         let size = Self.thumbnailPixels
         thumbnailQueue.async { [pipeline, thumbnailStore] in
-            var image: CGImage?
-            if let wanted {
-                let key = ThumbnailStore.key(for: photo)
-                image = key.flatMap { thumbnailStore.load(photoID: photo.id, key: $0) }
-                if image == nil, let rendered = try? pipeline.renderPreview(url: photo.url, edits: wanted, maxPixel: size).image {
+            // 보정 여부와 관계없이 디스크에 보관한 썸네일을 먼저 쓰고, 없으면 만들어 보관한다.
+            // 원본을 읽을 수 없으면 키를 만들 수 없으므로 마지막으로 보관한 썸네일을 보여 준다.
+            let key = ThumbnailStore.key(for: photo)
+            var image = key.flatMap { thumbnailStore.load(photoID: photo.id, key: $0) }
+            if image == nil, let key {
+                if let wanted, let rendered = try? pipeline.renderPreview(url: photo.url, edits: wanted, maxPixel: size).image {
                     image = rendered
-                    if let key { thumbnailStore.store(rendered, photoID: photo.id, key: key) }
+                    thumbnailStore.store(rendered, photoID: photo.id, key: key)
+                } else if let plain = try? pipeline.thumbnail(for: photo.url, maxPixel: size) {
+                    image = plain
+                    // 보정한 사진인데 보정 렌더에 실패해 보정 전 모습이면 보관하지 않는다.
+                    if wanted == nil { thumbnailStore.store(plain, photoID: photo.id, key: key) }
                 }
             }
-            image = image ?? (try? pipeline.thumbnail(for: photo.url, maxPixel: size))
+            let fallback = image == nil && key == nil ? thumbnailStore.latest(photoID: photo.id) : nil
+            let unavailable = image == nil && key == nil && fallback == nil
             DispatchQueue.main.async {
                 self.loadingThumbnails.remove(cacheKey)
-                if let image { self.storeThumbnail(image, id: photo.id, edits: wanted) }
+                if let shown = image ?? fallback { self.storeThumbnail(shown, id: photo.id, edits: wanted, isFallback: fallback != nil) }
+                if unavailable { self.unavailableThumbnails.insert(photo.id) }
                 if let latest = self.photo(withID: photo.id),
                    (latest.edits.isModified ? latest.edits : nil) != wanted {
                     self.requestThumbnail(for: latest)
@@ -43,9 +51,19 @@ extension LibraryModel {
         }
     }
 
-    private func storeThumbnail(_ image: CGImage, id: UUID, edits: EditSettings?) {
+    /// 원본이 돌아오거나 다시 연결된 사진은 대신 보여 주던 썸네일을 새로 만들고, 썸네일이 없던 사진은 다시 찾는다.
+    func missingOriginalsDidChange() {
+        let returned = fallbackThumbnailIDs.union(unavailableThumbnails).compactMap(photo(withID:)).filter { !isMissing($0) }
+        for photo in returned {
+            unavailableThumbnails.remove(photo.id)
+            requestThumbnail(for: photo)
+        }
+    }
+
+    private func storeThumbnail(_ image: CGImage, id: UUID, edits: EditSettings?, isFallback: Bool = false) {
+        if isFallback { fallbackThumbnailIDs.insert(id) } else { fallbackThumbnailIDs.remove(id) }
         let entry = ThumbnailEntry(image: NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height)),
-                                   edits: edits)
+                                   edits: edits, isFallback: isFallback)
         thumbnailCache.setObject(entry, forKey: id.uuidString as NSString, cost: image.width * image.height * 4)
         objectWillChange.send()
     }

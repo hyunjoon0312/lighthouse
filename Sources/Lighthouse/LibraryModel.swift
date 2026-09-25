@@ -108,10 +108,13 @@ final class CanvasStrokeState: ObservableObject {
 final class ThumbnailEntry: NSObject {
     let image: NSImage
     let edits: EditSettings?
+    /// 원본을 읽을 수 없어 디스크에 남은 마지막 썸네일을 보여 주는 중인지.
+    let isFallback: Bool
 
-    init(image: NSImage, edits: EditSettings?) {
+    init(image: NSImage, edits: EditSettings?, isFallback: Bool = false) {
         self.image = image
         self.edits = edits
+        self.isFallback = isFallback
     }
 }
 
@@ -295,10 +298,10 @@ final class LibraryModel: ObservableObject {
     private var pendingCollapse: DispatchWorkItem?
     var exportCancellation: CancellationFlag?
     var importCancellation: CancellationFlag?
-    private var visibleCache: [PhotoAsset]?
-    private var indexCache: [UUID: Int]?
-    private var countsCache: LibraryCounts?
-    private var foldersCache: [String]?
+    private(set) var visibleCache: [PhotoAsset]?
+    private(set) var indexCache: [UUID: Int]?
+    private(set) var countsCache: LibraryCounts?
+    private(set) var foldersCache: [String]?
     var burstCache: (signature: Int, index: BurstIndex)?
     /// 사진 목록의 ID·경로·촬영 정보만 본 서명. 보정·별점만 바뀌면 같아서 묶음·짝 계산을 다시 하지 않는다.
     private var structureSignatureCache: Int?
@@ -333,7 +336,13 @@ final class LibraryModel: ObservableObject {
     var draftLocalID: UUID?
     private var started = false
     /// 마지막 확인에서 파일을 찾지 못한 원본 경로. 앱으로 돌아오거나 볼륨을 연결·해제하면 다시 확인한다.
-    @Published var missingPaths: Set<String> = [] { didSet { visibleCache = nil; countsCache = nil } }
+    @Published var missingPaths: Set<String> = [] {
+        didSet { visibleCache = nil; countsCache = nil; missingOriginalsDidChange() }
+    }
+    /// 원본이 없고 보관한 썸네일도 없는 사진. 원본이 돌아올 때까지 다시 찾지 않는다.
+    var unavailableThumbnails = Set<UUID>()
+    /// 마지막 썸네일로 대신 보여 주는 사진. 원본이 돌아오거나 다시 연결되면 새로 만든다.
+    var fallbackThumbnailIDs = Set<UUID>()
     var missingScanRunning = false
     var missingScanAgain = false
     var fileObservers: [NSObjectProtocol] = []

@@ -4,7 +4,8 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// 보정한 사진의 썸네일을 `Thumbnails/<사진 ID>/<키>.jpg`로 보관한다. 지워도 다시 만들 수 있는 캐시다.
+/// 사진 썸네일을 `Thumbnails/<사진 ID>/<키>.jpg`로 보관한다(보정 여부와 관계없이 사진마다 최신 한 장).
+/// 원본을 읽을 수 없을 때는 마지막으로 보관한 것을 보여 준다. 지워도 다시 만들 수 있는 캐시다.
 public struct ThumbnailStore: Sendable {
     public let directory: URL
 
@@ -37,7 +38,20 @@ public struct ThumbnailStore: Sendable {
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
-    /// 새 썸네일을 저장하고 같은 사진의 이전 보정 썸네일은 지운다.
+    /// 원본을 읽을 수 없어 키를 만들 수 없을 때 보여 줄, 그 사진의 마지막 썸네일.
+    public func latest(photoID: UUID) -> CGImage? {
+        let folder = directory.appendingPathComponent(photoID.uuidString, isDirectory: true)
+        let files = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey]))
+            ?? []).filter { $0.pathExtension == "jpg" }
+        func modified(_ url: URL) -> Date {
+            (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        }
+        guard let newest = files.max(by: { modified($0) < modified($1) }),
+              let source = CGImageSourceCreateWithURL(newest as CFURL, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+
+    /// 새 썸네일을 저장하고 같은 사진의 이전 썸네일은 지운다.
     public func store(_ image: CGImage, photoID: UUID, key: String) {
         let folder = directory.appendingPathComponent(photoID.uuidString, isDirectory: true)
         let data = NSMutableData()
@@ -54,7 +68,7 @@ public struct ThumbnailStore: Sendable {
         }
     }
 
-    /// 카탈로그에서 뺀 항목(가상 사본)의 보정 썸네일을 지운다.
+    /// 카탈로그에서 뺀 항목의 썸네일을 지운다.
     public func remove(photoID: UUID) {
         try? FileManager.default.removeItem(at: directory.appendingPathComponent(photoID.uuidString, isDirectory: true))
     }
