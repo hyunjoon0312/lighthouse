@@ -72,6 +72,19 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertGreaterThan(untouched.2, 200)
     }
 
+    func testPreviewOfNonRAWPhotoMatchesFullRender() throws {
+        let input = try temporaryPNG(width: 96, height: 64) { x, y in
+            (UInt8(x * 2), UInt8(y * 3), UInt8((x + y) % 256), 255)
+        }
+        defer { try? FileManager.default.removeItem(at: input) }
+        let pipeline = ImagePipeline(cachesDevelopment: true)
+        let edits = EditSettings(exposure: 0.3, sharpness: 0.6, clarity: 0.4)
+        XCTAssertEqual(pipeline.decodeScale(url: input, edits: edits, maxPixel: 24), 1, "일반 사진은 줄여서 현상하지 않는다")
+        let full = try rgbaBytes(pipeline.render(url: input, edits: edits, maxPixel: 24))
+        let preview = try rgbaBytes(pipeline.renderPreview(url: input, edits: edits, maxPixel: 24).image)
+        XCTAssertEqual(full, preview)
+    }
+
     func testSeveralStrokesLandAtTheirRowsAndLeaveOtherPixelsIdentical() throws {
         let input = try temporaryPNG(width: 64, height: 64) { x, y in
             y < 32 ? (230, UInt8(x), 30, 255) : (30, UInt8(x), 220, 255)

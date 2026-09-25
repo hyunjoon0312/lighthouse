@@ -1585,9 +1585,11 @@ final class LibraryModel: ObservableObject {
         let token = retouchGeneration
         let selectionToken = selectionGeneration
         isFindingHealSource = true
+        let maxPixel: Int? = actualSize ? nil : 2200
         retouchQueue.async { [previewPipeline] in
             let result = Result {
-                try previewPipeline.healingSourceOffset(url: photo.url, edits: photo.edits, stroke: stroke)
+                try previewPipeline.healingSourceOffset(url: photo.url, edits: photo.edits, stroke: stroke,
+                                                        maxPixel: maxPixel)
             }
             DispatchQueue.main.async {
                 guard token == self.retouchGeneration else { return }
@@ -1712,7 +1714,7 @@ final class LibraryModel: ObservableObject {
             if let wanted {
                 let key = ThumbnailStore.key(for: photo)
                 image = key.flatMap { thumbnailStore.load(photoID: photo.id, key: $0) }
-                if image == nil, let rendered = try? pipeline.render(url: photo.url, edits: wanted, maxPixel: size) {
+                if image == nil, let rendered = try? pipeline.renderPreview(url: photo.url, edits: wanted, maxPixel: size).image {
                     image = rendered
                     if let key { thumbnailStore.store(rendered, photoID: photo.id, key: key) }
                 }
@@ -1962,7 +1964,7 @@ final class LibraryModel: ObservableObject {
         }
         prefetching.insert(key)
         prefetchQueue.async { [pipeline] in
-            let cg = try? pipeline.render(url: photo.url, edits: edits, maxPixel: 2200)
+            let cg = try? pipeline.renderPreview(url: photo.url, edits: edits, maxPixel: 2200).image
             let histogram = cg.flatMap { ImageHistogram.make(from: $0) }
             DispatchQueue.main.async {
                 self.prefetching.remove(key)

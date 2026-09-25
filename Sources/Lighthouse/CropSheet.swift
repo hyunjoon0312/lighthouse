@@ -225,7 +225,7 @@ private final class CropPreviewModel: ObservableObject {
                                      sourceHeight: Double(source.metadata.height), edits: edits)
         canvasAspect = Double(geometry.canvasSize.width / max(1, geometry.canvasSize.height))
         let job = DispatchWorkItem { [weak self, pipeline] in
-            let result = Result { try pipeline.render(url: source.url, edits: edits, maxPixel: 2200) }
+            let result = Result { try pipeline.renderPreview(url: source.url, edits: edits, maxPixel: 2200).image }
             DispatchQueue.main.async { [weak self] in
                 guard let self, token == self.generation else { return }
                 self.isRendering = false

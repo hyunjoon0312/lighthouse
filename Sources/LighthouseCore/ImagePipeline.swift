@@ -73,6 +73,8 @@ public final class ImagePipeline: @unchecked Sendable {
         let tint: Double
         let neutralTemperature: Double?
     }
+    private let sizeLock = NSLock()
+    private var sourceSizes: [String: CGSize] = [:]
     private let maskLock = NSLock()
     private var cachedMasks: [(definition: LocalMaskDefinition, width: Int, height: Int, image: CIImage)] = []
 
@@ -182,20 +184,67 @@ public final class ImagePipeline: @unchecked Sendable {
         return abs(sourceRatio - imageRatio) <= 0.02
     }
 
+    /// 원본 해상도로 현상한 뒤 `maxPixel`로 줄인다. 내보내기와 색 분석에 쓴다.
     public func render(url: URL, edits: EditSettings, maxPixel: Int? = 2200) throws -> CGImage {
-        try render(url: url, edits: edits, maxPixel: maxPixel, allowApproximation: false).image
+        try render(url: url, edits: edits, maxPixel: maxPixel, scale: 1, allowApproximation: false).image
     }
 
-    /// 편집 미리보기용. `allowApproximation`이면 RAW 노출·색온도·틴트만 바뀐 경우 최근 현상 결과에 차이를 덧씌워
-    /// RAW를 다시 현상하지 않고 그린다(슬라이더를 끄는 동안). 근사 결과인지 함께 돌려주므로 끝난 뒤 정확히 다시 그린다.
+    /// 화면 표시용. RAW는 출력에 필요한 만큼 줄여서 현상해 메모리를 아낀다. 원본 해상도로 현상해 줄인 결과와
+    /// 픽셀이 같지는 않다. `allowApproximation`이면 RAW 노출·색온도·틴트만 바뀐 경우 최근 현상 결과에 차이를
+    /// 덧씌워 RAW를 다시 현상하지 않고 그린다(슬라이더를 끄는 동안). 근사 결과인지 함께 돌려주므로 끝난 뒤 정확히 다시 그린다.
     public func renderPreview(url: URL, edits: EditSettings, maxPixel: Int?,
-                              allowApproximation: Bool) throws -> (image: CGImage, isApproximate: Bool) {
-        try render(url: url, edits: edits, maxPixel: maxPixel, allowApproximation: allowApproximation)
+                              allowApproximation: Bool = false) throws -> (image: CGImage, isApproximate: Bool) {
+        try render(url: url, edits: edits, maxPixel: maxPixel,
+                   scale: decodeScale(url: url, edits: edits, maxPixel: maxPixel),
+                   allowApproximation: allowApproximation)
     }
 
-    private func render(url: URL, edits: EditSettings, maxPixel: Int?,
+    /// 화면에 필요한 해상도 비율의 1.6배보다 크거나 같은 2^(-k/4) 값(최소 1/8). 크롭을 조금 바꿔도 같은 값이 나와
+    /// 현상 결과를 다시 쓸 수 있다. 원본 크기를 읽지 못하거나 `maxPixel`이 없으면 1이다.
+    /// 일반 사진은 Core Image가 이미 줄여 읽어서 따로 줄이면 오히려 메모리를 더 쓴다(24MP JPEG 114MB→431MB).
+    /// 필름 입자는 픽셀 단위 무늬라 해상도에 따라 보이는 세기가 불규칙하게 달라지므로, 입자가 있으면 원본 해상도로 현상한다.
+    func decodeScale(url: URL, edits: EditSettings, maxPixel: Int?) -> Double {
+        guard Self.isRAW(url), edits.grain.amount == 0, let maxPixel, maxPixel > 0,
+              let size = sourceSize(url: url) else { return 1 }
+        // RAW 디코더가 딱 필요한 크기로 줄이면 원본을 줄인 것보다 눈에 띄게 부드러워서 여유를 둔다.
+        // S9 2200px에서 0.59배가 되어 최대 메모리는 약 절반, 잔 디테일 차이는 약 20%였다.
+        let needed = Self.maskScale(sourceWidth: size.width, sourceHeight: size.height,
+                                    edits: edits, maxPixel: maxPixel) * 1.6
+        var scale = 1.0
+        for step in 1...12 {
+            let candidate = pow(2, -Double(step) / 4)
+            guard candidate >= needed else { break }
+            scale = candidate
+        }
+        return scale
+    }
+
+    /// 현상하지 않고 읽은 RAW 원본(방향 적용) 크기. 파일·수정 시각별로 기억한다.
+    private func sourceSize(url: URL) -> CGSize? {
+        let key = Self.fileIdentity(url)
+        sizeLock.lock()
+        if let size = sourceSizes[key] {
+            sizeLock.unlock()
+            return size
+        }
+        sizeLock.unlock()
+        guard let size = CIRAWFilter(imageURL: url)?.outputImage?.extent.size,
+              size.width > 0, size.height > 0 else { return nil }
+        sizeLock.lock()
+        if sourceSizes.count >= 256 { sourceSizes.removeAll() }
+        sourceSizes[key] = size
+        sizeLock.unlock()
+        return size
+    }
+
+    private static func fileIdentity(_ url: URL) -> String {
+        let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+        return "\(url.path)|\(modified?.timeIntervalSinceReferenceDate ?? 0)"
+    }
+
+    private func render(url: URL, edits: EditSettings, maxPixel: Int?, scale: Double,
                         allowApproximation: Bool) throws -> (image: CGImage, isApproximate: Bool) {
-        let development = try developed(url: url, edits: edits, allowApproximation: allowApproximation)
+        let development = try developed(url: url, edits: edits, scale: scale, allowApproximation: allowApproximation)
         var image = development.image
         image = try RetouchProcessor.apply(to: image, strokes: edits.retouchStrokes,
                                            context: context, colorSpace: colorSpace)
@@ -255,8 +304,11 @@ public final class ImagePipeline: @unchecked Sendable {
     }
 
     /// 새 스팟 복구의 패치 위치를 한 번 찾는다. 결과를 stroke에 저장하면 렌더마다 다시 찾지 않는다.
-    public func healingSourceOffset(url: URL, edits: EditSettings, stroke: RetouchStroke) throws -> MaskPoint {
-        let base = try developed(url: url, edits: edits, allowApproximation: false).image
+    /// 탐색은 256px로 줄인 이미지에서 하므로, `maxPixel` 미리보기와 같은 크기로 현상한 결과를 다시 쓴다.
+    public func healingSourceOffset(url: URL, edits: EditSettings, stroke: RetouchStroke,
+                                    maxPixel: Int? = 2200) throws -> MaskPoint {
+        let scale = decodeScale(url: url, edits: edits, maxPixel: maxPixel)
+        let base = try developed(url: url, edits: edits, scale: scale, allowApproximation: false).image
         let retouched = try RetouchProcessor.apply(to: base, strokes: edits.retouchStrokes,
                                                    context: context, colorSpace: colorSpace)
         return try RetouchProcessor.healingSourceOffset(for: stroke, in: retouched,
@@ -282,11 +334,12 @@ public final class ImagePipeline: @unchecked Sendable {
         return output
     }
 
-    private func developedSource(url: URL, edits: EditSettings,
+    private func developedSource(url: URL, edits: EditSettings, scale: Double,
                                  allowApproximation: Bool) throws -> (image: CIImage, delta: DevelopmentDelta?) {
-        guard cachesDevelopment else { return (try makeDevelopedSource(url: url, edits: edits).image, nil) }
-        let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
-        var base = "\(url.path)|\(modified?.timeIntervalSinceReferenceDate ?? 0)"
+        guard cachesDevelopment else {
+            return (try makeDevelopedSource(url: url, edits: edits, scale: scale).image, nil)
+        }
+        var base = "\(Self.fileIdentity(url))|\(scale)"
         var key = base
         if Self.isRAW(url) {
             base += "|\(edits.rawDevelop)"
@@ -307,7 +360,7 @@ public final class ImagePipeline: @unchecked Sendable {
                                                  neutralTemperature: near.neutralTemperature))
         }
         developmentLock.unlock()
-        let (image, neutralTemperature) = try makeDevelopedSource(url: url, edits: edits)
+        let (image, neutralTemperature) = try makeDevelopedSource(url: url, edits: edits, scale: scale)
         developmentLock.lock()
         developedSources.removeAll { $0.key == key }
         developedSources.append(DevelopedSource(key: key, base: base, exposure: edits.exposure,
@@ -320,9 +373,12 @@ public final class ImagePipeline: @unchecked Sendable {
         return (image, nil)
     }
 
-    private func makeDevelopedSource(url: URL, edits: EditSettings) throws -> (image: CIImage, neutralTemperature: Double?) {
+    /// `scale`이 1보다 작으면 RAW 디코더가 줄여서 현상한다.
+    private func makeDevelopedSource(url: URL, edits: EditSettings,
+                                     scale: Double) throws -> (image: CIImage, neutralTemperature: Double?) {
         if Self.isRAW(url) {
             guard let raw = CIRAWFilter(imageURL: url) else { throw ImagePipelineError.unreadable(url) }
+            if scale < 1 { raw.scaleFactor = Float(scale) }
             let originalExposure = raw.exposure
             let originalTemperature = raw.neutralTemperature
             let originalTint = raw.neutralTint
@@ -351,9 +407,9 @@ public final class ImagePipeline: @unchecked Sendable {
         return (source, nil)
     }
 
-    private func developed(url: URL, edits: EditSettings,
+    private func developed(url: URL, edits: EditSettings, scale: Double,
                            allowApproximation: Bool) throws -> (image: CIImage, isApproximate: Bool) {
-        let source = try developedSource(url: url, edits: edits, allowApproximation: allowApproximation)
+        let source = try developedSource(url: url, edits: edits, scale: scale, allowApproximation: allowApproximation)
         var image = source.image
         if let delta = source.delta {
             image = Self.approximated(image, by: delta)
@@ -400,6 +456,8 @@ public final class ImagePipeline: @unchecked Sendable {
             let filter = CIFilter.sharpenLuminance()
             filter.inputImage = image
             filter.sharpness = Float(edits.sharpness)
+            // 반경은 픽셀 단위다. 줄여서 현상했으면 원본에서와 같은 폭이 되도록 함께 줄인다.
+            if scale < 1 { filter.radius *= Float(scale) }
             image = filter.outputImage ?? image
         }
         return (image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY)),
