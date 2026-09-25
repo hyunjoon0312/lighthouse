@@ -577,6 +577,14 @@ struct WorkspaceView: View {
     private func installKeys() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // 글자 칸에서는 ⌘Z·⇧⌘Z가 사진 보정이 아니라 입력한 글자를 되돌리게 메뉴 단축키보다 먼저 보낸다.
+            if NSApp.keyWindow?.firstResponder is NSTextView,
+               event.modifierFlags.intersection([.command, .control, .option]) == .command,
+               ShortcutKey.resolve(characters: event.charactersIgnoringModifiers, keyCode: event.keyCode) == "z" {
+                let action = event.modifierFlags.contains(.shift) ? Selector(("redo:")) : Selector(("undo:"))
+                NSApp.sendAction(action, to: nil, from: nil)
+                return nil
+            }
             if NSApp.modalWindow != nil || model.hasModalPresentation { return event }
             if event.keyCode == 53, NSApp.keyWindow?.firstResponder is NSTextView {
                 NSApp.keyWindow?.makeFirstResponder(nil)

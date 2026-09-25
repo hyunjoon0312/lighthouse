@@ -564,8 +564,14 @@ private struct DescriptionFields: View {
             if let field = focus, field != .add { commit(field) }
             load()
         }
-        .onChange(of: photo.keywords) { _, _ in if focus != .keywords { keywordText = PhotoKeywords.text(photo.keywords) } }
-        .onChange(of: photo.caption) { _, _ in if focus != .caption { captionText = photo.caption } }
+        // 실행 취소 등으로 값이 바뀌면 따라간다. 입력 중이라도 저장하지 않은 글자가 없으면 따라가서,
+        // 나중에 칸을 떠날 때 옛 글자를 다시 저장해 실행 취소를 되돌리지 않게 한다.
+        .onChange(of: photo.keywords) { old, new in
+            if focus != .keywords || PhotoKeywords.parse(keywordText) == old { keywordText = PhotoKeywords.text(new) }
+        }
+        .onChange(of: photo.caption) { old, new in
+            if focus != .caption || captionText.trimmingCharacters(in: .whitespacesAndNewlines) == old { captionText = new }
+        }
         .onChange(of: focus) { old, new in
             if let old, old != .add { commit(old) }
             if new == .keywords || new == .caption { editingID = photo.id }
