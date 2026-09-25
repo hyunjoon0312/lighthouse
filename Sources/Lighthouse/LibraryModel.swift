@@ -618,12 +618,16 @@ final class LibraryModel: ObservableObject {
                     self.catalogLoaded = true
                     switch folders {
                     case .success(let loaded): self.photoFolders = loaded; self.foldersLoaded = true
-                    case .failure(let error): self.folderLoadError = error.localizedDescription
+                    case .failure(let error):
+                        AppLog.catalog.error("folders.json load failed: \(error.localizedDescription, privacy: .private)")
+                        self.folderLoadError = error.localizedDescription
                     }
                     switch presets {
                     case .success(let loaded):
                         self.presets = loaded.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-                    case .failure(let error): self.presetLoadError = error.localizedDescription
+                    case .failure(let error):
+                        AppLog.catalog.error("presets.json load failed: \(error.localizedDescription, privacy: .private)")
+                        self.presetLoadError = error.localizedDescription
                     }
                     if let first = photos.first {
                         self.photoSelection.select(first.id, in: photos.map(\.id))
@@ -639,6 +643,7 @@ final class LibraryModel: ObservableObject {
                         self.importURLs([URL(fileURLWithPath: arguments[index + 1])])
                     }
                 case .failure(let error):
+                    AppLog.catalog.fault("catalog load failed: \(error.localizedDescription, privacy: .private)")
                     self.loadError = """
                         카탈로그를 열 수 없습니다. 파일을 확인한 뒤 앱을 다시 실행하세요.
                         \(error.localizedDescription)
@@ -666,7 +671,10 @@ final class LibraryModel: ObservableObject {
             let missing = paths.filter { !FileManager.default.fileExists(atPath: $0) }
             DispatchQueue.main.async {
                 self.missingScanRunning = false
-                if self.missingPaths != missing { self.missingPaths = missing }
+                if self.missingPaths != missing {
+                    AppLog.files.info("missing originals: \(missing.count, privacy: .public) of \(paths.count, privacy: .public) paths")
+                    self.missingPaths = missing
+                }
                 if self.missingScanAgain {
                     self.missingScanAgain = false
                     self.refreshMissingOriginals()
@@ -723,6 +731,7 @@ final class LibraryModel: ObservableObject {
                 (alreadyInCatalog > 0 ? " \(alreadyInCatalog)개는 새 위치의 파일이 이미 카탈로그에 있습니다." : "")
             return
         }
+        AppLog.files.info("relinked \(moves.count, privacy: .public) files, \(notFound, privacy: .public) not found, \(alreadyInCatalog, privacy: .public) already in catalog")
         var updated = photos
         for index in updated.indices {
             if let target = moves[updated[index].path] { updated[index].path = target }
@@ -1333,7 +1342,9 @@ final class LibraryModel: ObservableObject {
                 self.isLUTLibraryLoading = false
                 switch result {
                 case .success(let items): self.savedLUTs = items; self.lutLibraryError = nil
-                case .failure(let error): self.lutLibraryError = error.localizedDescription
+                case .failure(let error):
+                    AppLog.editing.error("LUT library load failed: \(error.localizedDescription, privacy: .private)")
+                    self.lutLibraryError = error.localizedDescription
                 }
             }
         }
@@ -1366,7 +1377,10 @@ final class LibraryModel: ObservableObject {
             var failures: [String] = []
             for url in urls {
                 do { imported.append(try lutStore.importCube(from: url)) }
-                catch { failures.append("\(url.lastPathComponent): \(error.localizedDescription)") }
+                catch {
+                    AppLog.editing.error("LUT import failed: \(url.lastPathComponent, privacy: .private): \(error.localizedDescription, privacy: .private)")
+                    failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                }
             }
             var combinedNames = names
             for lut in imported { combinedNames[lut.id] = lut.name }
@@ -1590,6 +1604,7 @@ final class LibraryModel: ObservableObject {
                     self.isLocalEditing = true
                     self.updateEdits(edits)
                 case .failure(let error):
+                    AppLog.editing.error("subject mask failed: \(error.localizedDescription, privacy: .private)")
                     self.autoMaskError = "자동 선택 실패: \(error.localizedDescription) 브러시로 영역을 직접 추가할 수 있습니다."
                 }
             }
@@ -1706,6 +1721,7 @@ final class LibraryModel: ObservableObject {
                             self.maskImage = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
                             self.displayedMaskKey = key
                         case .failure(let error):
+                            AppLog.render.error("mask overlay failed: \(error.localizedDescription, privacy: .private)")
                             self.maskImage = nil
                             self.maskError = error.localizedDescription
                             self.displayedMaskKey = nil
@@ -1828,6 +1844,7 @@ final class LibraryModel: ObservableObject {
                     edits.retouchStrokes.append(healed)
                     self.updateEdits(edits)
                 case .failure(let error):
+                    AppLog.editing.error("heal source search failed: \(error.localizedDescription, privacy: .private)")
                     self.retouchError = error.localizedDescription
                 }
             }
@@ -1897,7 +1914,10 @@ final class LibraryModel: ObservableObject {
                 try catalog.save(snapshot)
                 if canSaveFolders { try folderStore.save(folderSnapshot) }
             }
-            catch { DispatchQueue.main.async { self.operationMessage = "사진 또는 폴더 정보 저장 실패: \(error.localizedDescription)" } }
+            catch {
+                AppLog.catalog.error("catalog save failed: \(error.localizedDescription, privacy: .private)")
+                DispatchQueue.main.async { self.operationMessage = "사진 또는 폴더 정보 저장 실패: \(error.localizedDescription)" }
+            }
             // 앱을 켜 둔 채 날짜가 바뀌면 그날 첫 저장 때 보관본을 만든다.
             self.backUpIfNeeded(snapshot)
         }
@@ -1908,6 +1928,7 @@ final class LibraryModel: ObservableObject {
         do {
             try backup.backUpIfNeeded(photos: photos, copying: [folderStore.url, presetStore.url])
         } catch {
+            AppLog.catalog.error("daily backup failed: \(error.localizedDescription, privacy: .private)")
             DispatchQueue.main.async {
                 guard !self.backupFailureReported else { return }
                 self.backupFailureReported = true
@@ -2091,6 +2112,7 @@ final class LibraryModel: ObservableObject {
                         self.rememberRender(image, key: recentKey, edits: edits, histogram: histogram)
                     }
                 case .failure(let error)?:
+                    AppLog.render.error("preview failed: \(photo.filename, privacy: .private): \(error.localizedDescription, privacy: .private)")
                     self.rendered = nil
                     self.imageError = error.localizedDescription
                     self.histogram = nil
@@ -2115,6 +2137,7 @@ final class LibraryModel: ObservableObject {
                         // 근사로 그린 기준 사진은 다음 렌더에서 정확히 다시 그린다.
                         self.pinnedRenderedEdits = result.isApproximate ? nil : pinnedEdits
                     case .failure(let error):
+                        AppLog.render.error("compare reference failed: \(error.localizedDescription, privacy: .private)")
                         self.pinnedImage = nil
                         self.pinnedError = error.localizedDescription
                         self.pinnedRenderedEdits = pinnedEdits
@@ -2265,7 +2288,10 @@ final class LibraryModel: ObservableObject {
             var failed: [String] = []
             for (index, url) in candidates.enumerated() {
                 do { added.append(PhotoAsset(url: url, metadata: try pipeline.metadata(for: url))) }
-                catch { failed.append("\(url.lastPathComponent): \(error.localizedDescription)") }
+                catch {
+                    AppLog.files.error("import failed: \(url.lastPathComponent, privacy: .private): \(error.localizedDescription, privacy: .private)")
+                    failed.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                }
                 let progress = Double(index + 1) / Double(max(1, candidates.count))
                 DispatchQueue.main.async { self.operationProgress = progress; self.operationMessage = "가져오는 중 \(index + 1)/\(candidates.count)" }
             }
@@ -2366,6 +2392,7 @@ final class LibraryModel: ObservableObject {
                     destinations.append(result.url)
                     if case .copied = result { copied += 1 } else { present += 1 }
                 } catch {
+                    AppLog.files.error("card copy failed: \(error.localizedDescription, privacy: .private)")
                     failures.append(error.localizedDescription)
                 }
                 let progress = Double(index + 1) / Double(max(1, files.count))
@@ -2438,7 +2465,10 @@ final class LibraryModel: ObservableObject {
                     _ = try pipeline.writeExport(data, format: options.format, baseName: baseName, to: directory)
                     successes += 1
                 }
-                catch { failures.append("\(photo.filename): \(error.localizedDescription)") }
+                catch {
+                    AppLog.export.error("export failed: \(photo.filename, privacy: .private): \(error.localizedDescription, privacy: .private)")
+                    failures.append("\(photo.filename): \(error.localizedDescription)")
+                }
                 let progress = Double(index + 1) / Double(targets.count)
                 DispatchQueue.main.async { self.operationProgress = progress }
             }

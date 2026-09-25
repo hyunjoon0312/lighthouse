@@ -72,6 +72,12 @@ swift build
 LIGHTHOUSE_DATA_DIR="$PWD/.artifacts/test-catalog" swift run Lighthouse
 ```
 
+실패(카탈로그 읽기·저장, 가져오기, 현상, 내보내기 등)는 macOS 통합 로그에 남습니다. 파일 이름과 오류 설명은 개인 정보로 표시되어 이 Mac에서 디버깅할 때만 보입니다.
+
+```sh
+/usr/bin/log stream --level info --predicate 'subsystem == "com.rian.lighthouse"'
+```
+
 - [제품 범위와 기술 설계](docs/architecture.md)
 - [파일별 구현 계약](docs/implementation-contract.md)
 - [부분 보정 설계와 구현 계약](docs/local-adjustments-contract.md)

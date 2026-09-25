@@ -88,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try library?.flushSave()
             return .terminateNow
         } catch {
+            AppLog.catalog.fault("save on quit failed: \(error.localizedDescription, privacy: .private)")
             let alert = NSAlert()
             alert.alertStyle = .critical
             alert.messageText = "사진 또는 폴더 정보를 저장하지 못했습니다"

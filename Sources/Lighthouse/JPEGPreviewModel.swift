@@ -34,6 +34,7 @@ final class JPEGPreviewModel: ObservableObject {
                     self.preview = PreparedJPEGExport(photoID: photo.id, edits: photo.edits, keywords: photo.keywords,
                                                       caption: photo.caption, options: options, result: jpeg)
                 case .failure(let error):
+                    AppLog.export.error("export preview failed: \(error.localizedDescription, privacy: .private)")
                     self.error = error.localizedDescription
                 }
             }
