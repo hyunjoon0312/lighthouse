@@ -8,6 +8,21 @@ struct InspectorView: View {
 
     private var edits: EditSettings { photo.edits }
 
+    private var missingOriginal: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("원본 파일을 찾을 수 없습니다", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+            Text(photo.path).font(.caption2).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
+                .textSelection(.enabled)
+            Text("드라이브를 연결하면 다시 확인합니다. 파일을 옮겼다면 새 위치를 알려 주세요. 같은 폴더에서 옮겨진 다른 사진도 함께 찾습니다.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Button("위치 다시 찾기…") { model.presentRelocate(for: photo) }.buttonStyle(.bordered)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -23,6 +38,7 @@ struct InspectorView: View {
                     }
                     Text(photo.displayName).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
+                if model.isMissing(photo) { missingOriginal }
                 HistogramView()
                 ratingRow
                 HStack(spacing: 8) {

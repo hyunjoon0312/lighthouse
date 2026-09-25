@@ -98,6 +98,9 @@ struct WorkspaceView: View {
             sidebarRow("제외됨", icon: "xmark.circle", count: model.counts.rejects, selected: model.filter == .rejects) { model.filter = .rejects }
             sidebarRow("보정됨", icon: "slider.horizontal.3", count: model.counts.edited, selected: model.filter == .edited) { model.filter = .edited }
             sidebarRow("연속 촬영", icon: "square.stack.3d.down.right", count: model.counts.bursts, selected: model.filter == .bursts) { model.filter = .bursts }
+            if model.counts.missing > 0 || model.filter == .missing {
+                sidebarRow("원본 없음", icon: "exclamationmark.triangle", count: model.counts.missing, selected: model.filter == .missing) { model.filter = .missing }
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     HStack {
@@ -582,6 +585,14 @@ private struct PhotoTile: View {
                             if photo.flag != .none { Image(systemName: photo.flag == .pick ? "checkmark.circle.fill" : "xmark.circle.fill").foregroundStyle(photo.flag == .pick ? Palette.accent : .red) }
                         }
                         Spacer()
+                        if model.isMissing(photo) {
+                            HStack {
+                                Label("원본 없음", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 9, weight: .bold)).foregroundStyle(.black).padding(5)
+                                    .background(.orange, in: RoundedRectangle(cornerRadius: 4))
+                                Spacer()
+                            }
+                        }
                         if let burst = model.burstBadge(for: photo) {
                             HStack(spacing: 4) {
                                 Text("연속 \(burst.shot)/\(burst.count)")

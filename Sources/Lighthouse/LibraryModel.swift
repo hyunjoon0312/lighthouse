@@ -10,7 +10,7 @@ enum WorkspaceMode: String, CaseIterable {
 }
 
 enum LibraryFilter: Hashable {
-    case all, picks, rejects, edited, bursts, folder(String), collection(UUID)
+    case all, picks, rejects, edited, bursts, missing, folder(String), collection(UUID)
 }
 
 /// 촬영 시각으로 묶은 연속 촬영과 사진마다의 위치(몇 번째 묶음의 몇 번째 컷).
@@ -105,6 +105,7 @@ struct LibraryCounts {
     var rejects = 0
     var edited = 0
     var bursts = 0
+    var missing = 0
     /// 내 폴더별로 목록에 보이는 사진 수.
     var folders: [UUID: Int] = [:]
 }
@@ -307,6 +308,12 @@ final class LibraryModel: ObservableObject {
     private var draftPhotoID: UUID?
     private var draftLocalID: UUID?
     private var started = false
+    /// 마지막 확인에서 파일을 찾지 못한 원본 경로. 앱으로 돌아오거나 볼륨을 연결·해제하면 다시 확인한다.
+    @Published private(set) var missingPaths: Set<String> = [] { didSet { visibleCache = nil; countsCache = nil } }
+    private var missingScanRunning = false
+    private var missingScanAgain = false
+    private var fileObservers: [NSObjectProtocol] = []
+    private let fileCheckQueue = DispatchQueue(label: "com.rian.lighthouse.files", qos: .utility)
     private var editHistory = EditHistory(limit: 100)
     private let thumbnailCache = NSCache<NSString, ThumbnailEntry>()
     private var loadingThumbnails = Set<String>()
@@ -365,7 +372,8 @@ final class LibraryModel: ObservableObject {
         var masks = [UUID: UInt8](minimumCapacity: photos.count)
         for photo in photos {
             masks[photo.id] = 1 | (photo.flag == .pick ? 2 : 0) | (photo.flag == .reject ? 4 : 0) |
-                (photo.edits.isModified ? 8 : 0) | (positions[photo.id] != nil ? 16 : 0)
+                (photo.edits.isModified ? 8 : 0) | (positions[photo.id] != nil ? 16 : 0) |
+                (missingPaths.contains(photo.path) ? 32 : 0)
         }
         for photo in photos {
             var mask = masks[photo.id] ?? 0
@@ -375,6 +383,7 @@ final class LibraryModel: ObservableObject {
             if mask & 4 != 0 { computed.rejects += 1 }
             if mask & 8 != 0 { computed.edited += 1 }
             if mask & 16 != 0 { computed.bursts += 1 }
+            if mask & 32 != 0 { computed.missing += 1 }
         }
         for folder in photoFolders {
             let members = folder.photoIDs
@@ -535,6 +544,7 @@ final class LibraryModel: ObservableObject {
         }
         let search = search, filter = filter, minimumRating = minimumRating
         let positions = filter == .bursts ? burstIndex.positions : [:]
+        let missing = filter == .missing ? missingPaths : []
         let computed = collapsedFilter { photo in
             let matchesFilter: Bool
             switch filter {
@@ -543,6 +553,7 @@ final class LibraryModel: ObservableObject {
             case .rejects: matchesFilter = photo.flag == .reject
             case .edited: matchesFilter = photo.edits.isModified
             case .bursts: matchesFilter = positions[photo.id] != nil
+            case .missing: matchesFilter = missing.contains(photo.path)
             case .folder(let path): matchesFilter = (photo.path as NSString).deletingLastPathComponent == path
             case .collection: matchesFilter = members?.contains(photo.id) ?? false
             }
@@ -579,6 +590,8 @@ final class LibraryModel: ObservableObject {
                     }
                     // 오늘 처음 연 상태를 남긴다. 이날 작업을 되돌리고 싶을 때 쓸 수 있다.
                     self.saveQueue.async { self.backUpIfNeeded(photos) }
+                    self.observeFileAvailability()
+                    self.refreshMissingOriginals()
                     self.refreshLUTLibrary()
                     self.requestRender()
                     let arguments = ProcessInfo.processInfo.arguments
@@ -597,6 +610,91 @@ final class LibraryModel: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: 원본 없음
+
+    func isMissing(_ photo: PhotoAsset) -> Bool { missingPaths.contains(photo.path) }
+
+    /// 모든 원본 경로가 있는지 백그라운드에서 확인한다. 확인 중에 다시 불리면 끝난 뒤 한 번 더 확인한다.
+    func refreshMissingOriginals() {
+        guard catalogLoaded, loadError == nil else { return }
+        guard !missingScanRunning else { missingScanAgain = true; return }
+        missingScanRunning = true
+        let paths = Set(photos.map(\.path))
+        fileCheckQueue.async {
+            let missing = paths.filter { !FileManager.default.fileExists(atPath: $0) }
+            DispatchQueue.main.async {
+                self.missingScanRunning = false
+                if self.missingPaths != missing { self.missingPaths = missing }
+                if self.missingScanAgain {
+                    self.missingScanAgain = false
+                    self.refreshMissingOriginals()
+                }
+            }
+        }
+    }
+
+    private func observeFileAvailability() {
+        guard fileObservers.isEmpty else { return }
+        let refresh: @Sendable (Notification) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshMissingOriginals() }
+        }
+        let workspace = NSWorkspace.shared.notificationCenter
+        fileObservers = [
+            NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
+                                                   queue: .main, using: refresh),
+            workspace.addObserver(forName: NSWorkspace.didMountNotification, object: nil, queue: .main, using: refresh),
+            workspace.addObserver(forName: NSWorkspace.didUnmountNotification, object: nil, queue: .main, using: refresh),
+        ]
+    }
+
+    func presentRelocate(for photo: PhotoAsset) {
+        guard catalogLoaded, loadError == nil else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "‘\(photo.url.lastPathComponent)’이 지금 들어 있는 폴더를 고르세요. 그 상위 폴더를 골라도 됩니다."
+        panel.prompt = "다시 찾기"
+        if panel.runModal() == .OK, let folder = panel.url { relocateMissing(from: photo, to: folder) }
+    }
+
+    /// `photo`가 `folder` 아래 어디에 있는지로 옛 폴더와 새 폴더의 대응을 정하고, 같은 옛 폴더 아래에서
+    /// 원본을 찾지 못한 항목을 모두 새 위치로 옮겨 적는다. 새 위치에 파일이 있을 때만 바꾸며 파일은 건드리지 않는다.
+    func relocateMissing(from photo: PhotoAsset, to folder: URL) {
+        guard catalogLoaded, loadError == nil else { return }
+        let root = folder.standardizedFileURL.resolvingSymlinksInPath().path
+        guard let mapping = PhotoRelocation.mapping(for: photo.path, in: root) else {
+            operationMessage = "\(root)에서 \(photo.url.lastPathComponent)을 찾지 못했습니다. 파일이 든 폴더나 그 상위 폴더를 고르세요."
+            return
+        }
+        let known = Set(photos.map(\.path))
+        var moves: [String: String] = [:]
+        var notFound = 0, alreadyInCatalog = 0
+        for path in missingPaths {
+            guard let target = PhotoRelocation.relocated(path, from: mapping.from, to: mapping.to) else { continue }
+            if known.contains(target) { alreadyInCatalog += 1 }
+            else if FileManager.default.fileExists(atPath: target) { moves[path] = target }
+            else { notFound += 1 }
+        }
+        guard !moves.isEmpty else {
+            operationMessage = "새 위치로 옮길 수 있는 사진이 없습니다." +
+                (alreadyInCatalog > 0 ? " \(alreadyInCatalog)개는 새 위치의 파일이 이미 카탈로그에 있습니다." : "")
+            return
+        }
+        var updated = photos
+        for index in updated.indices {
+            if let target = moves[updated[index].path] { updated[index].path = target }
+        }
+        photos = updated
+        missingPaths.subtract(moves.keys)
+        ensureSelectionVisible()
+        scheduleSave()
+        requestRender()
+        operationMessage = "파일 \(moves.count)개를 새 위치에서 다시 연결했습니다." +
+            (notFound > 0 ? " \(notFound)개는 새 위치에서 찾지 못했습니다." : "") +
+            (alreadyInCatalog > 0 ? " \(alreadyInCatalog)개는 새 위치의 파일이 이미 카탈로그에 있어 그대로 두었습니다." : "")
     }
 
     func select(_ photo: PhotoAsset) {

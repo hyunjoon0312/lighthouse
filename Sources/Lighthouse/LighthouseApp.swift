@@ -48,6 +48,8 @@ struct LighthouseApp: App {
                 Divider()
                 Button("카탈로그에서 빼기… (Delete)") { library.requestRemoveFromCatalog() }
                     .disabled(library.selection == nil || !library.catalogLoaded || library.hasModalPresentation)
+                Button("위치 다시 찾기…") { if let photo = library.selection { library.presentRelocate(for: photo) } }
+                    .disabled(library.selection.map { !library.isMissing($0) } ?? true || library.hasModalPresentation)
             }
             CommandGroup(replacing: .undoRedo) {
                 Button("실행 취소") { library.undo() }
