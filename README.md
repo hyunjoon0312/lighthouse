@@ -66,6 +66,14 @@ swift test
 swift build
 ```
 
+`LighthouseCoreTests`는 코어를, `LighthouseTests`는 실제 `LibraryModel`로 가져오기·보정·실행 취소·내보내기·연속 촬영·원본 없음 등 전체 흐름을 만든 사진으로 검사합니다. S9 RW2 표본이 있으면 RAW 부분(카메라 미리보기, 카드 복사, RAW+JPEG, 드래그 반응)도 검사하며, 없으면 그 검사는 건너뜁니다. 표본은 저장소 위쪽의 `.artifacts/samples/LUMIX-S9.RW2`에서 찾거나 경로를 지정합니다. 표본 파일은 읽기만 하고 테스트는 임시 폴더의 복사본을 씁니다.
+
+```sh
+LIGHTHOUSE_SAMPLE_RW2=/path/to/P1000123.RW2 LIGHTHOUSE_SAMPLE_FACES=/path/to/faces swift test
+```
+
+`.github/workflows/ci.yml`은 푸시·풀 리퀘스트마다 macOS 26 러너에서 빌드와 테스트를 돌리도록 적어 두었으나 원격 실행은 아직 확인하지 않았습니다.
+
 테스트용 카탈로그를 분리하려면 다음과 같이 실행합니다.
 
 ```sh

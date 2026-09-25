@@ -12,6 +12,7 @@ let package = Package(
         .target(name: "LighthouseCore"),
         .executableTarget(name: "Lighthouse", dependencies: ["LighthouseCore"]),
         .testTarget(name: "LighthouseCoreTests", dependencies: ["LighthouseCore"]),
+        .testTarget(name: "LighthouseTests", dependencies: ["Lighthouse", "LighthouseCore"]),
     ],
     swiftLanguageModes: [.v5]
 )

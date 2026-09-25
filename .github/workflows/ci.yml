@@ -1,0 +1,22 @@
+# 원격 러너에서의 동작은 푸시한 뒤 확인해야 한다(로컬에서 검증하지 않음).
+# RAW·얼굴 표본은 저장소에 없으므로 그 검사는 건너뛰고, 만든 사진으로 도는 검사만 실행한다.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    # macOS 26 SDK의 RAW API(하이라이트 복구)를 쓰므로 macOS 26 이미지가 필요하다.
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
