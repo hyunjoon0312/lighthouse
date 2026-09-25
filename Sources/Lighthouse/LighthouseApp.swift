@@ -45,6 +45,9 @@ struct LighthouseApp: App {
                     .disabled(library.selection == nil || !library.catalogLoaded || library.hasModalPresentation)
                 Button("가상 사본 삭제…") { library.requestDeleteVirtualCopies() }
                     .disabled(library.selectedVirtualCopies.isEmpty || library.hasModalPresentation)
+                Divider()
+                Button("카탈로그에서 빼기… (Delete)") { library.requestRemoveFromCatalog() }
+                    .disabled(library.selection == nil || !library.catalogLoaded || library.hasModalPresentation)
             }
             CommandGroup(replacing: .undoRedo) {
                 Button("실행 취소") { library.undo() }

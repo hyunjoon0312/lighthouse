@@ -42,17 +42,17 @@ struct WorkspaceView: View {
         .sheet(isPresented: $model.showCardImport) { CardImportSheet() }
         .sheet(item: $model.presetSheet) { request in PresetSheet(request: request) }
         .sheet(item: $model.cropSource) { source in CropSheet(source: source) }
-        .confirmationDialog(copyDeletionTitle, isPresented: Binding(
-            get: { model.copyDeletionRequest != nil },
-            set: { if !$0 { model.copyDeletionRequest = nil } }
+        .confirmationDialog(removalTitle, isPresented: Binding(
+            get: { model.catalogRemoval != nil },
+            set: { if !$0 { model.catalogRemoval = nil } }
         )) {
-            Button("사본 삭제", role: .destructive) {
-                if let copies = model.copyDeletionRequest { model.deleteVirtualCopies(Set(copies.map(\.id))) }
-                model.copyDeletionRequest = nil
+            Button(model.catalogRemoval?.isCopiesOnly == true ? "사본 삭제" : "카탈로그에서 빼기", role: .destructive) {
+                if let removal = model.catalogRemoval { model.removeFromCatalog(Set(removal.photos.map(\.id))) }
+                model.catalogRemoval = nil
             }
-            Button("취소", role: .cancel) { model.copyDeletionRequest = nil }
+            Button("취소", role: .cancel) { model.catalogRemoval = nil }
         } message: {
-            Text("사본의 보정·별점만 지웁니다. 원본 파일과 원래 항목은 그대로이며 실행 취소할 수 없습니다.")
+            Text(removalMessage)
         }
         .sheet(item: $model.referenceMatchSource) { source in
             ReferenceMatchSheet(source: source) { adjustment, apply in
@@ -215,9 +215,20 @@ struct WorkspaceView: View {
         .padding(.horizontal, 20).frame(height: 67).background(Palette.panel)
     }
 
-    private var copyDeletionTitle: String {
-        let copies = model.copyDeletionRequest ?? []
-        return copies.count == 1 ? "\(copies[0].displayName)을 삭제할까요?" : "가상 사본 \(copies.count)개를 삭제할까요?"
+    private var removalTitle: String {
+        guard let removal = model.catalogRemoval else { return "" }
+        let photos = removal.photos
+        if removal.isCopiesOnly {
+            return photos.count == 1 ? "\(photos[0].displayName)을 삭제할까요?" : "가상 사본 \(photos.count)개를 삭제할까요?"
+        }
+        return photos.count == 1 ? "\(photos[0].displayName)을 카탈로그에서 뺄까요?" : "사진 \(photos.count)장을 카탈로그에서 뺄까요?"
+    }
+
+    private var removalMessage: String {
+        guard let removal = model.catalogRemoval else { return "" }
+        if removal.isCopiesOnly { return "사본의 보정·별점만 지웁니다. 원본 파일과 원래 항목은 그대로이며 실행 취소할 수 없습니다." }
+        let companions = removal.hiddenCompanions > 0 ? " 한 장으로 묶여 있던 JPEG \(removal.hiddenCompanions)장도 함께 뺍니다." : ""
+        return "원본 파일은 지우거나 옮기지 않고, 보정·별점·폴더 정보만 카탈로그에서 지웁니다. 실행 취소할 수 없으며 다시 가져오면 보정 없이 새로 들어옵니다." + companions
     }
 
     private var selectionToolbar: some View {
@@ -522,6 +533,11 @@ struct WorkspaceView: View {
                 case "\\": model.toggleOriginal(); return nil
                 case "j": model.showsClipping.toggle(); return nil
                 default: break
+                }
+                // Delete: 내 폴더에서는 그 폴더에서만 빼고, 그 밖에서는 카탈로그에서 뺄지 묻는다.
+                if event.keyCode == 51 || event.keyCode == 117 {
+                    if case .collection = model.filter { model.removeSelectedPhotosFromCurrentFolder() } else { model.requestRemoveFromCatalog() }
+                    return nil
                 }
                 if event.keyCode == 123 { model.move(-1); return nil }
                 if event.keyCode == 124 { model.move(1); return nil }

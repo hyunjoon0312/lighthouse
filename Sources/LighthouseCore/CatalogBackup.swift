@@ -54,7 +54,7 @@ public struct CatalogBackup: Sendable {
         }
     }
 
-    static func folderName(for date: Date) -> String {
+    public static func folderName(for date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)

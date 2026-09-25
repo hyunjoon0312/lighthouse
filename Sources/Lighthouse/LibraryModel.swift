@@ -289,7 +289,7 @@ final class LibraryModel: ObservableObject {
     @Published private(set) var burstAnalysisProgress = 0.0
     @Published var burstMessage: String?
     /// 삭제를 확인받는 중인 가상 사본.
-    @Published var copyDeletionRequest: [PhotoAsset]?
+    @Published var catalogRemoval: CatalogRemoval?
     private var rawCapabilitiesPath: String?
     private var rawCapabilitiesByPath: [String: RAWCapabilities?] = [:]
     private static let renderInterval = 0.1
@@ -327,7 +327,7 @@ final class LibraryModel: ObservableObject {
     var canRedo: Bool { editHistory.canRedo }
     var hasModalPresentation: Bool {
         showBatchEdit || showExport || showCardImport || presetSheet != nil || referenceMatchSource != nil || folderSheetRequest != nil ||
-            cropSource != nil || copyDeletionRequest != nil
+            cropSource != nil || catalogRemoval != nil
     }
     var selectedLocal: LocalAdjustment? { selection?.edits.localAdjustments.first { $0.id == selectedLocalID } }
     var canDrawLocal: Bool {
@@ -1060,21 +1060,41 @@ final class LibraryModel: ObservableObject {
         operationMessage = "\(copy.displayName)을 만들었습니다. 원본 파일은 하나이며 보정·별점만 따로 저장됩니다."
     }
 
-    /// 선택한 사진 중 가상 사본만 카탈로그에서 뺀다. 원본 파일과 원래 항목은 그대로다. 실행 취소할 수 없다.
-    var selectedVirtualCopies: [PhotoAsset] {
-        let targets = selectedPhotos.isEmpty ? selection.map { [$0] } ?? [] : selectedPhotos
-        return targets.filter(\.isVirtualCopy)
+    // MARK: 카탈로그에서 빼기
+
+    /// 여러 장을 골랐으면 그 사진들, 아니면 보고 있는 사진.
+    private var actionTargets: [PhotoAsset] {
+        selectedPhotos.isEmpty ? selection.map { [$0] } ?? [] : selectedPhotos
     }
+
+    /// 선택한 사진 중 가상 사본만. 원본 파일과 원래 항목은 그대로다.
+    var selectedVirtualCopies: [PhotoAsset] { actionTargets.filter(\.isVirtualCopy) }
 
     func requestDeleteVirtualCopies() {
         let copies = selectedVirtualCopies
         guard !copies.isEmpty else { return }
-        copyDeletionRequest = copies
+        catalogRemoval = CatalogRemoval(photos: copies, hiddenCompanions: 0)
     }
 
-    func deleteVirtualCopies(_ ids: Set<UUID>) {
+    /// 선택한 사진을 카탈로그에서 빼도록 확인을 요청한다. RAW+JPEG를 한 장으로 보고 있으면
+    /// 뺄 RAW 뒤에 숨어 있던 JPEG도 함께 뺀다. 남겨 두면 RAW가 사라진 뒤 따로 나타나기 때문이다.
+    func requestRemoveFromCatalog() {
         guard catalogLoaded, loadError == nil else { return }
-        let removed = photos.filter { ids.contains($0.id) && $0.isVirtualCopy }
+        let targets = actionTargets
+        guard !targets.isEmpty else { return }
+        let ids = Set(targets.map(\.id))
+        let companions = activeCompanions
+        let hidden = photos.filter { photo in
+            guard !ids.contains(photo.id), let raws = companions[photo.id] else { return false }
+            return raws.allSatisfy(ids.contains)
+        }
+        catalogRemoval = CatalogRemoval(photos: targets + hidden, hiddenCompanions: hidden.count)
+    }
+
+    /// 항목을 카탈로그에서 뺀다. 원본 파일은 지우거나 옮기지 않는다. 실행 취소할 수 없다.
+    func removeFromCatalog(_ ids: Set<UUID>) {
+        guard catalogLoaded, loadError == nil else { return }
+        let removed = photos.filter { ids.contains($0.id) }
         guard !removed.isEmpty else { return }
         let removedIDs = Set(removed.map(\.id))
         let fallbackPath = selection.flatMap { removedIDs.contains($0.id) ? $0.path : nil }
@@ -1098,7 +1118,9 @@ final class LibraryModel: ObservableObject {
         if selectedID == nil, let fallbackPath, let sibling = visiblePhotos.first(where: { $0.path == fallbackPath }) {
             focusPhoto(sibling)
         }
-        operationMessage = "가상 사본 \(removed.count)개를 지웠습니다. 원본 파일은 그대로입니다."
+        operationMessage = removed.allSatisfy(\.isVirtualCopy)
+            ? "가상 사본 \(removed.count)개를 지웠습니다. 원본 파일은 그대로입니다."
+            : "카탈로그에서 \(removed.count)장을 뺐습니다. 원본 파일은 그대로입니다."
     }
 
     func copyEdits() { clipboard = selection?.edits }
@@ -2251,4 +2273,11 @@ final class LibraryModel: ObservableObject {
         exportCancellation?.cancel()
         isCancellingExport = true
     }
+}
+
+/// 카탈로그에서 뺄 항목. `hiddenCompanions`는 RAW+JPEG 한 장으로 보기에서 함께 빠지는 JPEG 수다.
+struct CatalogRemoval: Equatable {
+    var photos: [PhotoAsset]
+    var hiddenCompanions: Int
+    var isCopiesOnly: Bool { photos.allSatisfy(\.isVirtualCopy) }
 }
