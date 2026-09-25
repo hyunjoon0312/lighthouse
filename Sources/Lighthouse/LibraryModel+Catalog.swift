@@ -116,7 +116,8 @@ extension LibraryModel {
     /// `saveQueue`에서 부른다. 실패는 한 번만 알린다.
     nonisolated func backUpIfNeeded(_ photos: [PhotoAsset]) {
         do {
-            try backup.backUpIfNeeded(photos: photos, copying: [folderStore.url, presetStore.url])
+            try backup.backUpIfNeeded(photos: photos, copying: [folderStore.url, presetStore.url],
+                                      linkingMasksFrom: catalog.maskDirectory)
         } catch {
             AppLog.catalog.error("daily backup failed: \(error.localizedDescription, privacy: .private)")
             DispatchQueue.main.async {

@@ -66,7 +66,7 @@ LIGHTHOUSE_DATA_DIR=/tmp/lh-qa/data dist/Lighthouse.app/Contents/MacOS/Lighthous
 
 ## 보관본과 오류 안내
 
-- [ ] 파일 메뉴 › 카탈로그 보관본 보기 → Finder에서 `Backups` 폴더가 열리고 오늘 날짜 폴더가 있다.
+- [ ] 파일 메뉴 › 카탈로그 보관본 보기 → Finder에서 `Backups` 폴더가 열리고 오늘 날짜 폴더가 있다. 자동 선택 마스크를 쓴 사진이 있으면 그 안에 `Masks` 폴더가 있다.
 - [ ] 격리 카탈로그의 `catalog.json`을 일부러 깨뜨리고 실행 → 오류 화면에 보관본 경로와 복원 방법이 보인다. 앱은 깨진 파일을 덮어쓰지 않는다.
 
 ## 이전 라운드에서 남은 화면 확인

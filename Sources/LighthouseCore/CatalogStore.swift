@@ -35,19 +35,21 @@ public struct CatalogStore: Sendable {
         let parent = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
         let masks = MaskFileStore(directory: maskDirectory)
-        let referenced = try masks.write(photos.flatMap { $0.edits.localAdjustments.compactMap(\.baseMask) })
+        let referenced = try masks.write(Self.masks(in: photos))
+        try Self.encoded(photos, maskDirectory: maskDirectory).write(to: url, options: .atomic)
+        masks.removeFiles(notIn: referenced)
+    }
+
+    static func masks(in photos: [PhotoAsset]) -> [RasterMask] {
+        photos.flatMap { $0.edits.localAdjustments.compactMap(\.baseMask) }
+    }
+
+    /// 마스크는 내용 해시만 쓰고 PNG는 `maskDirectory`에 둔 카탈로그.
+    static func encoded(_ photos: [PhotoAsset], maskDirectory: URL) throws -> Data {
         let encoder = JSONEncoder()
         // 사진 수천 장의 카탈로그는 자주 저장되므로 들여쓰기 없이 쓴다(보정한 사진 절반을 포함한 5000장 15.5MB → 5.4MB).
         encoder.outputFormatting = [.sortedKeys]
         encoder.userInfo[.rasterMaskDirectory] = maskDirectory
-        try encoder.encode(Envelope(version: 1, photos: photos)).write(to: url, options: .atomic)
-        masks.removeFiles(notIn: referenced)
-    }
-
-    /// 마스크 PNG까지 안에 넣은 카탈로그. 이 파일 하나를 `catalog.json` 자리에 두면 그대로 열린다.
-    static func selfContainedData(_ photos: [PhotoAsset]) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
         return try encoder.encode(Envelope(version: 1, photos: photos))
     }
 

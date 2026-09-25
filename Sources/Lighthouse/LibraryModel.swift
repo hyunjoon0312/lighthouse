@@ -658,7 +658,7 @@ final class LibraryModel: ObservableObject {
                         \(error.localizedDescription)
 
                         날짜별 보관본이 \(self.backup.directory.path)에 있습니다(파일 메뉴 › 카탈로그 보관본 보기). \
-                        앱을 끝낸 뒤 원하는 날짜 폴더의 파일을 \(self.catalog.url.deletingLastPathComponent().path)에 \
+                        앱을 끝낸 뒤 원하는 날짜 폴더 안의 파일과 Masks 폴더를 \(self.catalog.url.deletingLastPathComponent().path)에 \
                         덮어 두면 그날 처음 연 상태로 돌아갑니다.
                         """
                 }

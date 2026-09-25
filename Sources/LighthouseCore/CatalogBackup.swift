@@ -1,7 +1,8 @@
 import Foundation
 
-/// 하루 한 번 카탈로그·폴더·프리셋을 `Backups/YYYY-MM-DD`에 남긴다. 자동 마스크 PNG는 카탈로그 안에 넣어
-/// 그 폴더의 파일만으로 복원할 수 있게 한다. 최근 7일치만 남긴다.
+/// 하루 한 번 카탈로그·폴더·프리셋을 `Backups/YYYY-MM-DD`에 남긴다. 자동 마스크 PNG는 그 폴더의 `Masks`에 두어
+/// 날짜 폴더만으로 복원할 수 있게 한다. 같은 마스크는 원래 `Masks`의 파일을 하드 링크해 한 벌만 차지한다.
+/// 최근 7일치만 남긴다.
 public struct CatalogBackup: Sendable {
     public static let keptDays = 7
     public let directory: URL
@@ -15,7 +16,8 @@ public struct CatalogBackup: Sendable {
     /// 오늘 보관본이 없으면 만들고 7일보다 오래된 보관본을 지운다. 만들었으면 true.
     /// 임시 폴더에 다 쓴 뒤 날짜 이름으로 옮기므로 중간에 멈춰도 반쯤 쓴 보관본이 남지 않는다.
     @discardableResult
-    public func backUpIfNeeded(photos: [PhotoAsset], copying files: [URL], now: Date = Date()) throws -> Bool {
+    public func backUpIfNeeded(photos: [PhotoAsset], copying files: [URL], linkingMasksFrom maskDirectory: URL? = nil,
+                               now: Date = Date()) throws -> Bool {
         let manager = FileManager.default
         let name = Self.folderName(for: now)
         let target = directory.appendingPathComponent(name, isDirectory: true)
@@ -24,7 +26,10 @@ public struct CatalogBackup: Sendable {
         let staging = directory.appendingPathComponent(".\(name)-\(UUID().uuidString)", isDirectory: true)
         try manager.createDirectory(at: staging, withIntermediateDirectories: false)
         do {
-            try CatalogStore.selfContainedData(photos).write(to: staging.appendingPathComponent("catalog.json"))
+            let masks = MaskFileStore(directory: staging.appendingPathComponent("Masks", isDirectory: true))
+            _ = try masks.write(CatalogStore.masks(in: photos), linkingFrom: maskDirectory.map(MaskFileStore.init(directory:)))
+            try CatalogStore.encoded(photos, maskDirectory: masks.directory)
+                .write(to: staging.appendingPathComponent("catalog.json"))
             for file in files where manager.fileExists(atPath: file.path) {
                 try manager.copyItem(at: file, to: staging.appendingPathComponent(file.lastPathComponent))
             }

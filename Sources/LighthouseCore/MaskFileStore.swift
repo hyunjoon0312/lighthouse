@@ -27,8 +27,9 @@ struct MaskFileStore {
         return data
     }
 
-    /// 없는 파일만 쓰고, 카탈로그가 참조하는 모든 해시를 돌려준다.
-    func write(_ masks: [RasterMask]) throws -> Set<String> {
+    /// 없는 파일만 쓰고, 카탈로그가 참조하는 모든 해시를 돌려준다. `source`에 내용이 맞는 같은 파일이 있으면
+    /// 새로 쓰지 않고 하드 링크한다. 마스크 파일은 내용 해시 이름이라 제자리에서 바뀌지 않는다.
+    func write(_ masks: [RasterMask], linkingFrom source: MaskFileStore? = nil) throws -> Set<String> {
         var referenced = Set<String>()
         for mask in masks {
             let id = Self.contentID(mask.pngData)
@@ -37,6 +38,8 @@ struct MaskFileStore {
             let existing = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber
             if existing?.intValue == mask.pngData.count { continue }
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            if let source, (try? source.load(id: id)) != nil,
+               (try? FileManager.default.linkItem(at: source.file(for: id), to: url)) != nil { continue }
             try mask.pngData.write(to: url, options: .atomic)
         }
         return referenced
@@ -51,7 +54,7 @@ struct MaskFileStore {
         }
     }
 
-    private func file(for id: String) -> URL {
+    func file(for id: String) -> URL {
         directory.appendingPathComponent(id + ".png")
     }
 
