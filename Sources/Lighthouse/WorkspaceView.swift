@@ -18,8 +18,7 @@ struct WorkspaceView: View {
     /// 그리드 칸의 최소 너비. 썸네일 크기 슬라이더로 바꾸며 다음 실행에도 기억한다.
     @AppStorage("gridTileWidth") private var tileWidth = 180.0
     @State private var gridWidth: CGFloat = 0
-    /// 사진만 보기를 켜며 전체 화면으로 들어갔는지. 이미 전체 화면이었다면 나갈 때 그대로 둔다.
-    @State private var enteredFullScreen = false
+    @State private var fullScreen = FocusFullScreen()
 
     var body: some View {
         Group {
@@ -27,10 +26,20 @@ struct WorkspaceView: View {
         }
         .background(Palette.background)
         .tint(Palette.accent)
-        .onChange(of: model.isFocusView) { _, focused in setFullScreen(focused) }
+        .onChange(of: model.isFocusView) { syncFullScreen() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { _ in
+            fullScreen.willTransition()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willExitFullScreenNotification)) { _ in
+            fullScreen.willTransition()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
+            fullScreen.didEnter()
+            syncFullScreen()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
-            enteredFullScreen = false
-            if model.isFocusView { model.isFocusView = false }
+            if fullScreen.didExit(focused: model.isFocusView) { model.isFocusView = false }
+            syncFullScreen()
         }
         .sheet(isPresented: $model.showExport) { ExportSheet() }
         .sheet(isPresented: $model.showBatchEdit) { BatchEditSheet() }
@@ -97,15 +106,10 @@ struct WorkspaceView: View {
             }
     }
 
-    private func setFullScreen(_ focused: Bool) {
+    private func syncFullScreen() {
         guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
-        let isFullScreen = window.styleMask.contains(.fullScreen)
-        if focused, !isFullScreen {
-            enteredFullScreen = true
+        if fullScreen.sync(focused: model.isFocusView, isFullScreen: window.styleMask.contains(.fullScreen)) {
             window.toggleFullScreen(nil)
-        } else if !focused, enteredFullScreen {
-            enteredFullScreen = false
-            if isFullScreen { window.toggleFullScreen(nil) }
         }
     }
 
@@ -800,5 +804,44 @@ private struct BurstBar: View {
         .buttonStyle(.borderless)
         .padding(.horizontal, 20).padding(.vertical, 8)
         .background(Palette.panel)
+    }
+}
+
+/// 사진만 보기와 창의 전체 화면을 맞춘다. AppKit은 전환 애니메이션 중의 전환 요청을 무시하므로
+/// 그동안의 요청은 미뤘다가 전환이 끝나면 마지막 상태에 맞춘다. F를 빠르게 여러 번 눌러도 어긋나지 않는다.
+struct FocusFullScreen {
+    /// 사진만 보기가 전체 화면으로 들어갔는지. 이미 전체 화면이던 창은 나갈 때 그대로 둔다.
+    private(set) var entered = false
+    private(set) var transitioning = false
+    private var exitRequested = false
+
+    /// 창의 전체 화면을 켜거나 꺼야 하면 true.
+    mutating func sync(focused: Bool, isFullScreen: Bool) -> Bool {
+        guard !transitioning else { return false }
+        if focused, !isFullScreen {
+            entered = true
+            transitioning = true
+            return true
+        }
+        if !focused, entered {
+            entered = false
+            guard isFullScreen else { return false }
+            exitRequested = true
+            transitioning = true
+            return true
+        }
+        return false
+    }
+
+    mutating func willTransition() { transitioning = true }
+
+    mutating func didEnter() { transitioning = false }
+
+    /// 앱이 요청하지 않은 종료(초록 버튼·⌃⌘F)로 사진만 보기를 끝내야 하면 true.
+    mutating func didExit(focused: Bool) -> Bool {
+        defer { exitRequested = false }
+        transitioning = false
+        entered = false
+        return focused && !exitRequested
     }
 }
