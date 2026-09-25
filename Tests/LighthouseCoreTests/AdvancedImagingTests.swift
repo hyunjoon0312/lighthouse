@@ -72,6 +72,32 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertGreaterThan(untouched.2, 200)
     }
 
+    func testSeveralStrokesLandAtTheirRowsAndLeaveOtherPixelsIdentical() throws {
+        let input = try temporaryPNG(width: 64, height: 64) { x, y in
+            y < 32 ? (230, UInt8(x), 30, 255) : (30, UInt8(x), 220, 255)
+        }
+        defer { try? FileManager.default.removeItem(at: input) }
+        let pipeline = ImagePipeline()
+        let original = try rgbaBytes(pipeline.render(url: input, edits: .neutral, maxPixel: nil))
+        let strokes = [
+            RetouchStroke(mode: .clone, points: [MaskPoint(x: 0.25, y: 0.2)], radius: 0.06,
+                          sourceOffset: MaskPoint(x: 0, y: 0.6)),
+            RetouchStroke(mode: .clone, points: [MaskPoint(x: 0.75, y: 0.8)], radius: 0.06,
+                          sourceOffset: MaskPoint(x: 0, y: -0.6)),
+        ]
+        let output = try pipeline.render(url: input, edits: EditSettings(retouchStrokes: strokes), maxPixel: nil)
+
+        XCTAssertGreaterThan(try rgba(output, x: 16, y: 13).2, 180, "위쪽 stroke는 아래쪽 파랑을 가져온다")
+        XCTAssertGreaterThan(try rgba(output, x: 48, y: 51).0, 180, "아래쪽 stroke는 위쪽 빨강을 가져온다")
+        let bytes = try rgbaBytes(output)
+        for y in 0..<64 {
+            for x in 0..<64 where max(abs(x - 16), abs(y - 13)) > 12 && max(abs(x - 48), abs(y - 51)) > 12 {
+                let index = (y * 64 + x) * 4
+                XCTAssertEqual(bytes[index..<index + 4], original[index..<index + 4], "(\(x), \(y))")
+            }
+        }
+    }
+
     func testCloneWithSourceOutsideImageLeavesDestinationUnchanged() throws {
         let input = try temporaryPNG(width: 64, height: 32) { x, y in
             (UInt8(x * 3), UInt8(y * 5), 90, 255)

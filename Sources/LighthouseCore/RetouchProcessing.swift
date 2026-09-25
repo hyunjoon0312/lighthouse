@@ -34,9 +34,28 @@ enum RetouchProcessor {
         }
         var image = source
         for stroke in strokes where stroke.isEnabled && !stroke.points.isEmpty {
-            image = try apply(stroke, to: image, context: context, colorSpace: colorSpace)
+            guard let (output, region) = try apply(stroke, to: image, context: context, colorSpace: colorSpace) else {
+                continue
+            }
+            image = try materialized(output, in: region, context: context).composited(over: image).cropped(to: bounds)
         }
         return image
+    }
+
+    /// stroke 결과를 영역 크기의 float 비트맵으로 굳힌다. 그러지 않으면 여러 곳에서 참조되는 앞선 결과를
+    /// Core Image가 stroke마다 전체 해상도 중간 버퍼로 다시 만들어, stroke 수에 비례해 렌더가 느려진다.
+    private static func materialized(_ output: CIImage, in region: CGRect, context: CIContext) throws -> CIImage {
+        let area = region.integral
+        let width = Int(area.width), height = Int(area.height)
+        let rowBytes = width * 16
+        var data = Data(count: rowBytes * height)
+        data.withUnsafeMutableBytes { buffer in
+            context.render(output, toBitmap: buffer.baseAddress!, rowBytes: rowBytes, bounds: area,
+                           format: .RGBAf, colorSpace: nil)
+        }
+        return CIImage(bitmapData: data, bytesPerRow: rowBytes, size: area.size, format: .RGBAf, colorSpace: nil)
+            .transformed(by: CGAffineTransform(translationX: area.minX, y: area.minY))
+            .cropped(to: region)
     }
 
     static func healingSourceOffset(for stroke: RetouchStroke, in image: CIImage,
@@ -55,8 +74,9 @@ enum RetouchProcessor {
         return radiusFraction * min(image.extent.width, image.extent.height)
     }
 
+    /// stroke가 바꾸는 영역과 그 영역의 결과를 돌려준다. 바꿀 영역이 없으면 nil.
     private static func apply(_ stroke: RetouchStroke, to image: CIImage,
-                              context: CIContext, colorSpace: CGColorSpace) throws -> CIImage {
+                              context: CIContext, colorSpace: CGColorSpace) throws -> (CIImage, CGRect)? {
         let radius = try validatedRadius(of: stroke, in: image)
         let offset: MaskPoint
         switch stroke.mode {
@@ -109,22 +129,21 @@ enum RetouchProcessor {
             patch = corrected
         }
 
-        var mask = try strokeMask(stroke, width: Int(image.extent.width.rounded(.up)),
-                                  height: Int(image.extent.height.rounded(.up)),
-                                  radius: radius)
         let blurRadius = max(0.5, radius * 0.25)
+        // 마스크가 0인 곳은 원본 그대로이므로 stroke 주변만 그리고 계산한다.
+        let region = destinationRegion(of: stroke, margin: radius + blurRadius * 4 + 2, in: image.extent)
+        guard !region.isEmpty else { return nil }
+        var mask = try strokeMask(stroke, in: region, imageExtent: image.extent, radius: radius)
         let blur = CIFilter.gaussianBlur()
         blur.inputImage = mask.clampedToExtent()
         blur.radius = Float(blurRadius)
-        if let softened = blur.outputImage { mask = softened.cropped(to: image.extent) }
+        if let softened = blur.outputImage { mask = softened.cropped(to: region) }
         let multiply = CIFilter.multiplyCompositing()
         multiply.inputImage = mask
         multiply.backgroundImage = support
-        guard let supportedMask = multiply.outputImage?.cropped(to: image.extent) else {
+        guard let supportedMask = multiply.outputImage?.cropped(to: region) else {
             throw RetouchProcessingError.processingFailed
         }
-        // 마스크가 0인 곳은 원본 그대로이므로 stroke 주변만 합성해 전체 이미지 계산을 피한다.
-        let region = destinationRegion(of: stroke, margin: radius + blurRadius * 4 + 2, in: image.extent)
         let blend = CIFilter.blendWithMask()
         blend.inputImage = patch.cropped(to: region)
         blend.backgroundImage = image.cropped(to: region)
@@ -132,7 +151,7 @@ enum RetouchProcessor {
         guard let output = blend.outputImage?.cropped(to: region) else {
             throw RetouchProcessingError.processingFailed
         }
-        return output.composited(over: image).cropped(to: image.extent)
+        return (output, region)
     }
 
     private static func destinationRegion(of stroke: RetouchStroke, margin: CGFloat,
@@ -154,8 +173,12 @@ enum RetouchProcessor {
         return (blur.outputImage ?? image).cropped(to: image.extent)
     }
 
-    private static func strokeMask(_ stroke: RetouchStroke, width: Int,
-                                   height: Int, radius: CGFloat) throws -> CIImage {
+    /// stroke를 `region`(Core Image 좌표)을 덮는 정수 크기 비트맵에만 그린다. 전체 해상도 비트맵을 만들지 않는다.
+    private static func strokeMask(_ stroke: RetouchStroke, in region: CGRect, imageExtent: CGRect,
+                                   radius: CGFloat) throws -> CIImage {
+        let area = region.integral
+        let width = Int(area.width), height = Int(area.height)
+        let imageWidth = Double(imageExtent.width.rounded(.up)), imageHeight = Double(imageExtent.height.rounded(.up))
         guard width > 0, height > 0,
               let bitmap = CGContext(data: nil, width: width, height: height,
                                      bitsPerComponent: 8, bytesPerRow: 0,
@@ -165,7 +188,8 @@ enum RetouchProcessor {
         }
         bitmap.setFillColor(gray: 0, alpha: 1)
         bitmap.fill(CGRect(x: 0, y: 0, width: width, height: height))
-        bitmap.translateBy(x: 0, y: CGFloat(height))
+        // 좌상단 기준 좌표로 그린다. 전체 비트맵에서 y = 높이 - 위치였던 것을 영역 아래쪽 가장자리만큼 옮긴다.
+        bitmap.translateBy(x: -area.minX, y: CGFloat(imageHeight) - area.minY)
         bitmap.scaleBy(x: 1, y: -1)
         bitmap.setFillColor(gray: 1, alpha: 1)
         bitmap.setStrokeColor(gray: 1, alpha: 1)
@@ -173,7 +197,7 @@ enum RetouchProcessor {
         bitmap.setLineCap(.round)
         bitmap.setLineJoin(.round)
         let positions = stroke.points.map {
-            CGPoint(x: $0.x * Double(width), y: $0.y * Double(height))
+            CGPoint(x: $0.x * imageWidth, y: $0.y * imageHeight)
         }
         guard let first = positions.first else { throw RetouchProcessingError.invalidStroke }
         bitmap.fillEllipse(in: CGRect(x: first.x - radius, y: first.y - radius,
@@ -186,6 +210,7 @@ enum RetouchProcessor {
         }
         guard let image = bitmap.makeImage() else { throw RetouchProcessingError.processingFailed }
         return CIImage(cgImage: image, options: [.colorSpace: NSNull()])
+            .transformed(by: CGAffineTransform(translationX: area.minX, y: area.minY))
     }
 
     private static func healingOffset(for stroke: RetouchStroke, radius: CGFloat,
