@@ -227,7 +227,8 @@ public final class ImagePipeline: @unchecked Sendable {
     }
 
     /// 현상하지 않고 읽은 RAW 원본(방향 적용) 크기. 파일·수정 시각별로 기억한다.
-    private func sourceSize(url: URL) -> CGSize? {
+    /// 파일 속성만 읽어 RAW 디코더를 만들지 않는다(S9 한 장 약 2ms, CIRAWFilter는 약 28ms). 읽지 못하면 디코더로 읽는다.
+    func sourceSize(url: URL) -> CGSize? {
         let key = Self.fileIdentity(url)
         sizeLock.lock()
         if let size = sourceSizes[key] {
@@ -235,13 +236,23 @@ public final class ImagePipeline: @unchecked Sendable {
             return size
         }
         sizeLock.unlock()
-        guard let size = CIRAWFilter(imageURL: url)?.outputImage?.extent.size,
+        guard let size = Self.orientedPixelSize(url: url) ?? CIRAWFilter(imageURL: url)?.outputImage?.extent.size,
               size.width > 0, size.height > 0 else { return nil }
         sizeLock.lock()
         if sourceSizes.count >= 256 { sourceSizes.removeAll() }
         sourceSizes[key] = size
         sizeLock.unlock()
         return size
+    }
+
+    /// 파일 속성의 픽셀 크기. 방향이 5–8(90° 회전)이면 CIRAWFilter 결과처럼 가로세로를 바꾼다.
+    private static func orientedPixelSize(url: URL) -> CGSize? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int, width > 0, height > 0 else { return nil }
+        let rotated = (5...8).contains(properties[kCGImagePropertyOrientation] as? Int ?? 1)
+        return rotated ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
     }
 
     private static func fileIdentity(_ url: URL) -> String {
