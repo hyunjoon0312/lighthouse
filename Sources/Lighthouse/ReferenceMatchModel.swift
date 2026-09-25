@@ -125,7 +125,7 @@ final class ReferenceMatchModel: ObservableObject {
         }
     }
 
-    func store(apply: Bool, onStored: @escaping (LUTAdjustment, Bool) -> Void) {
+    func store(apply: Bool, onStored: @escaping @MainActor (LUTAdjustment, Bool) -> Void) {
         guard canWrite, let result else { return }
         let name = lutName.trimmingCharacters(in: .whitespacesAndNewlines)
         let strength = strength

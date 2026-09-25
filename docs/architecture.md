@@ -22,6 +22,7 @@
 ## 기술 구조
 
 - Swift 6 도구 체인, Swift 5 언어 모드, macOS 15 이상. Swift Package Manager로 외부 의존성 없이 빌드한다.
+  - Swift 6 언어 모드 평가(2026-09-25, Swift 6.3.2): 코어는 LUT 캐시(NSCache) 한 곳을 표시하면 통과하고, 앱은 Binding 설정 클로저 경고 2개로 빌드되며 `swift test`도 통과한다. 그러나 실제 `LibraryModel`을 링크한 검사가 시작 직후 `requestRender`에서 백그라운드 큐로 넘긴 클로저가 MainActor로 추론되어 Swift 6의 실행 시간 격리 검사(`dispatch_assert_queue`)로 멈췄다. 전환하려면 백그라운드 큐에 넘기는 클로저를 모두 `@Sendable`로 명시하고 화면 흐름 전체를 다시 검증해야 해서 Swift 5 모드를 유지한다. Binding 설정 클로저를 `@MainActor`로 표시하면 이 컴파일러가 IR 생성 중 멈춘다.
 - SwiftUI 화면과 AppKit 파일 선택·메뉴·키보드 이벤트를 사용한다.
 - `LighthouseCore`: Codable 모델, 원자적 JSON 카탈로그 저장, Image I/O 메타데이터·썸네일, Core Image RAW 현상과 JPEG 출력.
 - `Lighthouse` 실행 타깃: 메인 액터의 화면 상태와 저장·렌더 작업 조율. 무거운 파일 읽기와 렌더는 백그라운드에서 실행한다.

@@ -35,7 +35,8 @@ public struct LUTLibraryItem: Identifiable, Equatable, Sendable {
 
 public struct LUTStore: Sendable {
     public let directory: URL
-    private static let cubeCache: NSCache<NSString, CachedCube> = {
+    /// NSCache는 여러 스레드에서 써도 안전하다(Swift 6 모드의 전역 상태 검사를 위해 명시).
+    nonisolated(unsafe) private static let cubeCache: NSCache<NSString, CachedCube> = {
         let cache = NSCache<NSString, CachedCube>()
         cache.countLimit = 8
         cache.totalCostLimit = 32 * 1024 * 1024
