@@ -100,10 +100,13 @@ private final class ThumbnailEntry: NSObject {
 }
 
 struct LibraryCounts {
-    var ids = Set<UUID>()
+    var total = 0
     var picks = 0
     var rejects = 0
     var edited = 0
+    var bursts = 0
+    /// 내 폴더별로 목록에 보이는 사진 수.
+    var folders: [UUID: Int] = [:]
 }
 
 private final class CancellationFlag: @unchecked Sendable {
@@ -124,7 +127,7 @@ private final class CancellationFlag: @unchecked Sendable {
 final class LibraryModel: ObservableObject {
     @Published var photos: [PhotoAsset] = [] { didSet { invalidateLibraryCaches() } }
     @Published var photoSelection = PhotoSelectionState()
-    @Published var photoFolders: [PhotoFolder] = [] { didSet { visibleCache = nil } }
+    @Published var photoFolders: [PhotoFolder] = [] { didSet { visibleCache = nil; countsCache = nil } }
     @Published var foldersLoaded = false
     @Published var folderLoadError: String?
     @Published var folderSheetRequest: PhotoFolderSheetRequest?
@@ -194,6 +197,15 @@ final class LibraryModel: ObservableObject {
             requestRender()
         }
     }
+    /// RAW+JPEG로 찍은 사진은 RAW만 보인다. JPEG는 카탈로그에 남고 끄면 다시 보인다.
+    @Published var collapsesRAWJPEGPairs = UserDefaults.standard.object(forKey: "collapseRAWJPEGPairs") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(collapsesRAWJPEGPairs, forKey: "collapseRAWJPEGPairs")
+            visibleCache = nil
+            countsCache = nil
+            ensureSelectionVisible()
+        }
+    }
     @Published var autoAdvance = UserDefaults.standard.bool(forKey: "autoAdvanceAfterMark") {
         didSet { UserDefaults.standard.set(autoAdvance, forKey: "autoAdvanceAfterMark") }
     }
@@ -261,7 +273,9 @@ final class LibraryModel: ObservableObject {
     private var countsCache: LibraryCounts?
     private var foldersCache: [String]?
     private var burstCache: (signature: Int, index: BurstIndex)?
-    private var burstCacheStale = true
+    /// 사진 목록의 ID·경로·촬영 정보만 본 서명. 보정·별점만 바뀌면 같아서 묶음·짝 계산을 다시 하지 않는다.
+    private var structureSignatureCache: Int?
+    private var pairCache: (signature: Int, companions: [UUID: [UUID]], pairedRAWs: Set<UUID>)?
     private var burstRecommendationCache: [UUID: BurstRecommendation]?
     private var burstCancellation: CancellationFlag?
     private let burstQueue = DispatchQueue(label: "com.rian.lighthouse.burst", qos: .utility)
@@ -343,11 +357,28 @@ final class LibraryModel: ObservableObject {
     var counts: LibraryCounts {
         if let countsCache { return countsCache }
         var computed = LibraryCounts()
+        // 사진마다 속한 목록(전체·선택·제외·보정·연속 촬영)을 비트로 한 번만 구한다. JPEG 짝은 RAW와 같은 목록에서 뺀다.
+        let companions = activeCompanions
+        let positions = burstIndex.positions
+        var masks = [UUID: UInt8](minimumCapacity: photos.count)
         for photo in photos {
-            computed.ids.insert(photo.id)
-            if photo.flag == .pick { computed.picks += 1 }
-            if photo.flag == .reject { computed.rejects += 1 }
-            if photo.edits.isModified { computed.edited += 1 }
+            masks[photo.id] = 1 | (photo.flag == .pick ? 2 : 0) | (photo.flag == .reject ? 4 : 0) |
+                (photo.edits.isModified ? 8 : 0) | (positions[photo.id] != nil ? 16 : 0)
+        }
+        for photo in photos {
+            var mask = masks[photo.id] ?? 0
+            for raw in companions[photo.id] ?? [] { mask &= ~(masks[raw] ?? 0) }
+            if mask & 1 != 0 { computed.total += 1 }
+            if mask & 2 != 0 { computed.picks += 1 }
+            if mask & 4 != 0 { computed.rejects += 1 }
+            if mask & 8 != 0 { computed.edited += 1 }
+            if mask & 16 != 0 { computed.bursts += 1 }
+        }
+        for folder in photoFolders {
+            let members = folder.photoIDs
+            computed.folders[folder.id] = members.filter { id in
+                masks[id] != nil && !(companions[id]?.contains(where: members.contains) ?? false)
+            }.count
         }
         countsCache = computed
         return computed
@@ -365,7 +396,52 @@ final class LibraryModel: ObservableObject {
         indexCache = nil
         countsCache = nil
         foldersCache = nil
-        burstCacheStale = true
+        structureSignatureCache = nil
+    }
+
+    private var structureSignature: Int {
+        if let structureSignatureCache { return structureSignatureCache }
+        var hasher = Hasher()
+        for photo in photos {
+            hasher.combine(photo.id)
+            hasher.combine(photo.path)
+            hasher.combine(photo.metadata.capturedAt)
+            hasher.combine(photo.metadata.camera)
+            hasher.combine(photo.copyName)
+        }
+        let signature = hasher.finalize()
+        structureSignatureCache = signature
+        return signature
+    }
+
+    /// RAW와 함께 찍힌 JPEG. 한 장으로 보기를 켜면 목록·개수에서 뺀다.
+    private var pairs: (companions: [UUID: [UUID]], pairedRAWs: Set<UUID>) {
+        let signature = structureSignature
+        if let pairCache, pairCache.signature == signature { return (pairCache.companions, pairCache.pairedRAWs) }
+        let companions = RAWJPEGPairs.companions(in: photos)
+        let raws = Set(companions.values.flatMap { $0 })
+        pairCache = (signature, companions, raws)
+        return (companions, raws)
+    }
+
+    /// `matches`에 드는 사진 중 같은 이름의 RAW도 `matches`에 드는 JPEG 짝을 뺀다.
+    /// RAW가 없는 폴더·필터에서는 JPEG를 그대로 보인다.
+    private func collapsedFilter(_ matches: (PhotoAsset) -> Bool) -> [PhotoAsset] {
+        let companions = activeCompanions
+        return photos.filter { matches($0) && !isHiddenCompanion($0, companions, matches) }
+    }
+
+    private var activeCompanions: [UUID: [UUID]] { collapsesRAWJPEGPairs ? pairs.companions : [:] }
+
+    private func isHiddenCompanion(_ photo: PhotoAsset, _ companions: [UUID: [UUID]],
+                                   _ matches: (PhotoAsset) -> Bool) -> Bool {
+        guard let raws = companions[photo.id] else { return false }
+        return raws.contains { id in self.photo(withID: id).map(matches) ?? false }
+    }
+
+    /// 한 장으로 보기에서 JPEG 짝을 숨긴 RAW인지.
+    func hidesCompanion(of photo: PhotoAsset) -> Bool {
+        collapsesRAWJPEGPairs && pairs.pairedRAWs.contains(photo.id)
     }
 
     func presentCreateFolder() {
@@ -455,14 +531,16 @@ final class LibraryModel: ObservableObject {
         if case .collection(let id) = filter {
             members = photoFolders.first(where: { $0.id == id })?.photoIDs ?? []
         }
-        let computed = photos.filter { photo in
+        let search = search, filter = filter, minimumRating = minimumRating
+        let positions = filter == .bursts ? burstIndex.positions : [:]
+        let computed = collapsedFilter { photo in
             let matchesFilter: Bool
             switch filter {
             case .all: matchesFilter = true
             case .picks: matchesFilter = photo.flag == .pick
             case .rejects: matchesFilter = photo.flag == .reject
             case .edited: matchesFilter = photo.edits.isModified
-            case .bursts: matchesFilter = burstIndex.positions[photo.id] != nil
+            case .bursts: matchesFilter = positions[photo.id] != nil
             case .folder(let path): matchesFilter = (photo.path as NSString).deletingLastPathComponent == path
             case .collection: matchesFilter = members?.contains(photo.id) ?? false
             }
@@ -786,16 +864,7 @@ final class LibraryModel: ObservableObject {
 
     /// 보정·별점만 바뀐 경우는 다시 묶지 않는다. 사진 5000장에서 묶기는 약 25ms, 이 비교는 약 1ms다.
     var burstIndex: BurstIndex {
-        if !burstCacheStale, let burstCache { return burstCache.index }
-        var hasher = Hasher()
-        for photo in photos {
-            hasher.combine(photo.id)
-            hasher.combine(photo.path)
-            hasher.combine(photo.metadata.capturedAt)
-            hasher.combine(photo.metadata.camera)
-        }
-        let signature = hasher.finalize()
-        burstCacheStale = false
+        let signature = structureSignature
         if let burstCache, burstCache.signature == signature { return burstCache.index }
         var index = BurstIndex(groups: BurstGrouping.groups(for: photos))
         for (groupIndex, group) in index.groups.enumerated() {

@@ -93,11 +93,11 @@ struct WorkspaceView: View {
             }
             .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 30)
             sectionLabel("라이브러리")
-            sidebarRow("전체 사진", icon: "square.grid.2x2", count: model.photos.count, selected: model.filter == .all) { model.filter = .all }
+            sidebarRow("전체 사진", icon: "square.grid.2x2", count: model.counts.total, selected: model.filter == .all) { model.filter = .all }
             sidebarRow("선택됨", icon: "checkmark.circle", count: model.counts.picks, selected: model.filter == .picks) { model.filter = .picks }
             sidebarRow("제외됨", icon: "xmark.circle", count: model.counts.rejects, selected: model.filter == .rejects) { model.filter = .rejects }
             sidebarRow("보정됨", icon: "slider.horizontal.3", count: model.counts.edited, selected: model.filter == .edited) { model.filter = .edited }
-            sidebarRow("연속 촬영", icon: "square.stack.3d.down.right", count: model.burstIndex.positions.count, selected: model.filter == .bursts) { model.filter = .bursts }
+            sidebarRow("연속 촬영", icon: "square.stack.3d.down.right", count: model.counts.bursts, selected: model.filter == .bursts) { model.filter = .bursts }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     HStack {
@@ -117,7 +117,7 @@ struct WorkspaceView: View {
                     ForEach(model.photoFolders) { folder in
                         HStack(spacing: 0) {
                             sidebarRow(folder.name, icon: "folder.fill",
-                                       count: folder.photoIDs.intersection(model.counts.ids).count,
+                                       count: model.counts.folders[folder.id] ?? 0,
                                        selected: model.filter == .collection(folder.id)) {
                                 model.filter = .collection(folder.id)
                             }
@@ -230,6 +230,10 @@ struct WorkspaceView: View {
             Button("전체 선택") { model.selectAllVisible() }
                 .accessibilityLabel("보이는 사진 전체 선택")
                 .disabled(model.visiblePhotos.isEmpty)
+            Toggle("RAW+JPEG 한 장으로", isOn: $model.collapsesRAWJPEGPairs)
+                .toggleStyle(.checkbox)
+                .help("RAW와 함께 찍힌 JPEG를 숨기고 RAW만 보여 줍니다. JPEG는 카탈로그에 남아 있으며 끄면 다시 보입니다.")
+                .accessibilityLabel("RAW와 JPEG를 한 장으로 보기")
             Toggle("표시 후 다음 사진", isOn: $model.autoAdvance)
                 .toggleStyle(.checkbox)
                 .help("P·X·U·0–5 키로 표시하면 다음 사진으로 넘어갑니다")
@@ -551,7 +555,7 @@ private struct PhotoTile: View {
                     }
                     VStack {
                         HStack {
-                            if photo.isRAW { Text("RAW").font(.system(size: 9, weight: .bold)).padding(5).background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 4)) }
+                            if photo.isRAW { Text(model.hidesCompanion(of: photo) ? "RAW+JPEG" : "RAW").font(.system(size: 9, weight: .bold)).padding(5).background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 4)) }
                             if let copyName = photo.copyName {
                                 Label(copyName, systemImage: "square.on.square").font(.system(size: 9, weight: .bold)).padding(5)
                                     .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 4))
