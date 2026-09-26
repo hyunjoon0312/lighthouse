@@ -227,7 +227,7 @@ struct WorkspaceView: View {
                                        selected: model.filter == .collection(folder.id) || dropFolderID == folder.id) {
                                 model.filter = .collection(folder.id)
                             }
-                            .dropDestination(for: String.self) { items, _ in
+                            .dropDestination(for: PhotoDragItem.self) { items, _ in
                                 let ids = LibraryModel.draggedPhotoIDs(items)
                                 return !ids.isEmpty && model.addPhotos(ids, to: folder.id)
                             } isTargeted: { dropFolderID = $0 ? folder.id : (dropFolderID == folder.id ? nil : dropFolderID) }

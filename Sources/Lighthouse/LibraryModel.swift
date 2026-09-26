@@ -1,4 +1,5 @@
 import AppKit
+import CoreTransferable
 import Foundation
 import LighthouseCore
 import UniformTypeIdentifiers
@@ -132,6 +133,20 @@ struct LibraryCounts {
     var folders: [UUID: Int] = [:]
     /// 스마트 폴더별로 조건에 맞는 사진 수.
     var smart: [UUID: Int] = [:]
+}
+
+extension UTType {
+    /// 앱 안에서 끄는 사진 목록. Info.plist에 선언한다.
+    static let lighthousePhotos = UTType(exportedAs: "com.rian.lighthouse.photos")
+}
+
+/// 그리드에서 끄는 사진. 이 앱 안에서만 보이는 형식이라 Finder·메모 같은 다른 앱에 놓아도 아무것도 생기지 않는다.
+struct PhotoDragItem: Codable, Sendable, Transferable {
+    let ids: [UUID]
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .lighthousePhotos).visibility(.ownProcess)
+    }
 }
 
 final class CancellationFlag: @unchecked Sendable {
@@ -607,19 +622,14 @@ final class LibraryModel: ObservableObject {
 
     // MARK: 끌어 놓기
 
-    static let photoDragPrefix = "lighthouse-photos:"
-
-    /// 사진을 끌 때 넘기는 글자. 선택한 사진 중 하나를 끌면 선택한 사진 전체를 넘긴다.
-    func dragPayload(for photo: PhotoAsset) -> String {
-        let ids = selectedPhotoIDs.contains(photo.id) ? selectedPhotos.map(\.id) : [photo.id]
-        return Self.photoDragPrefix + ids.map(\.uuidString).joined(separator: ",")
+    /// 사진을 끌 때 넘기는 내용. 선택한 사진 중 하나를 끌면 선택한 사진 전체를 넘긴다.
+    func dragPayload(for photo: PhotoAsset) -> PhotoDragItem {
+        PhotoDragItem(ids: selectedPhotoIDs.contains(photo.id) ? selectedPhotos.map(\.id) : [photo.id])
     }
 
-    /// 앱 안에서 끈 사진의 ID. 다른 앱에서 끌어온 글자는 무시한다.
-    static func draggedPhotoIDs(_ items: [String]) -> [UUID] {
-        items.filter { $0.hasPrefix(photoDragPrefix) }
-            .flatMap { $0.dropFirst(photoDragPrefix.count).split(separator: ",") }
-            .compactMap { UUID(uuidString: String($0)) }
+    /// 놓은 사진의 ID. 카탈로그에 없는 ID는 `addPhotos`가 거른다.
+    static func draggedPhotoIDs(_ items: [PhotoDragItem]) -> [UUID] {
+        items.flatMap(\.ids)
     }
 
     /// Finder에서 끌어 놓은 파일·폴더를 가져온다. 지금 가져올 수 없으면 false.

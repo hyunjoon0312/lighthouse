@@ -1,6 +1,8 @@
+import CoreTransferable
 import Foundation
 @testable import Lighthouse
 import LighthouseCore
+import UniformTypeIdentifiers
 import XCTest
 
 /// Finder에서 끌어 놓아 가져오기와 사진을 내 폴더로 끌어 넣기.
@@ -23,7 +25,16 @@ final class DragDropTests: XCTestCase {
                        "선택한 사진 중 하나를 끌면 선택한 사진 전체")
         XCTAssertEqual(LibraryModel.draggedPhotoIDs([model.dragPayload(for: photos[1])]), [photos[1].id],
                        "선택하지 않은 사진을 끌면 그 사진만")
-        XCTAssertEqual(LibraryModel.draggedPhotoIDs(["바다, \(photos[1].id.uuidString)"]), [], "다른 앱의 글자는 무시")
+
+        // 앱 전용 형식 하나만 올린다. 글자·파일 형식이 없어 다른 앱에 놓아도 텍스트 클리핑 등이 생기지 않는다.
+        let provider = NSItemProvider()
+        provider.register(payload)
+        XCTAssertEqual(provider.registeredContentTypes, [.lighthousePhotos])
+        XCTAssertFalse(UTType.lighthousePhotos.conforms(to: .text))
+        let loaded: PhotoDragItem = try await withCheckedThrowingContinuation { continuation in
+            _ = provider.loadTransferable(type: PhotoDragItem.self) { continuation.resume(with: $0) }
+        }
+        XCTAssertEqual(Set(loaded.ids), [photos[0].id, photos[2].id])
 
         model.presentCreateFolder()
         let request = try XCTUnwrap(model.folderSheetRequest)
