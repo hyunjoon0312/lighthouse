@@ -20,6 +20,8 @@ struct WorkspaceView: View {
     @State private var pinch: (start: CGPoint, total: CGFloat)?
     @State private var folderToDelete: PhotoFolder?
     @State private var zoomPosition = ScrollPosition(edge: .top)
+    @State private var pinnedZoomPosition = ScrollPosition(edge: .top)
+    @State private var zoomSync = ZoomSync()
     /// 그리드 칸의 최소 너비. 썸네일 크기 슬라이더로 바꾸며 다음 실행에도 기억한다.
     @AppStorage("gridTileWidth") private var tileWidth = 180.0
     @State private var gridWidth: CGFloat = 0
@@ -664,14 +666,22 @@ struct WorkspaceView: View {
                     if model.actualSize {
                         let scale = NSApp.keyWindow?.backingScaleFactor ?? 1
                         let content = CGSize(width: image.size.width / scale, height: image.size.height / scale)
-                        if zoomable {
-                            actualSizeScroll(image, overlay: overlay, content: content, viewport: geometry.size)
-                                .scrollPosition($zoomPosition)
-                                .onAppear { scrollToZoomAnchor(content: content, viewport: geometry.size) }
-                                .onChange(of: content) { _, size in scrollToZoomAnchor(content: size, viewport: geometry.size) }
-                        } else {
-                            actualSizeScroll(image, overlay: overlay, content: content, viewport: geometry.size)
-                        }
+                        // 비교 보기의 두 칸은 같은 곳(사진 안 비율 위치)을 보이고 함께 스크롤한다.
+                        actualSizeScroll(image, overlay: overlay, content: content, viewport: geometry.size)
+                            .scrollPosition(zoomable ? $zoomPosition : $pinnedZoomPosition)
+                            .onAppear { scrollToZoomAnchor(zoomable, content: content, viewport: geometry.size) }
+                            .onChange(of: content) { _, size in scrollToZoomAnchor(zoomable, content: size, viewport: geometry.size) }
+                            .onChange(of: geometry.size) { _, size in scrollToZoomAnchor(zoomable, content: content, viewport: size) }
+                            .onScrollGeometryChange(for: CGPoint.self) { scroll in
+                                CGPoint(x: (scroll.contentOffset.x + scroll.containerSize.width / 2) / max(1, scroll.contentSize.width),
+                                        y: (scroll.contentOffset.y + scroll.containerSize.height / 2) / max(1, scroll.contentSize.height))
+                            } action: { _, anchor in followZoom(from: zoomable, anchor: anchor) }
+                            .onScrollPhaseChange { _, phase in
+                                // 스크롤을 멈춘 곳을 기억해 다음 사진도 같은 곳을 100%로 연다.
+                                if phase == .idle, let anchor = zoomSync.anchors[zoomable], anchor != model.zoomAnchor {
+                                    model.zoomAnchor = anchor
+                                }
+                            }
                     } else {
                         let splitting = zoomable && model.isSplitActive
                         Image(nsImage: image).resizable().interpolation(.high).allowedDynamicRange(.high)
@@ -775,11 +785,30 @@ struct WorkspaceView: View {
         }
     }
 
-    private func scrollToZoomAnchor(content: CGSize, viewport: CGSize) {
-        zoomPosition.scrollTo(point: CGPoint(
-            x: max(0, min(content.width - viewport.width, model.zoomAnchor.x * content.width - viewport.width / 2)),
-            y: max(0, min(content.height - viewport.height, model.zoomAnchor.y * content.height - viewport.height / 2))
-        ))
+    private func scrollToZoomAnchor(_ zoomable: Bool, content: CGSize, viewport: CGSize) {
+        zoomSync.sizes[zoomable] = (content, viewport)
+        zoomSync.anchors[zoomable] = nil
+        scroll(zoomable, to: model.zoomAnchor)
+    }
+
+    /// 100% 칸을 사진 안 비율 위치 `anchor`가 가운데 오게 스크롤한다(끝에서는 멈춘다).
+    private func scroll(_ zoomable: Bool, to anchor: CGPoint) {
+        guard let (content, viewport) = zoomSync.sizes[zoomable] else { return }
+        let point = CGPoint(
+            x: max(0, min(content.width - viewport.width, anchor.x * content.width - viewport.width / 2)),
+            y: max(0, min(content.height - viewport.height, anchor.y * content.height - viewport.height / 2))
+        )
+        if zoomable { zoomPosition.scrollTo(point: point) } else { pinnedZoomPosition.scrollTo(point: point) }
+    }
+
+    /// 비교 보기 100%에서 한 칸을 스크롤하면 다른 칸도 같은 곳을 보이게 따라 스크롤한다.
+    /// 따라간 칸이 알려 오는 위치가 1pt 안이면 되돌려 보내지 않는다.
+    private func followZoom(from zoomable: Bool, anchor: CGPoint) {
+        zoomSync.anchors[zoomable] = anchor
+        guard model.mode == .compare, let (content, _) = zoomSync.sizes[!zoomable] else { return }
+        if let other = zoomSync.anchors[!zoomable],
+           abs(other.x - anchor.x) * content.width < 1, abs(other.y - anchor.y) * content.height < 1 { return }
+        scroll(!zoomable, to: anchor)
     }
 
     /// 가져오기·내보내기 진행과 안내. 필름 스트립이 없는 그리드에서도 보인다.
@@ -1370,4 +1399,11 @@ struct FocusFullScreen {
         entered = false
         return focused && !exitRequested
     }
+}
+
+/// 100% 보기에서 두 칸(키: 확대할 수 있는 현재 사진 칸인지)의 내용·보이는 크기와 지금 가운데 있는 사진 안 비율 위치.
+/// 스크롤마다 바뀌므로 화면을 다시 그리지 않도록 관찰하지 않는 객체에 둔다.
+private final class ZoomSync {
+    var sizes: [Bool: (content: CGSize, viewport: CGSize)] = [:]
+    var anchors: [Bool: CGPoint] = [:]
 }

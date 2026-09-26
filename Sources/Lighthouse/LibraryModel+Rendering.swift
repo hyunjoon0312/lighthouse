@@ -114,6 +114,11 @@ extension LibraryModel {
         let pinnedKey = compare.map { "\($0.id):\(maxPixel ?? 0)" }
         let pinnedEdits = compare.map { compareShowsPinnedEdits ? $0.edits : EditSettings.neutral }
         let reference = pinnedKey != pinnedSource || pinnedEdits != pinnedRenderedEdits ? compare : nil
+        // 비교 보기에서 100%로 바꾸면 기준 사진도 원본 크기 그림이 올 때까지 늘려 보인다.
+        if actualSize, let fixed = reference, let image = pinnedImage,
+           let enlarged = enlarged(image, url: fixed.url, edits: pinnedEdits ?? .neutral) {
+            pinnedImage = enlarged
+        }
         let recentKey = actualSize ? nil : "\(photo.id):\(isOriginal)"
         let recent = recentKey.flatMap { key in recentRenders.last { $0.key == key } }
         let renderCurrent = recent?.edits != edits
@@ -311,13 +316,22 @@ extension LibraryModel {
         }
     }
 
-    /// 화면 맞춤에서 100%로 바꾸면 원본 크기 렌더가 올 때까지 지금 그림을 원본 크기로 늘려 먼저 보여 준다.
-    /// 그 사이 사진이 사라지지 않고 누른 곳이 바로 100% 자리에 온다(S9는 0.3–0.8초).
+    /// 100%로 보는 동안 원본 크기 렌더가 올 때까지 화면 맞춤 그림을 원본 크기로 늘려 먼저 보여 준다.
+    /// 화면 맞춤에서 바꿀 때는 지금 그림을, 100%로 다른 사진에 넘어갈 때는 최근에 그린 그 사진의 화면 맞춤 그림을 쓴다.
+    /// 그 사이 사진이 사라지지 않고 보던 곳이 바로 100% 자리에 온다(S9는 0.3–0.8초).
     private func enlargedForActualSize(previousSource: String?) -> NSImage? {
-        guard actualSize, let photo = selection, previousSource == "\(photo.id.uuidString):\(isOriginal):false",
-              let cg = rendered?.cgImage(forProposedRect: nil, context: nil, hints: nil),
-              let size = previewPipeline.outputSize(url: photo.url, edits: isOriginal ? .neutral : photo.edits),
-              size.width > CGFloat(cg.width) else { return nil }
+        guard actualSize, let photo = selection else { return nil }
+        let edits = isOriginal ? EditSettings.neutral : photo.edits
+        let fit = previousSource == "\(photo.id.uuidString):\(isOriginal):false"
+            ? rendered
+            : recentRenders.last { $0.key == "\(photo.id):\(isOriginal)" && $0.edits == edits }?.image
+        return fit.flatMap { enlarged($0, url: photo.url, edits: edits) }
+    }
+
+    /// 원본 크기보다 작은 그림을 원본 크기로 늘린 그림. 이미 원본 크기면 nil.
+    private func enlarged(_ image: NSImage, url: URL, edits: EditSettings) -> NSImage? {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let size = previewPipeline.outputSize(url: url, edits: edits), size.width > CGFloat(cg.width) else { return nil }
         return NSImage(cgImage: cg, size: size)
     }
 
