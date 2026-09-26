@@ -9,6 +9,23 @@ extension LibraryModel {
 
     func isMissing(_ photo: PhotoAsset) -> Bool { missingPaths.contains(photo.path) }
 
+    /// 고른 사진(없으면 보고 있는 사진)의 원본을 Finder에서 선택해 보여 준다. 가상 사본은 원본 한 파일로 모으고,
+    /// 원본이 없는 사진은 빼고 알린다.
+    func revealOriginals() {
+        let targets = actionTargets
+        let present = targets.filter { !isMissing($0) }
+        var seen = Set<String>()
+        let urls = present.map(\.url).filter { seen.insert($0.path).inserted }
+        guard !urls.isEmpty else {
+            if !targets.isEmpty { operationMessage = "원본 파일을 찾을 수 없습니다. 위치 다시 찾기로 새 위치를 알려 주세요." }
+            return
+        }
+        revealInFinder(urls)
+        if present.count < targets.count {
+            operationMessage = "원본이 없는 \(targets.count - present.count)장은 빼고 Finder에서 보여 줍니다."
+        }
+    }
+
     /// 모든 원본 경로가 있는지 백그라운드에서 확인한다. 확인 중에 다시 불리면 끝난 뒤 한 번 더 확인한다.
     func refreshMissingOriginals() {
         guard catalogLoaded, loadError == nil else { return }

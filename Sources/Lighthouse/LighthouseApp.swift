@@ -92,6 +92,16 @@ struct LighthouseApp: App {
                     .keyboardShortcut("u", modifiers: .command)
                     .disabled(library.selection == nil || library.isAutoAdjusting || library.hasModalPresentation)
                 Divider()
+                Button("왼쪽으로 회전") { library.rotate(clockwise: false) }
+                    .keyboardShortcut("[", modifiers: .command)
+                    .disabled(library.selection == nil || library.hasModalPresentation)
+                Button("오른쪽으로 회전") { library.rotate(clockwise: true) }
+                    .keyboardShortcut("]", modifiers: .command)
+                    .disabled(library.selection == nil || library.hasModalPresentation)
+                Button("Finder에서 원본 보기") { library.revealOriginals() }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .disabled(library.selection == nil || library.hasModalPresentation)
+                Divider()
                 Button("가상 사본 만들기") { library.createVirtualCopy() }
                     .keyboardShortcut("'", modifiers: .command)
                     .disabled(library.selection == nil || !library.catalogLoaded || library.hasModalPresentation)

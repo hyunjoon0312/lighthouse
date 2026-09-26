@@ -893,10 +893,10 @@ private struct PhotoTile: View {
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(active ? Palette.accent : selected ? Palette.accent.opacity(0.48) : .clear, lineWidth: active ? 2 : 1.5))
             .contentShape(RoundedRectangle(cornerRadius: 10))
             .onTapGesture { tileClicked(model, photo) }
+            .contextMenu { PhotoContextMenu(photo: photo) }
             .draggable(model.dragPayload(for: photo)) { dragPreview }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(photo.displayName), 별점 \(photo.rating), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")" +
-                                (photo.colorLabel.map { ", \($0.title) 라벨" } ?? "") + burstAccessibility)
+            .accessibilityLabel(accessibilityText)
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction { model.focusPhoto(photo) }
             .accessibilityAction(named: Text("선택 토글")) { model.togglePhotoSelection(photo) }
@@ -928,6 +928,12 @@ private struct PhotoTile: View {
                     .background(Palette.accent, in: Capsule()).foregroundStyle(.black)
             }
         }
+    }
+
+    private var accessibilityText: String {
+        let state = active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨"
+        let label = photo.colorLabel.map { ", \($0.title) 라벨" } ?? ""
+        return "\(photo.displayName), 별점 \(photo.rating), \(state)" + label + burstAccessibility
     }
 
     private var burstAccessibility: String {
@@ -963,6 +969,7 @@ private struct FilmstripTile: View {
             .overlay(RoundedRectangle(cornerRadius: 5).stroke(active ? Palette.accent : selected ? Palette.accent.opacity(0.5) : .clear, lineWidth: active ? 2 : 1.5))
             .contentShape(RoundedRectangle(cornerRadius: 5))
             .onTapGesture { tileClicked(model, photo) }
+            .contextMenu { PhotoContextMenu(photo: photo) }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(photo.displayName), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")")
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
@@ -1117,6 +1124,7 @@ private struct SurveyCell: View {
         .contentShape(RoundedRectangle(cornerRadius: 8))
         .onTapGesture(count: 2) { model.focusPhoto(photo); model.setMode(.edit) }
         .onTapGesture { model.focusPhoto(photo) }
+        .contextMenu { PhotoContextMenu(photo: photo) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(photo.displayName), 별점 \(photo.rating)\(active ? ", 기준 사진" : "")")
         .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)

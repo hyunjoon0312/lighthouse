@@ -350,6 +350,8 @@ final class LibraryModel: ObservableObject {
     var exportCancellation: CancellationFlag?
     /// 다시 내보낼 때 이전 파일을 휴지통으로 옮긴다. 테스트는 임시 폴더로 옮기도록 바꾼다.
     var moveToTrash: @Sendable (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
+    /// Finder에서 파일을 선택해 보여 준다. 테스트는 부른 파일만 기록하도록 바꾼다.
+    var revealInFinder: ([URL]) -> Void = { NSWorkspace.shared.activateFileViewerSelecting($0) }
     var importCancellation: CancellationFlag?
     private(set) var visibleCache: [PhotoAsset]?
     private(set) var indexCache: [UUID: Int]?
@@ -1043,6 +1045,15 @@ final class LibraryModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// 보고 있는 사진을 90도 돌린다. 자유 크롭 영역은 새 방향에 맞지 않아 지운다.
+    func rotate(clockwise: Bool) {
+        guard let photo = selection else { return }
+        var edits = photo.edits
+        edits.rotationQuarterTurns = (edits.rotationQuarterTurns + (clockwise ? 1 : 3)) % 4
+        edits.cropRect = nil
+        updateEdits(edits)
     }
 
     func copyEdits() {

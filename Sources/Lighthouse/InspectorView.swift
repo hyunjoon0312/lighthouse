@@ -131,12 +131,11 @@ struct InspectorView: View {
             adjustment("선명도", \.sharpness, range: 0...2, format: "%.2f")
             adjustment("비네팅", \.vignette, range: -1...1, format: "%+.2f")
             HStack {
-                Button {
-                    change {
-                        $0.rotationQuarterTurns = ($0.rotationQuarterTurns + 1) % 4
-                        $0.cropRect = nil
-                    }
-                } label: { Label("90° 회전", systemImage: "rotate.right") }
+                Button { model.rotate(clockwise: false) } label: { Image(systemName: "rotate.left") }
+                    .help("왼쪽으로 90° 회전 (⌘[)")
+                    .accessibilityLabel("반시계 방향으로 90도 회전")
+                Button { model.rotate(clockwise: true) } label: { Image(systemName: "rotate.right") }
+                    .help("오른쪽으로 90° 회전 (⌘])")
                     .accessibilityLabel("시계 방향으로 90도 회전")
                 Spacer()
                 Button("자유 크롭…") { model.presentCrop() }
