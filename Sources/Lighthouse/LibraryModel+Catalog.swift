@@ -127,7 +127,9 @@ extension LibraryModel {
             }
         }
         scheduleSave()
-        if selectedID == nil { focusPhoto(restored[0].photo) } else { ensureSelectionVisible() }
+        // 되돌린 사진을 보여 준다. 빼기 뒤에는 다음 사진이 선택되어 있으므로 선택이 비었는지와 관계없이 옮긴다.
+        focusPhoto(restored[0].photo)
+        ensureSelectionVisible()
         let skipped = removed.count - restored.count
         operationMessage = "\(restored.count)장을 카탈로그에 되돌렸습니다." +
             (skipped > 0 ? " \(skipped)장은 그사이 다시 가져와 건너뛰었습니다." : "")

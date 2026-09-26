@@ -81,6 +81,10 @@ final class CatalogRemovalUndoTests: XCTestCase {
         model.focusPhoto(photos[1])
         model.removeFromCatalog([photos[1].id])
         XCTAssertEqual(model.selectedID, photos[2].id, "그 뒤 사진")
+        model.undo()
+        XCTAssertEqual(model.selectedID, photos[1].id, "되돌리면 되돌린 사진을 보여 준다")
+        model.redo()
+        XCTAssertEqual(model.selectedID, photos[2].id)
         model.removeFromCatalog([photos[2].id])
         XCTAssertEqual(model.selectedID, photos[0].id, "끝이었으면 그 앞 사진")
     }
