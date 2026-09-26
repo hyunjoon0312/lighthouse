@@ -13,6 +13,11 @@ private enum Palette {
 struct WorkspaceView: View {
     @EnvironmentObject private var model: LibraryModel
     @State private var keyMonitor: Any?
+    @State private var pinchMonitor: Any?
+    /// 사진 보기 칸들의 창 안 위치(왼쪽 위 기준). 키는 확대할 수 있는 현재 사진 칸인지다. 트랙패드 핀치를 받을 곳이다.
+    @State private var paneFrames: [Bool: CGRect] = [:]
+    /// 벌리거나 오므리기 시작한 곳과 지금까지 바뀐 배율의 합.
+    @State private var pinch: (start: CGPoint, total: CGFloat)?
     @State private var folderToDelete: PhotoFolder?
     @State private var zoomPosition = ScrollPosition(edge: .top)
     /// 그리드 칸의 최소 너비. 썸네일 크기 슬라이더로 바꾸며 다음 실행에도 기억한다.
@@ -97,9 +102,13 @@ struct WorkspaceView: View {
         }
         .onAppear {
             installKeys()
+            installPinch()
             DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) }
         }
-        .onDisappear { if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil } }
+        .onDisappear {
+            if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
+            if let pinchMonitor { NSEvent.removeMonitor(pinchMonitor); self.pinchMonitor = nil }
+        }
         .onChange(of: model.filter) { _, _ in model.ensureSelectionVisible() }
         .onChange(of: model.search) { _, _ in model.ensureSelectionVisible() }
         .onChange(of: model.minimumRating) { _, _ in model.ensureSelectionVisible() }
@@ -670,12 +679,6 @@ struct WorkspaceView: View {
                                 .onTapGesture(coordinateSpace: .local) { location in
                                     zoomIn(at: location, imageSize: image.size, available: geometry.size)
                                 }
-                                // 트랙패드로 벌리면 벌린 곳을 100%로 확대한다.
-                                .simultaneousGesture(MagnifyGesture().onEnded { value in
-                                    if value.magnification > 1.15 {
-                                        zoomIn(at: value.startLocation, imageSize: image.size, available: geometry.size)
-                                    }
-                                })
                                 .accessibilityLabel("클릭한 위치를 100%로 확대")
                         }
                         if let overlay {
@@ -715,6 +718,8 @@ struct WorkspaceView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Palette.canvas)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { paneFrames[zoomable] = $0 }
+            .onDisappear { paneFrames[zoomable] = nil }
         }
     }
 
@@ -731,10 +736,6 @@ struct WorkspaceView: View {
             .frame(minWidth: viewport.width, minHeight: viewport.height)
             .contentShape(Rectangle())
             .onTapGesture { model.toggleActualSize() }
-            // 트랙패드로 오므리면 화면 맞춤으로 돌아간다.
-            .simultaneousGesture(MagnifyGesture().onEnded { value in
-                if value.magnification < 0.87 { model.toggleActualSize() }
-            })
         }
     }
 
@@ -829,6 +830,45 @@ struct WorkspaceView: View {
             InspectorView(photo: photo)
         } else {
             VStack { Text("사진을 선택하세요").foregroundStyle(Palette.muted) }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.panel)
+        }
+    }
+
+    /// 트랙패드로 사진의 한 곳을 벌리면(1.15배 넘게) 그곳을 100%로 열고, 100%에서 오므리면(0.87배 아래) 화면 맞춤으로
+    /// 돌아간다. SwiftUI 확대 제스처 대신 앱에 오는 확대 이벤트를 받아, 합성한 이벤트로도 같은 경로를 확인할 수 있다.
+    private func installPinch() {
+        guard pinchMonitor == nil else { return }
+        pinchMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { event in
+            handlePinch(event)
+            return event
+        }
+    }
+
+    private func handlePinch(_ event: NSEvent) {
+        // 시트·팝오버 같은 딸린 창의 핀치는 받지 않는다.
+        guard let window = event.window, window.canBecomeMain,
+              model.showsSingleImage, !model.hasModalPresentation, !model.isPickingWhiteBalance else {
+            pinch = nil
+            return
+        }
+        // 사진 칸 위치(`.global`)와 같은 기준인 창 왼쪽 위 기준 좌표로 바꾼다.
+        let point = CGPoint(x: event.locationInWindow.x, y: window.frame.height - event.locationInWindow.y)
+        switch event.phase {
+        case .began:
+            pinch = (point, 0)
+        case .changed:
+            pinch?.total += event.magnification
+        case .ended:
+            guard let (start, total) = pinch else { return }
+            pinch = nil
+            if model.actualSize {
+                if total < -0.13, paneFrames.values.contains(where: { $0.contains(start) }) { model.toggleActualSize() }
+            } else if total > 0.15, !model.isSplitActive, let frame = paneFrames[true], frame.contains(start),
+                      let image = model.rendered {
+                zoomIn(at: CGPoint(x: start.x - frame.minX, y: start.y - frame.minY), imageSize: image.size,
+                       available: frame.size)
+            }
+        default:
+            pinch = nil
         }
     }
 
