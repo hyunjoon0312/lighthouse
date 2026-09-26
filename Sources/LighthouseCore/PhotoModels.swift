@@ -246,6 +246,34 @@ public struct EditSettings: Codable, Equatable, Sendable {
         vignette = try container.decodeIfPresent(Double.self, forKey: .vignette) ?? 0
         hdrAmount = try container.decodeIfPresent(Double.self, forKey: .hdrAmount) ?? 0
     }
+
+    /// HDR 하이라이트는 쓸 때만 적는다. 쓰지 않는 사진의 카탈로그와 썸네일 키가 예전과 같게 남는다.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(exposure, forKey: .exposure)
+        try container.encode(contrast, forKey: .contrast)
+        try container.encode(saturation, forKey: .saturation)
+        try container.encode(temperatureShift, forKey: .temperatureShift)
+        try container.encode(tintShift, forKey: .tintShift)
+        try container.encode(highlights, forKey: .highlights)
+        try container.encode(shadows, forKey: .shadows)
+        try container.encode(sharpness, forKey: .sharpness)
+        try container.encode(rotationQuarterTurns, forKey: .rotationQuarterTurns)
+        try container.encodeIfPresent(cropAspect, forKey: .cropAspect)
+        try container.encode(localAdjustments, forKey: .localAdjustments)
+        try container.encodeIfPresent(lut, forKey: .lut)
+        try container.encode(curves, forKey: .curves)
+        try container.encode(colorRanges, forKey: .colorRanges)
+        try container.encode(grain, forKey: .grain)
+        try container.encode(straightenDegrees, forKey: .straightenDegrees)
+        try container.encodeIfPresent(cropRect, forKey: .cropRect)
+        try container.encode(retouchStrokes, forKey: .retouchStrokes)
+        try container.encode(rawDevelop, forKey: .rawDevelop)
+        try container.encode(vibrance, forKey: .vibrance)
+        try container.encode(clarity, forKey: .clarity)
+        try container.encode(vignette, forKey: .vignette)
+        if hdrAmount != 0 { try container.encode(hdrAmount, forKey: .hdrAmount) }
+    }
 }
 
 public struct PhotoMetadata: Codable, Equatable, Sendable {

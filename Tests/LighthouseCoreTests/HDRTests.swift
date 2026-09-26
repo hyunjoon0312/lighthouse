@@ -28,6 +28,20 @@ final class HDRTests: XCTestCase {
         return stride(from: 0, to: data.count, by: 4).map { 0.2126 * data[$0] + 0.7152 * data[$0 + 1] + 0.0722 * data[$0 + 2] }
     }
 
+    func testZeroAmountIsNotWrittenSoOlderCatalogsAndThumbnailKeysStay() throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        var edits = EditSettings(exposure: 0.5, cropAspect: 1.5)
+        XCTAssertFalse(String(decoding: try encoder.encode(edits), as: UTF8.self).contains("hdrAmount"))
+        let keys = Set(try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(edits)) as? [String: Any]).keys)
+        XCTAssertEqual(keys, ["exposure", "contrast", "saturation", "temperatureShift", "tintShift", "highlights", "shadows",
+                              "sharpness", "rotationQuarterTurns", "cropAspect", "localAdjustments", "curves", "colorRanges",
+                              "grain", "straightenDegrees", "retouchStrokes", "rawDevelop", "vibrance", "clarity", "vignette"],
+                       "예전과 같은 항목(비어 있는 LUT·크롭은 쓰지 않는다)")
+        edits.hdrAmount = 1.2
+        XCTAssertEqual(try JSONDecoder().decode(EditSettings.self, from: encoder.encode(edits)), edits)
+    }
+
     func testPreviewLiftsOnlyHighlightsAboveSDRWhite() throws {
         guard let url = rawSample else { throw XCTSkip("RAW 표본이 없습니다.") }
         let pipeline = ImagePipeline(cachesDevelopment: true)
