@@ -496,11 +496,7 @@ struct WorkspaceView: View {
         } else if model.photos.isEmpty {
             emptyState("사진을 가져오세요", icon: "photo.on.rectangle.angled", detail: "폴더나 파일을 선택해 시작하세요. JPEG, HEIC, TIFF와 RAW 파일을 지원합니다.")
         } else if model.visiblePhotos.isEmpty {
-            if case .collection = model.filter, model.search.isEmpty, model.minimumRating == 0 {
-                emptyState("폴더가 비어 있습니다", icon: "folder", detail: "사진은 전체 라이브러리에서 선택해 이 폴더에 추가하세요.")
-            } else {
-                emptyState("검색 결과가 없습니다", icon: "magnifyingglass", detail: "검색어나 필터를 바꿔 보세요.")
-            }
+            emptyListState
         } else if model.mode == .grid {
             grid
         } else if model.mode == .survey {
@@ -508,6 +504,42 @@ struct WorkspaceView: View {
         } else {
             editorCanvas
         }
+    }
+
+    /// 원본이 없는 사진은 저장해 둔 마지막 썸네일을 흐리게 보여 주고 위치를 다시 찾게 한다.
+    private func missingOriginal(_ photo: PhotoAsset) -> some View {
+        VStack(spacing: 14) {
+            if let thumbnail = model.thumbnail(for: photo) {
+                Image(nsImage: thumbnail).resizable().interpolation(.medium).scaledToFit()
+                    .frame(maxWidth: 420, maxHeight: 320).opacity(0.55)
+            }
+            Label("원본 파일을 찾을 수 없습니다", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline).foregroundStyle(Palette.accent)
+            Text("저장해 둔 작은 미리보기입니다. 드라이브를 연결하면 다시 확인하고, 파일을 옮겼다면 새 위치를 알려 주세요.")
+                .font(.caption).foregroundStyle(Palette.muted).multilineTextAlignment(.center).frame(maxWidth: 360)
+            Button("위치 다시 찾기…") { model.presentRelocate(for: photo) }.buttonStyle(.bordered)
+        }
+        .padding(20)
+    }
+
+    /// 목록에 사진이 없을 때의 안내. 검색어·조건이 걸려 있으면 그것을 바꾸라고 하고, 아니면 목록마다 채우는 방법을 알린다.
+    private var emptyListState: some View {
+        let narrowed = !model.search.trimmingCharacters(in: .whitespaces).isEmpty || model.minimumRating > 0 ||
+            !model.criteria.isEmpty
+        if narrowed {
+            return emptyState("검색 결과가 없습니다", icon: "magnifyingglass", detail: "검색어나 별점·조건을 바꿔 보세요.")
+        }
+        let detail: String = switch model.filter {
+        case .picks: "P 키나 오른쪽 패널의 선택 단추로 표시한 사진이 여기에 모입니다."
+        case .rejects: "X 키로 제외한 사진이 여기에 모입니다."
+        case .edited: "보정한 사진이 여기에 모입니다."
+        case .bursts: "1초 안에 이어 찍은 사진이 없습니다."
+        case .missing: "모든 원본을 찾았습니다."
+        case .collection: "사진은 전체 라이브러리에서 선택해 이 폴더에 추가하세요."
+        case .smart: "조건에 맞는 사진이 없습니다. 사이드바의 … 메뉴에서 이름을 바꾸거나 지울 수 있습니다."
+        case .all, .folder: "이 목록에 사진이 없습니다."
+        }
+        return emptyState("‘\(model.filterTitle)’에 사진이 없습니다", icon: "photo.on.rectangle", detail: detail)
     }
 
     private func emptyState(_ title: String, icon: String, detail: String) -> some View {
@@ -590,16 +622,16 @@ struct WorkspaceView: View {
                 if model.mode == .compare {
                     imagePane(model.pinnedImage, error: model.pinnedError,
                               caption: model.compareShowsPinnedEdits ? "기준 · 보정" : "기준 · 원본", overlay: nil,
-                              zoomable: false)
+                              zoomable: false, photo: model.pinned)
                 }
                 imagePane(model.rendered, error: model.imageError, caption: model.isOriginal ? "현재 · 원본" : "현재 · 보정",
-                          overlay: model.showsClipping ? model.clippingOverlay : nil, zoomable: true)
+                          overlay: model.showsClipping ? model.clippingOverlay : nil, zoomable: true, photo: model.selection)
             }
             .background(Palette.canvas)
     }
 
     private func imagePane(_ image: NSImage?, error: String?, caption: String, overlay: NSImage?,
-                           zoomable: Bool) -> some View {
+                           zoomable: Bool, photo: PhotoAsset?) -> some View {
         GeometryReader { geometry in
             ZStack {
                 if let image {
@@ -641,6 +673,8 @@ struct WorkspaceView: View {
                                             availableSize: geometry.size)
                         }
                     }
+                } else if let photo, model.isMissing(photo) {
+                    missingOriginal(photo)
                 } else if let error {
                     VStack(spacing: 10) {
                         Image(systemName: "exclamationmark.triangle").font(.title)

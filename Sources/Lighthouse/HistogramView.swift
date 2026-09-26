@@ -26,7 +26,8 @@ struct HistogramView: View {
                     }
                     .padding(4)
                 } else {
-                    Text(model.showsSingleImage ? "계산 중…" : "사진 보기에서 표시됩니다")
+                    Text(!model.showsSingleImage ? "사진 보기에서 표시됩니다" :
+                            model.imageError != nil || model.selection.map(model.isMissing) == true ? "표시할 수 없음" : "계산 중…")
                         .font(.caption2).foregroundStyle(.secondary)
                         .frame(maxHeight: .infinity)
                 }

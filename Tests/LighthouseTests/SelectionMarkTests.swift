@@ -39,4 +39,21 @@ final class SelectionMarkTests: XCTestCase {
         model.markFromKeyboard(rating: 5)
         XCTAssertEqual(model.visiblePhotos.filter { $0.rating == 5 }.count, 1, "사진 보기에서는 보고 있는 한 장에만")
     }
+
+    /// 사진 보기에서 목록을 바꿔 보던 사진이 빠지면 첫 사진을 보여 준다. 그리드에서는 선택을 비운다.
+    func testSingleImageViewKeepsAPhotoWhenTheListChanges() async throws {
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 3)
+        let photos = model.visiblePhotos
+        model.select(photos[1])
+        model.setFlag(.pick)
+        model.select(photos[2])
+        model.setMode(.edit)
+        model.filter = .picks
+        model.ensureSelectionVisible()
+        XCTAssertEqual(model.selectedID, photos[1].id)
+        model.setMode(.grid)
+        model.filter = .rejects
+        model.ensureSelectionVisible()
+        XCTAssertNil(model.selectedID)
+    }
 }

@@ -851,10 +851,11 @@ final class LibraryModel: ObservableObject {
         requestRender()
     }
 
+    /// 보이는 사진만 선택에 남긴다. 사진·비교 보기에서 선택이 모두 빠지면 첫 사진을 골라 빈 화면이 되지 않게 한다.
     func ensureSelectionVisible() {
         guard catalogLoaded else { return }
         let previous = selectedID
-        photoSelection.reconcile(with: visiblePhotos.map(\.id))
+        photoSelection.reconcile(with: visiblePhotos.map(\.id), selectFirstIfEmpty: showsSingleImage)
         selectionDidChange(previousActive: previous, clearFocus: false)
     }
 
