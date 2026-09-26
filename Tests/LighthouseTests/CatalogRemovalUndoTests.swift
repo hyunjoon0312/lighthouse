@@ -66,4 +66,22 @@ final class CatalogRemovalUndoTests: XCTestCase {
         }
         XCTAssertTrue(FileManager.default.fileExists(atPath: thumbnails.appendingPathComponent(original[3].id.uuidString).path))
     }
+
+    /// 사진 보기에서 보고 있던 사진을 빼면 같은 파일의 남은 항목, 없으면 그 뒤(끝이면 앞) 사진으로 옮긴다.
+    func testRemovingTheViewedPhotoMovesToItsSiblingOrNeighbor() async throws {
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 3)
+        let photos = model.visiblePhotos
+        model.select(photos[0])
+        model.setMode(.edit)
+        model.createVirtualCopy()
+        let copy = try XCTUnwrap(model.visiblePhotos.first(where: \.isVirtualCopy))
+        model.focusPhoto(copy)
+        model.removeFromCatalog([copy.id])
+        XCTAssertEqual(model.selectedID, photos[0].id, "사본을 지우면 원래 항목")
+        model.focusPhoto(photos[1])
+        model.removeFromCatalog([photos[1].id])
+        XCTAssertEqual(model.selectedID, photos[2].id, "그 뒤 사진")
+        model.removeFromCatalog([photos[2].id])
+        XCTAssertEqual(model.selectedID, photos[0].id, "끝이었으면 그 앞 사진")
+    }
 }

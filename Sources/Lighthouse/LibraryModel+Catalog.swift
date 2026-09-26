@@ -72,7 +72,17 @@ extension LibraryModel {
 
     /// 빼기와 다시 실행에서 쓴다. 기록은 남기지 않는다. 디스크의 썸네일은 되돌릴 때를 위해 다음 실행까지 둔다.
     func performRemoval(_ removedIDs: Set<UUID>) {
-        let fallbackPath = selection.flatMap { removedIDs.contains($0.id) ? $0.path : nil }
+        // 보고 있던 사진을 빼면 같은 파일의 남은 항목(사본을 지운 경우), 없으면 목록에서 그 뒤(끝이면 앞) 사진으로 옮긴다.
+        let removedCurrent = selection.map { removedIDs.contains($0.id) } ?? false
+        let fallbackPath = removedCurrent ? selection?.path : nil
+        var nextID: UUID?
+        if removedCurrent {
+            let visible = visiblePhotos
+            if let index = visible.firstIndex(where: { $0.id == selectedID }) {
+                nextID = (visible[(index + 1)...].first { !removedIDs.contains($0.id) } ??
+                          visible[..<index].last { !removedIDs.contains($0.id) })?.id
+            }
+        }
         photos.removeAll { removedIDs.contains($0.id) }
         if foldersLoaded, folderLoadError == nil {
             for index in photoFolders.indices { photoFolders[index].remove(removedIDs) }
@@ -85,9 +95,12 @@ extension LibraryModel {
         if pinnedID.map(removedIDs.contains) == true { pinnedID = nil }
         scheduleSave()
         ensureSelectionVisible()
-        // 보고 있던 사본을 지우면 같은 파일의 남은 항목으로 옮긴다.
-        if selectedID == nil, let fallbackPath, let sibling = visiblePhotos.first(where: { $0.path == fallbackPath }) {
+        guard removedCurrent else { return }
+        let visible = visiblePhotos
+        if let fallbackPath, let sibling = visible.first(where: { $0.path == fallbackPath }) {
             focusPhoto(sibling)
+        } else if let nextID, let next = visible.first(where: { $0.id == nextID }) {
+            focusPhoto(next)
         }
     }
 

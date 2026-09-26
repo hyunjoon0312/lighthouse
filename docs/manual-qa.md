@@ -122,6 +122,7 @@ LIGHTHOUSE_DATA_DIR=/tmp/lh-qa/data dist/Lighthouse.app/Contents/MacOS/Lighthous
 
 ## 카탈로그에서 빼기
 
+- [ ] 사진 보기에서 Delete로 보고 있던 사진을 뺀다 → 그 뒤 사진(마지막이었으면 그 앞 사진)이 바로 보인다. 가상 사본을 지우면 원래 사진이 보인다.
 - [ ] 사진을 고르고 Delete → "…을 카탈로그에서 뺄까요?" 확인 창. 취소하면 아무것도 바뀌지 않는다.
 - [ ] RAW+JPEG 한 장으로를 켠 상태에서 RAW를 빼기 → 확인 창에 "JPEG 1장도 함께" 문구. 뺀 뒤 두 파일 모두 Finder에 남아 있다.
 - [ ] 내 폴더를 보면서 Delete → 확인 창 없이 그 폴더에서만 빠지고 전체 사진에는 남는다.
