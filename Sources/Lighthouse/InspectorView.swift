@@ -154,7 +154,16 @@ struct InspectorView: View {
             Button("참조 사진 색감 맞추기…") { model.presentReferenceMatch() }
                 .accessibilityLabel("참조 사진 색감 맞추기")
             if photo.isRAW { rawDevelopControls; Divider() } else { Divider() }
-            section("빛")
+            HStack {
+                section("빛")
+                Spacer()
+                if model.isAutoAdjusting { ProgressView().controlSize(.small) }
+                Button("자동") { model.autoAdjust() }
+                    .font(.caption).buttonStyle(.bordered)
+                    .disabled(model.isAutoAdjusting)
+                    .help("노출·색온도·틴트·하이라이트·섀도를 사진에서 정합니다 (⌘U). ⌘Z로 되돌릴 수 있습니다")
+                    .accessibilityLabel("자동 보정")
+            }
             adjustment("노출", \.exposure, range: -4...4, format: "%.2f EV")
             adjustment("대비", \.contrast, range: 0.5...1.5, format: "%.2f")
             adjustment("하이라이트", \.highlights, range: 0...1, format: "%.2f")

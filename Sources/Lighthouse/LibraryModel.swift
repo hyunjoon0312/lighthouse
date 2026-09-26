@@ -218,6 +218,7 @@ final class LibraryModel: ObservableObject {
     @Published var rawCapabilities: RAWCapabilities?
     @Published var histogram: ImageHistogram?
     @Published var showsClipping = false { didSet { refreshClippingOverlay() } }
+    @Published var isAutoAdjusting = false
     /// 여러 장 보기에서 사진마다 그린 모습과 그때의 보정.
     @Published var surveyImages: [UUID: NSImage] = [:]
     var surveyRenderedEdits: [UUID: EditSettings] = [:]
@@ -300,6 +301,7 @@ final class LibraryModel: ObservableObject {
     let saveQueue = DispatchQueue(label: "com.rian.lighthouse.catalog", qos: .utility)
     let splitQueue = DispatchQueue(label: "com.rian.lighthouse.split", qos: .userInitiated)
     let surveyQueue = DispatchQueue(label: "com.rian.lighthouse.survey", qos: .userInitiated)
+    let autoAdjustQueue = DispatchQueue(label: "com.rian.lighthouse.auto", qos: .userInitiated)
     var saveDelay: DispatchWorkItem?
     var renderDelay: DispatchWorkItem?
     var generation = 0
@@ -978,6 +980,33 @@ final class LibraryModel: ObservableObject {
     func applyCurrentLUTToSelection() {
         guard let current = selection, current.edits.lut != nil, selectedPhotoIDs.count >= 2 else { return }
         applyBatchEdits(source: current.edits, to: selectedPhotos.map(\.id), components: .lut)
+    }
+
+    /// 보고 있는 사진의 노출·화이트밸런스·하이라이트·섀도를 자동으로 정한다. 한 번에 실행 취소된다.
+    /// 계산하는 동안 사진이나 보정이 바뀌면 적용하지 않는다.
+    func autoAdjust() {
+        guard catalogLoaded, loadError == nil, !isAutoAdjusting, let photo = selection else { return }
+        isAutoAdjusting = true
+        let start = Date()
+        autoAdjustQueue.async { [pipeline] in
+            let result = Result { try AutoAdjust.suggest(url: photo.url, current: photo.edits, pipeline: pipeline) }
+            DispatchQueue.main.async {
+                self.isAutoAdjusting = false
+                switch result {
+                case .success(let suggestion):
+                    AppLog.render.info("auto adjust: \(suggestion.renders, privacy: .public) renders in \(Date().timeIntervalSince(start), privacy: .public)s")
+                    guard self.selectedID == photo.id, self.selection?.edits == photo.edits else {
+                        self.operationMessage = "자동 보정을 계산하는 동안 사진이나 보정이 바뀌어 적용하지 않았습니다."
+                        return
+                    }
+                    self.updateEdits(suggestion.edits)
+                    self.operationMessage = "자동 보정: 노출·색온도·틴트·하이라이트·섀도를 정했습니다. 마음에 들지 않으면 ⌘Z로 되돌리세요."
+                case .failure(let error):
+                    AppLog.render.error("auto adjust failed: \(error.localizedDescription, privacy: .private)")
+                    self.operationMessage = "자동 보정을 할 수 없습니다: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
     func copyEdits() {

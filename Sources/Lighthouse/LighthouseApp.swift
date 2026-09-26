@@ -86,6 +86,10 @@ struct LighthouseApp: App {
                 }
                 .disabled(library.selection == nil || library.hasModalPresentation)
                 Divider()
+                Button("자동 보정") { library.autoAdjust() }
+                    .keyboardShortcut("u", modifiers: .command)
+                    .disabled(library.selection == nil || library.isAutoAdjusting || library.hasModalPresentation)
+                Divider()
                 Button("가상 사본 만들기") { library.createVirtualCopy() }
                     .keyboardShortcut("'", modifiers: .command)
                     .disabled(library.selection == nil || !library.catalogLoaded || library.hasModalPresentation)
