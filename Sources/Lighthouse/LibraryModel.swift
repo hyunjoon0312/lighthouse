@@ -173,6 +173,7 @@ final class LibraryModel: ObservableObject {
     @Published var showExport = false
     @Published var showBatchEdit = false
     @Published var showCardImport = false
+    @Published var showShortcuts = false
     @Published var presets: [EditPreset] = []
     @Published var presetLoadError: String?
     @Published var presetSheet: PresetSheetRequest?
@@ -366,7 +367,7 @@ final class LibraryModel: ObservableObject {
     var canUndo: Bool { editHistory.canUndo }
     var canRedo: Bool { editHistory.canRedo }
     var hasModalPresentation: Bool {
-        showBatchEdit || showExport || showCardImport || presetSheet != nil || referenceMatchSource != nil || folderSheetRequest != nil ||
+        showBatchEdit || showExport || showCardImport || showShortcuts || presetSheet != nil || referenceMatchSource != nil || folderSheetRequest != nil ||
             cropSource != nil || catalogRemoval != nil
     }
     var selectedLocal: LocalAdjustment? { selection?.edits.localAdjustments.first { $0.id == selectedLocalID } }

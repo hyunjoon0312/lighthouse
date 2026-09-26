@@ -39,9 +39,40 @@ struct LighthouseApp: App {
                 Divider()
                 Button("카탈로그 보관본 보기") { library.revealBackups() }
             }
-            CommandMenu("사진") {
+            // 한 글자 단축키는 글자 칸 입력을 가로채지 않도록 메뉴에 등록하지 않고 이름에만 적는다.
+            CommandGroup(before: .toolbar) {
+                Button("그리드 (G)") { library.setMode(.grid) }
+                    .disabled(library.hasModalPresentation)
+                Button("사진 (E)") { library.setMode(.edit) }
+                    .disabled(library.hasModalPresentation)
+                Button("비교 (C)") { library.setMode(.compare) }
+                    .disabled(library.hasModalPresentation)
+                Divider()
+                Button(library.isOriginal ? "보정 보기 (\\)" : "원본 보기 (\\)") { library.toggleOriginal() }
+                    .disabled(library.selection == nil || library.hasModalPresentation)
+                Button(library.actualSize ? "화면 맞춤 (Z)" : "100% 보기 (Z)") { library.toggleActualSize() }
+                    .disabled(library.selection == nil || library.mode == .grid || library.hasModalPresentation)
+                Button(library.showsClipping ? "잘림 표시 끄기 (J)" : "하이라이트·섀도 잘림 표시 (J)") { library.showsClipping.toggle() }
+                    .disabled(library.hasModalPresentation)
                 Button(library.isFocusView ? "사진만 보기 끝내기 (F)" : "사진만 보기 (F)") { library.toggleFocusView() }
                     .disabled(library.selection == nil || library.hasModalPresentation)
+                Divider()
+            }
+            CommandMenu("사진") {
+                Button("선택 표시 (P)") { library.markFromKeyboard(flag: .pick) }
+                    .disabled(library.selection == nil || library.hasModalPresentation)
+                Button("제외 표시 (X)") { library.markFromKeyboard(flag: .reject) }
+                    .disabled(library.selection == nil || library.hasModalPresentation)
+                Button("표시 해제 (U)") { library.markFromKeyboard(flag: PhotoFlag.none) }
+                    .disabled(library.selection == nil || library.hasModalPresentation)
+                Menu("별점") {
+                    ForEach(0...5, id: \.self) { rating in
+                        Button(rating == 0 ? "별점 없음 (0)" : "\(String(repeating: "★", count: rating)) (\(rating))") {
+                            library.markFromKeyboard(rating: rating)
+                        }
+                    }
+                }
+                .disabled(library.selection == nil || library.hasModalPresentation)
                 Divider()
                 Button("가상 사본 만들기") { library.createVirtualCopy() }
                     .keyboardShortcut("'", modifiers: .command)
@@ -68,6 +99,11 @@ struct LighthouseApp: App {
                 Button("보정 붙여넣기") { library.pasteEditsToSelection() }
                     .keyboardShortcut("v", modifiers: [.command, .shift])
                     .disabled(library.clipboard == nil || library.selection == nil || library.hasModalPresentation)
+            }
+            CommandGroup(replacing: .help) {
+                Button("단축키 보기 (?)") { library.showShortcuts = true }
+                    .keyboardShortcut("/", modifiers: .command)
+                    .disabled(library.hasModalPresentation)
             }
         }
     }

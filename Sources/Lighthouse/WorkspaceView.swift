@@ -44,6 +44,7 @@ struct WorkspaceView: View {
         .sheet(isPresented: $model.showExport) { ExportSheet() }
         .sheet(isPresented: $model.showBatchEdit) { BatchEditSheet() }
         .sheet(isPresented: $model.showCardImport) { CardImportSheet() }
+        .sheet(isPresented: $model.showShortcuts) { ShortcutHelpSheet() }
         .sheet(item: $model.presetSheet) { request in PresetSheet(request: request) }
         .sheet(item: $model.cropSource) { source in CropSheet(source: source) }
         .confirmationDialog(removalTitle, isPresented: Binding(
@@ -596,6 +597,11 @@ struct WorkspaceView: View {
             }
             if NSApp.keyWindow?.firstResponder is NSTextView { return event }
             if event.keyCode == 53, model.isFocusView { model.isFocusView = false; return nil }
+            // ?(⇧/)는 자판 배열과 입력 상태에 관계없이 같은 자리의 키로 읽는다.
+            if event.keyCode == 44, event.modifierFlags.intersection([.command, .control, .option, .shift]) == .shift {
+                model.showShortcuts = true
+                return nil
+            }
             // 한글 입력 상태에서도 같은 키로 동작하도록 글자 대신 키 위치로 읽는다.
             let key = ShortcutKey.resolve(characters: event.charactersIgnoringModifiers, keyCode: event.keyCode)
             if event.modifierFlags.contains(.command), key == "a" {
