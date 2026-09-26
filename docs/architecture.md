@@ -38,7 +38,7 @@
 
 ## XMP 사이드카
 
-`XMPSidecar`는 켠 경우에만 원본 옆 `<이름>.xmp`에 `xmp:CreatorTool="Lighthouse"`, `xmp:Rating`(제외는 -1), `xmp:Label`, `dc:subject`, `dc:description`을 쓴다. 파일이 없거나 이 표시가 있는 파일만 쓰고, 내용이 같으면 다시 쓰지 않는다. 표시가 없는 파일(카메라·다른 앱)은 건드리지 않는다. 가상 사본과, 같은 이름의 RAW가 카탈로그에 있는 JPEG·HEIC는 쓰지 않는다. 표시를 바꾸면 0.4초 모았다가 백그라운드에서 쓴다. 원본 파일과 보정값은 쓰지 않는다.
+`XMPSidecar`는 켠 경우에만 원본 옆 `<이름>.xmp`에 `xmp:CreatorTool="Lighthouse"`, `xmp:Rating`(제외는 -1), `xmp:Label`, `dc:subject`, `dc:description`을 쓴다. 파일이 없거나 Lighthouse가 쓴 모양 그대로인 파일(다시 읽은 값으로 만든 문서와 바이트 단위로 같음)만 쓰고, 내용이 같으면 다시 쓰지 않는다. 카메라·다른 앱이 만든 파일과, 이 표시가 남아 있어도 다른 앱이 항목을 더하거나 고쳐 저장한 파일은 건드리지 않는다. 가상 사본과, 같은 이름의 RAW가 카탈로그에 있는 JPEG·HEIC는 쓰지 않는다. 표시를 바꾸면 0.4초 모았다가 백그라운드에서 쓴다. 원본 파일과 보정값은 쓰지 않는다.
 
 ## 다시 내보내기
 

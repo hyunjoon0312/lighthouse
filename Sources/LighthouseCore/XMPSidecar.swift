@@ -19,20 +19,39 @@ public enum XMPSidecar {
         photo.url.deletingPathExtension().appendingPathExtension("xmp")
     }
 
+    /// 사이드카에 적는 값. 이미 있는 사이드카를 다시 읽어 Lighthouse가 쓴 모양인지 확인할 때도 쓴다.
+    struct Marks: Equatable {
+        var rating: Int
+        var label: String?
+        var keywords: [String]
+        var caption: String
+
+        /// 적을 표시가 하나도 없다.
+        var isEmpty: Bool { rating == 0 && label == nil && keywords.isEmpty && caption.isEmpty }
+    }
+
     /// 제외는 Lightroom처럼 별점 -1로 쓴다. 선택 표시는 XMP에 정해진 항목이 없어 쓰지 않는다.
+    static func marks(of photo: PhotoAsset) -> Marks {
+        Marks(rating: photo.flag == .reject ? -1 : photo.rating, label: photo.colorLabel?.xmpName,
+              keywords: photo.keywords, caption: photo.caption)
+    }
+
     public static func document(for photo: PhotoAsset) -> String {
-        let rating = photo.flag == .reject ? -1 : photo.rating
-        var attributes = "    xmp:CreatorTool=\"\(creatorTool)\"\n    xmp:Rating=\"\(rating)\""
-        if let label = photo.colorLabel { attributes += "\n    xmp:Label=\"\(label.xmpName)\"" }
+        document(marks(of: photo))
+    }
+
+    static func document(_ marks: Marks) -> String {
+        var attributes = "    xmp:CreatorTool=\"\(creatorTool)\"\n    xmp:Rating=\"\(marks.rating)\""
+        if let label = marks.label { attributes += "\n    xmp:Label=\"\(escaped(label))\"" }
         var body = ""
-        if !photo.keywords.isEmpty {
+        if !marks.keywords.isEmpty {
             body += "   <dc:subject>\n    <rdf:Bag>\n" +
-                photo.keywords.map { "     <rdf:li>\(escaped($0))</rdf:li>\n" }.joined() +
+                marks.keywords.map { "     <rdf:li>\(escaped($0))</rdf:li>\n" }.joined() +
                 "    </rdf:Bag>\n   </dc:subject>\n"
         }
-        if !photo.caption.isEmpty {
+        if !marks.caption.isEmpty {
             body += "   <dc:description>\n    <rdf:Alt>\n" +
-                "     <rdf:li xml:lang=\"x-default\">\(escaped(photo.caption))</rdf:li>\n" +
+                "     <rdf:li xml:lang=\"x-default\">\(escaped(marks.caption))</rdf:li>\n" +
                 "    </rdf:Alt>\n   </dc:description>\n"
         }
         return """
@@ -67,8 +86,27 @@ public enum XMPSidecar {
         }
     }
 
+    /// Lighthouse가 쓴 모양 그대로일 때만 우리 것이다. 다른 프로그램이 항목(보정값 등)을 더하거나 고쳐 저장한 파일은
+    /// `CreatorTool`이 남아 있어도 덮어쓰면 그 내용이 사라지므로 우리 것으로 보지 않는다.
     static func isOurs(_ data: Data) -> Bool {
-        String(decoding: data, as: UTF8.self).contains("xmp:CreatorTool=\"\(creatorTool)\"")
+        guard let marks = marks(in: data) else { return false }
+        return Data(document(marks).utf8) == data
+    }
+
+    /// 사이드카에서 Lighthouse가 쓰는 항목만 읽는다. `CreatorTool`이 Lighthouse가 아니거나 읽을 수 없으면 nil.
+    static func marks(in data: Data) -> Marks? {
+        guard let xml = try? XMLDocument(data: data),
+              let description = (try? xml.nodes(forXPath: "//*[local-name()='Description']"))?.first as? XMLElement,
+              description.attribute(forName: "xmp:CreatorTool")?.stringValue == creatorTool,
+              let rating = description.attribute(forName: "xmp:Rating")?.stringValue.flatMap({ Int($0) }) else {
+            return nil
+        }
+        func texts(_ path: String) -> [String] {
+            ((try? description.nodes(forXPath: path)) ?? []).compactMap(\.stringValue)
+        }
+        return Marks(rating: rating, label: description.attribute(forName: "xmp:Label")?.stringValue,
+                     keywords: texts("./*[local-name()='subject']//*[local-name()='li']"),
+                     caption: texts("./*[local-name()='description']//*[local-name()='li']").first ?? "")
     }
 
     private static func escaped(_ text: String) -> String {
