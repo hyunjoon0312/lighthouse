@@ -56,6 +56,16 @@ struct InspectorView: View {
                         .accessibilityLabel("선택한 사진에 보정 일괄 적용")
                 }
                 Divider()
+                // 초기화·복사는 세 패널 모두에 걸치므로 패널 탭 위에 둔다.
+                HStack {
+                    Button("보정 초기화") { model.updateEdits(.neutral) }.disabled(!edits.isModified)
+                        .help("크롭·부분 보정·복구·LUT까지 모두 처음 상태로 돌립니다. ⌘Z로 되돌립니다")
+                    Spacer()
+                    Button("복사") { model.copyEdits() }
+                    Button("다음에 붙여넣기") { model.pasteToNext() }
+                        .disabled(model.clipboard == nil || model.visiblePhotos.last?.id == photo.id)
+                        .help("전체 보정과 LUT만 붙여넣습니다. 크롭·부분 보정·복구는 사진마다 달라 제외합니다.")
+                }.buttonStyle(.bordered)
                 HStack(spacing: 0) {
                     panelButton("전체 보정", selected: model.adjustmentPanel == .global) { model.leaveLocalPanel() }
                     panelButton("부분 보정", selected: model.adjustmentPanel == .local) { model.enterLocalPanel() }
@@ -114,11 +124,11 @@ struct InspectorView: View {
                     .accessibilityLabel("자동 보정")
             }
             adjustment("노출", \.exposure, range: -4...4, format: "%.2f EV")
-            adjustment("대비", \.contrast, range: 0.5...1.5, format: "%.2f")
-            // 하이라이트는 1(그대로)에서 낮추기만, 섀도는 0에서 올리기만 한다. 값은 바꾼 정도(-100…0, 0…+100)로 보인다.
-            adjustment("하이라이트", \.highlights, range: 0...1) { String(format: "%.0f", ($0 - 1) * 100) }
-            adjustment("섀도", \.shadows, range: 0...1) { $0 == 0 ? "0" : String(format: "%+.0f", $0 * 100) }
-            adjustment("명료도", \.clarity, range: -1...1, format: "%+.2f")
+            adjustment("대비", \.contrast, range: 0.5...1.5, scale: 200)
+            // 하이라이트는 1(그대로)에서 낮추기만, 섀도는 0에서 올리기만 한다.
+            adjustment("하이라이트", \.highlights, range: 0...1, scale: 100)
+            adjustment("섀도", \.shadows, range: 0...1, scale: 100)
+            adjustment("명료도", \.clarity, range: -1...1, scale: 100)
             Divider()
             HStack {
                 section("색상")
@@ -131,14 +141,14 @@ struct InspectorView: View {
                     .accessibilityLabel("흰색 기준 찍기")
             }
             adjustment("색온도 이동", \.temperatureShift, range: -2500...2500, format: "%.0f K")
-            adjustment("틴트", \.tintShift, range: -100...100, format: "%.0f")
-            adjustment("생동감", \.vibrance, range: -1...1, format: "%+.2f")
-            adjustment("채도", \.saturation, range: 0...2, format: "%.2f")
+            adjustment("틴트", \.tintShift, range: -100...100, scale: 1)
+            adjustment("생동감", \.vibrance, range: -1...1, scale: 100)
+            adjustment("채도", \.saturation, range: 0...2, scale: 100)
             AdvancedColorControls(edits: edits)
             Divider()
             section("디테일 및 구도")
-            adjustment("선명도", \.sharpness, range: 0...2, format: "%.2f")
-            adjustment("비네팅", \.vignette, range: -1...1, format: "%+.2f")
+            adjustment("선명도", \.sharpness, range: 0...2, scale: 50)
+            adjustment("비네팅", \.vignette, range: -1...1, scale: 100)
             HStack {
                 Button { model.rotate(clockwise: false) } label: { Image(systemName: "rotate.left") }
                     .help("왼쪽으로 90° 회전 (⌘[)")
@@ -155,14 +165,6 @@ struct InspectorView: View {
                 Text(String(format: "크롭 적용 · 수평 %+.1f°", edits.straightenDegrees))
                     .font(.caption2).foregroundStyle(.secondary)
             }
-            HStack {
-                Button("보정 초기화") { model.updateEdits(.neutral) }.disabled(!edits.isModified)
-                Spacer()
-                Button("복사") { model.copyEdits() }
-                Button("다음에 붙여넣기") { model.pasteToNext() }
-                    .disabled(model.clipboard == nil || model.visiblePhotos.last?.id == photo.id)
-                    .help("전체 보정과 LUT만 붙여넣습니다. 크롭·부분 보정·복구는 사진마다 달라 제외합니다.")
-            }.buttonStyle(.bordered)
             if photo.isRAW { rawDevelopControls }
             Divider()
             presetControls
@@ -521,6 +523,16 @@ struct InspectorView: View {
     private func adjustment(_ title: String, _ keyPath: WritableKeyPath<EditSettings, Double>,
                             range: ClosedRange<Double>, format: String) -> some View {
         adjustment(title, keyPath, range: range) { String(format: format, $0) }
+    }
+
+    /// 값을 보정하지 않은 값과의 차이에 `scale`을 곱한 정수(0, +35, -20)로 보인다.
+    private func adjustment(_ title: String, _ keyPath: WritableKeyPath<EditSettings, Double>,
+                            range: ClosedRange<Double>, scale: Double) -> some View {
+        let neutral = EditSettings.neutral[keyPath: keyPath]
+        return adjustment(title, keyPath, range: range) { value in
+            let amount = ((value - neutral) * scale).rounded()
+            return amount == 0 ? "0" : String(format: "%+.0f", amount)
+        }
     }
 
     private func adjustment(_ title: String, _ keyPath: WritableKeyPath<EditSettings, Double>,

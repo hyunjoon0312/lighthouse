@@ -79,7 +79,13 @@ final class UISnapshotTests: XCTestCase {
         model.setMode(.edit)
         try await render(WorkspaceView(), model, wide, "edit", settle: 3)
         try await render(WorkspaceView(), model, narrow, "edit-narrow")
-        try await render(InspectorView(photo: lead), model, CGSize(width: 300, height: 3400), "inspector")
+        // 값 표시와 나눠 보기를 보려고 몇 가지를 바꿔 둔다.
+        var edited = lead.edits
+        edited.contrast = 1.1; edited.highlights = 0.63; edited.shadows = 0.35; edited.clarity = 0.2
+        edited.tintShift = -7.5; edited.vibrance = -0.15; edited.saturation = 1.2
+        edited.sharpness = 0.6; edited.vignette = -0.3
+        model.updateEdits(edited)
+        try await render(InspectorView(photo: model.selection ?? lead), model, CGSize(width: 300, height: 3400), "inspector")
         model.toggleSplit()
         try await render(WorkspaceView(), model, wide, "split", settle: 3)
         model.toggleSplit()
