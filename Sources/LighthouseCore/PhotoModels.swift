@@ -230,10 +230,12 @@ public struct PhotoMetadata: Codable, Equatable, Sendable {
     public var aperture: Double?
     public var shutter: Double?
     public var capturedAt: Date?
+    /// 실제 초점거리(mm). 이 값이 생기기 전에 가져온 사진은 다음 실행 때 원본에서 다시 읽어 채운다.
+    public var focalLength: Double?
 
     public init(width: Int = 0, height: Int = 0, camera: String? = nil, lens: String? = nil,
                 iso: Int? = nil, aperture: Double? = nil, shutter: Double? = nil,
-                capturedAt: Date? = nil) {
+                capturedAt: Date? = nil, focalLength: Double? = nil) {
         self.width = width
         self.height = height
         self.camera = camera
@@ -242,6 +244,7 @@ public struct PhotoMetadata: Codable, Equatable, Sendable {
         self.aperture = aperture
         self.shutter = shutter
         self.capturedAt = capturedAt
+        self.focalLength = focalLength
     }
 }
 

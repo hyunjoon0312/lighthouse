@@ -10,7 +10,7 @@ enum WorkspaceMode: String, CaseIterable {
 }
 
 enum LibraryFilter: Hashable {
-    case all, picks, rejects, edited, bursts, missing, folder(String), collection(UUID)
+    case all, picks, rejects, edited, bursts, missing, folder(String), collection(UUID), smart(UUID)
 }
 
 /// 사진 목록 정렬. 카탈로그는 촬영 시각 순으로 보관하고 보이는 목록만 다시 정렬한다.
@@ -127,6 +127,8 @@ struct LibraryCounts {
     var missing = 0
     /// 내 폴더별로 목록에 보이는 사진 수.
     var folders: [UUID: Int] = [:]
+    /// 스마트 폴더별로 조건에 맞는 사진 수.
+    var smart: [UUID: Int] = [:]
 }
 
 final class CancellationFlag: @unchecked Sendable {
@@ -154,6 +156,10 @@ final class LibraryModel: ObservableObject {
     @Published var filter: LibraryFilter = .all { didSet { visibleCache = nil } }
     @Published var search = "" { didSet { visibleCache = nil } }
     @Published var minimumRating = 0 { didSet { visibleCache = nil } }
+    /// 조건 창에서 거는 촬영 정보 조건. 어떤 목록을 보든 그 위에 더해진다. 저장하지 않는다.
+    @Published var criteria = PhotoCriteria() { didSet { visibleCache = nil } }
+    @Published var smartFolders: [SmartFolder] = [] { didSet { visibleCache = nil; countsCache = nil } }
+    @Published var smartFolderLoadError: String?
     @Published var mode: WorkspaceMode = .grid
     @Published var isOriginal = false
     @Published var actualSize = false
@@ -265,6 +271,7 @@ final class LibraryModel: ObservableObject {
     let catalog = CatalogStore(url: CatalogStore.defaultURL)
     let folderStore = PhotoFolderStore(url: PhotoFolderStore.defaultURL)
     let presetStore = EditPresetStore(url: EditPresetStore.defaultURL)
+    let smartFolderStore = SmartFolderStore(url: SmartFolderStore.defaultURL)
     let backup = CatalogBackup(directory: CatalogBackup.defaultDirectory)
     var backupFailureReported = false
     let previewQueue = DispatchQueue(label: "com.rian.lighthouse.preview", qos: .userInitiated)
@@ -424,6 +431,10 @@ final class LibraryModel: ObservableObject {
             computed.folders[folder.id] = members.filter { id in
                 masks[id] != nil && !(companions[id]?.contains(where: members.contains) ?? false)
             }.count
+        }
+        for folder in smartFolders {
+            let criteria = folder.criteria
+            computed.smart[folder.id] = collapsedFilter { criteria.matches($0) }.count
         }
         countsCache = computed
         return computed
@@ -608,9 +619,10 @@ final class LibraryModel: ObservableObject {
         if case .collection(let id) = filter {
             members = photoFolders.first(where: { $0.id == id })?.photoIDs ?? []
         }
-        let search = search, filter = filter, minimumRating = minimumRating
+        let search = search, filter = filter, minimumRating = minimumRating, criteria = criteria
         let positions = filter == .bursts ? burstIndex.positions : [:]
         let missing = filter == .missing ? missingPaths : []
+        let smartCriteria = smartFolderCriteria
         var computed = collapsedFilter { photo in
             let matchesFilter: Bool
             switch filter {
@@ -622,8 +634,9 @@ final class LibraryModel: ObservableObject {
             case .missing: matchesFilter = missing.contains(photo.path)
             case .folder(let path): matchesFilter = (photo.path as NSString).deletingLastPathComponent == path
             case .collection: matchesFilter = members?.contains(photo.id) ?? false
+            case .smart: matchesFilter = smartCriteria?.matches(photo) ?? false
             }
-            return matchesFilter && photo.rating >= minimumRating &&
+            return matchesFilter && photo.rating >= minimumRating && criteria.matches(photo) &&
                 (search.isEmpty || photo.displayName.localizedCaseInsensitiveContains(search) ||
                  photo.keywords.contains { $0.localizedCaseInsensitiveContains(search) } ||
                  photo.caption.localizedCaseInsensitiveContains(search))
@@ -649,10 +662,11 @@ final class LibraryModel: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
-        batchQueue.async { [catalog, folderStore, presetStore] in
+        batchQueue.async { [catalog, folderStore, presetStore, smartFolderStore] in
             let result = Result { try catalog.load() }
             let folders = Result { try folderStore.load() }
             let presets = Result { try presetStore.load() }
+            let smartFolders = Result { try smartFolderStore.load() }
             DispatchQueue.main.async {
                 switch result {
                 case .success(let photos):
@@ -671,6 +685,12 @@ final class LibraryModel: ObservableObject {
                         AppLog.catalog.error("presets.json load failed: \(error.localizedDescription, privacy: .private)")
                         self.presetLoadError = error.localizedDescription
                     }
+                    switch smartFolders {
+                    case .success(let loaded): self.smartFolders = loaded
+                    case .failure(let error):
+                        AppLog.catalog.error("smart-folders.json load failed: \(error.localizedDescription, privacy: .private)")
+                        self.smartFolderLoadError = error.localizedDescription
+                    }
                     if let first = photos.first {
                         self.photoSelection.select(first.id, in: photos.map(\.id))
                     }
@@ -681,6 +701,7 @@ final class LibraryModel: ObservableObject {
                     self.thumbnailQueue.async { [thumbnailStore = self.thumbnailStore] in thumbnailStore.prune(keeping: kept) }
                     self.observeFileAvailability()
                     self.refreshMissingOriginals()
+                    self.backfillFocalLengths()
                     self.refreshLUTLibrary()
                     self.requestRender()
                     let arguments = ProcessInfo.processInfo.arguments

@@ -20,6 +20,9 @@ struct WorkspaceView: View {
     @State private var gridWidth: CGFloat = 0
     @State private var fullScreen = FocusFullScreen()
     @State private var fileDropTargeted = false
+    @State private var showsCriteria = false
+    @State private var smartRenameTarget: SmartFolder?
+    @State private var smartRenameText = ""
     @State private var dropFolderID: UUID?
 
     var body: some View {
@@ -67,6 +70,19 @@ struct WorkspaceView: View {
             }
         }
         .sheet(item: $model.folderSheetRequest) { request in PhotoFolderSheet(request: request) }
+        .alert("스마트 폴더 이름", isPresented: Binding(
+            get: { smartRenameTarget != nil },
+            set: { if !$0 { smartRenameTarget = nil } }
+        )) {
+            TextField("이름", text: $smartRenameText)
+            Button("변경") {
+                if let target = smartRenameTarget, let error = model.renameSmartFolder(target.id, to: smartRenameText) {
+                    model.operationMessage = error
+                }
+                smartRenameTarget = nil
+            }
+            Button("취소", role: .cancel) { smartRenameTarget = nil }
+        }
         .alert("폴더 삭제", isPresented: Binding(
             get: { folderToDelete != nil },
             set: { if !$0 { folderToDelete = nil } }
@@ -87,6 +103,7 @@ struct WorkspaceView: View {
         .onChange(of: model.filter) { _, _ in model.ensureSelectionVisible() }
         .onChange(of: model.search) { _, _ in model.ensureSelectionVisible() }
         .onChange(of: model.minimumRating) { _, _ in model.ensureSelectionVisible() }
+        .onChange(of: model.criteria) { _, _ in model.ensureSelectionVisible() }
         .onChange(of: model.hasModalPresentation) { _, presented in
             if presented { model.cancelDraft(); model.cancelRetouchDraft() }
         }
@@ -164,6 +181,31 @@ struct WorkspaceView: View {
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
+                    sectionLabel("스마트 폴더").padding(.top, 24)
+                    if let error = model.smartFolderLoadError {
+                        Text("스마트 폴더 오류: \(error)").font(.caption2).foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 16)
+                    } else if model.smartFolders.isEmpty {
+                        Text("위쪽 조건 단추에서 조건을 정해 저장하면 생깁니다").font(.caption).foregroundStyle(Palette.muted)
+                            .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 20)
+                    }
+                    ForEach(model.smartFolders) { folder in
+                        HStack(spacing: 0) {
+                            sidebarRow(folder.name, icon: "folder.badge.gearshape",
+                                       count: model.counts.smart[folder.id] ?? 0,
+                                       selected: model.filter == .smart(folder.id)) {
+                                model.filter = .smart(folder.id)
+                            }
+                            .help(folder.criteria.summary().joined(separator: " · "))
+                            Menu {
+                                Button("이름 변경…") { smartRenameText = folder.name; smartRenameTarget = folder }
+                                Button("삭제", role: .destructive) { model.deleteSmartFolder(folder.id) }
+                            } label: { Image(systemName: "ellipsis").frame(width: 22, height: 24) }
+                                .menuStyle(.borderlessButton)
+                                .accessibilityLabel("\(folder.name) 관리")
+                                .padding(.trailing, 8)
+                        }
+                    }
                     HStack {
                         sectionLabel("내 폴더")
                         Spacer()
@@ -171,7 +213,7 @@ struct WorkspaceView: View {
                             .buttonStyle(.plain).accessibilityLabel("새 폴더 만들기")
                             .disabled(!model.foldersLoaded)
                             .padding(.trailing, 18)
-                    }.padding(.top, 24)
+                    }.padding(.top, 20)
                     if let error = model.folderLoadError {
                         Text("폴더 오류: \(error)").font(.caption2).foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 16)
@@ -253,7 +295,8 @@ struct WorkspaceView: View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("사진 라이브러리").font(.system(size: 18, weight: .semibold))
-                Text("\(model.visiblePhotos.count)장 표시").font(.caption).foregroundStyle(Palette.muted)
+                Text(toolbarSubtitle).font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
+                    .help(toolbarSubtitle)
             }
             Spacer(minLength: 20)
             HStack(spacing: 5) {
@@ -276,6 +319,16 @@ struct WorkspaceView: View {
                 ForEach(1...5, id: \.self) { Text("\($0)★ 이상").tag($0) }
             }
             .labelsHidden().frame(width: 112)
+            Button { showsCriteria.toggle() } label: {
+                Image(systemName: model.criteria.isEmpty ? "line.3.horizontal.decrease.circle"
+                                                         : "line.3.horizontal.decrease.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(model.criteria.isEmpty ? Color.white.opacity(0.82) : Palette.accent)
+            }
+            .buttonStyle(.plain)
+            .help("카메라·렌즈·초점거리·ISO·촬영일로 거르고 스마트 폴더로 저장")
+            .accessibilityLabel(model.criteria.isEmpty ? "조건으로 거르기" : "조건으로 거르기, 조건 걸림")
+            .popover(isPresented: $showsCriteria, arrowEdge: .bottom) { CriteriaPopover().environmentObject(model) }
             Picker("정렬", selection: $model.sortOrder) {
                 ForEach(PhotoSortOrder.allCases) { Text($0.title).tag($0) }
             }
@@ -286,6 +339,14 @@ struct WorkspaceView: View {
                 .disabled(model.selection == nil || model.isExporting || !model.catalogLoaded)
         }
         .padding(.horizontal, 20).frame(height: 67).background(Palette.panel)
+    }
+
+    /// 보이는 장수와, 걸린 조건(스마트 폴더·조건 창)의 요약.
+    private var toolbarSubtitle: String {
+        var parts = ["\(model.visiblePhotos.count)장 표시"]
+        if let smart = model.smartFolderCriteria { parts += smart.summary() }
+        parts += model.criteria.summary()
+        return parts.joined(separator: " · ")
     }
 
     private var removalTitle: String {

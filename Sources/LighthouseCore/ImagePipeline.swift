@@ -117,7 +117,8 @@ public final class ImagePipeline: @unchecked Sendable {
                 guard !digits.isEmpty, digits.count <= 9, digits.allSatisfy(\.isASCII),
                       digits.allSatisfy(\.isNumber), let fraction = Double("0." + digits) else { return date }
                 return date.addingTimeInterval(fraction)
-            }
+            },
+            focalLength: (exif[kCGImagePropertyExifFocalLength as String] as? NSNumber)?.doubleValue.nilIfNotPositive
         )
     }
 
@@ -788,4 +789,8 @@ public final class ImagePipeline: @unchecked Sendable {
 
 private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
+private extension Double {
+    var nilIfNotPositive: Double? { isFinite && self > 0 ? self : nil }
 }
