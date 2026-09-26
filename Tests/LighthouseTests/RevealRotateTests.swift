@@ -28,6 +28,10 @@ final class RevealRotateTests: XCTestCase {
         model.revealOriginals()
         XCTAssertEqual(revealed.count, before, "원본이 없으면 Finder를 열지 않는다")
         XCTAssertTrue(model.operationMessage?.contains("찾을 수 없습니다") == true)
+        model.presentCrop()
+        XCTAssertNil(model.cropSource, "원본이 없으면 크롭 창을 열지 않는다")
+        model.beginWhiteBalancePick()
+        XCTAssertFalse(model.isPickingWhiteBalance, "원본이 없으면 회색 찍기를 시작하지 않는다")
 
         model.select(photos[1])
         model.rotate(clockwise: false)

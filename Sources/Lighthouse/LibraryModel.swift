@@ -1080,7 +1080,11 @@ final class LibraryModel: ObservableObject {
 
     /// 흰색 기준 찍기를 시작한다. 사진 보기(화면 맞춤, 보정 보기)에서 사진을 누르면 된다.
     func beginWhiteBalancePick() {
-        guard catalogLoaded, loadError == nil, selection != nil, !isAutoAdjusting else { return }
+        guard catalogLoaded, loadError == nil, let photo = selection, !isAutoAdjusting else { return }
+        guard !isMissing(photo) else {
+            operationMessage = "원본 파일을 찾을 수 없어 흰색 기준을 맞출 수 없습니다."
+            return
+        }
         if mode != .edit { setMode(.edit) }
         if actualSize { actualSize = false }
         if isOriginal { isOriginal = false }
@@ -1150,6 +1154,10 @@ final class LibraryModel: ObservableObject {
 
     func presentCrop() {
         guard cropSource == nil, let source = selection else { return }
+        guard !isMissing(source) else {
+            operationMessage = "원본 파일을 찾을 수 없어 크롭할 수 없습니다. 위치 다시 찾기로 새 위치를 알려 주세요."
+            return
+        }
         cancelDraft()
         cancelRetouchDraft()
         isLocalEditing = false

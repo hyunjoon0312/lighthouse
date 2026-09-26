@@ -148,6 +148,7 @@ struct InspectorView: View {
                     .accessibilityLabel("시계 방향으로 90도 회전")
                 Spacer()
                 Button("자유 크롭…") { model.presentCrop() }
+                    .disabled(model.isMissing(photo))
                     .accessibilityLabel("자유 크롭 및 수평 보정")
             }.buttonStyle(.bordered)
             if edits.cropRect != nil || edits.cropAspect != nil || edits.straightenDegrees != 0 {
