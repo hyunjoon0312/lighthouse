@@ -179,7 +179,7 @@ struct WorkspaceView: View {
             .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 30)
             sectionLabel("라이브러리")
             sidebarRow("전체 사진", icon: "square.grid.2x2", count: model.counts.total, selected: model.filter == .all) { model.filter = .all }
-            sidebarRow("선택됨", icon: "checkmark.circle", count: model.counts.picks, selected: model.filter == .picks) { model.filter = .picks }
+            sidebarRow("선택됨", icon: "flag", count: model.counts.picks, selected: model.filter == .picks) { model.filter = .picks }
             sidebarRow("제외됨", icon: "xmark.circle", count: model.counts.rejects, selected: model.filter == .rejects) { model.filter = .rejects }
             sidebarRow("보정됨", icon: "slider.horizontal.3", count: model.counts.edited, selected: model.filter == .edited) { model.filter = .edited }
             sidebarRow("연속 촬영", icon: "square.stack.3d.down.right", count: model.counts.bursts, selected: model.filter == .bursts) { model.filter = .bursts }
@@ -964,7 +964,7 @@ private struct PhotoTile: View {
                     // 오른쪽 위는 다중 선택 단추 자리라, 선택·제외 표시는 별점 줄에 둔다.
                     if photo.flag != .none {
                         Label(photo.flag == .pick ? "선택" : "제외",
-                              systemImage: photo.flag == .pick ? "checkmark.circle.fill" : "xmark.circle.fill")
+                              systemImage: photo.flag == .pick ? "flag.fill" : "xmark.circle.fill")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(photo.flag == .pick ? Palette.accent : .red)
                     }
@@ -1043,8 +1043,19 @@ private struct FilmstripTile: View {
                 } else {
                     Rectangle().fill(.white.opacity(0.06)).overlay(Image(systemName: "photo").foregroundStyle(Palette.muted))
                 }
-                if photo.flag == .pick { Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.accent).padding(5) }
-                if photo.flag == .reject { Image(systemName: "xmark.circle.fill").foregroundStyle(.red).padding(5) }
+                // 오른쪽 위는 다중 선택 단추, 왼쪽 아래는 "기준" 자리라 선택·제외 표시는 왼쪽 위에 둔다.
+                if photo.flag != .none {
+                    VStack {
+                        HStack {
+                            Image(systemName: photo.flag == .pick ? "flag.fill" : "xmark.circle.fill")
+                                .font(.caption).foregroundStyle(photo.flag == .pick ? Palette.accent : .red)
+                                .padding(4).background(.black.opacity(0.6), in: Circle())
+                            Spacer()
+                        }
+                        Spacer()
+                    }
+                    .padding(4)
+                }
                 if active { Text("기준").font(.system(size: 9, weight: .bold)).padding(3).background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 3)).padding(4) }
                 if let label = photo.colorLabel {
                     VStack { Spacer(); Rectangle().fill(label.color).frame(height: 4) }
@@ -1196,7 +1207,7 @@ private struct SurveyCell: View {
                 Text(photo.displayName).lineLimit(1)
                 Spacer()
                 if photo.flag != .none {
-                    Image(systemName: photo.flag == .pick ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    Image(systemName: photo.flag == .pick ? "flag.fill" : "xmark.circle.fill")
                         .foregroundStyle(photo.flag == .pick ? Palette.accent : .red)
                 }
                 if photo.rating > 0 { Text(String(repeating: "★", count: photo.rating)).foregroundStyle(Palette.accent) }

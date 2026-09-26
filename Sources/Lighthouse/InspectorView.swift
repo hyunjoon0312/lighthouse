@@ -43,7 +43,7 @@ struct InspectorView: View {
                 ratingRow
                 ColorLabelRow(current: photo.colorLabel) { model.setColorLabel($0) }
                 HStack(spacing: 8) {
-                    flagButton("선택", icon: "checkmark", flag: .pick)
+                    flagButton("선택", icon: "flag.fill", flag: .pick)
                     flagButton("제외", icon: "xmark", flag: .reject)
                     Button("해제") { model.setFlag(.none) }.accessibilityLabel("선택과 제외 표시 해제").disabled(photo.flag == .none)
                 }.buttonStyle(.bordered)
