@@ -102,6 +102,11 @@ struct LighthouseApp: App {
                     .disabled(library.selection == nil || !library.catalogLoaded || library.hasModalPresentation)
                 Button("위치 다시 찾기…") { if let photo = library.selection { library.presentRelocate(for: photo) } }
                     .disabled(library.selection.map { !library.isMissing($0) } ?? true || library.hasModalPresentation)
+                Divider()
+                Toggle("별점·키워드를 XMP 사이드카로 쓰기", isOn: $library.writesXMPSidecars)
+                    .disabled(!library.catalogLoaded)
+                Button("모든 사진의 XMP 사이드카 다시 쓰기") { library.writeAllSidecars() }
+                    .disabled(!library.writesXMPSidecars || !library.catalogLoaded)
             }
             CommandGroup(replacing: .undoRedo) {
                 Button("실행 취소") { library.undo() }

@@ -61,6 +61,7 @@ extension LibraryModel {
 
     func applyMarks(_ marks: PhotoMarks, to id: UUID) {
         updatePhoto(id) { $0.marks = marks }
+        scheduleSidecarWrite(id)
     }
 
     // MARK: 키워드·설명

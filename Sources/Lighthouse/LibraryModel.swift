@@ -259,6 +259,13 @@ final class LibraryModel: ObservableObject {
     @Published var autoAdvance = UserDefaults.standard.bool(forKey: "autoAdvanceAfterMark") {
         didSet { UserDefaults.standard.set(autoAdvance, forKey: "autoAdvanceAfterMark") }
     }
+    /// 별점·라벨·키워드·설명을 원본 옆 XMP 사이드카로 쓴다. 켜면 지금 사진 전체를 한 번 쓴다.
+    @Published var writesXMPSidecars = UserDefaults.standard.bool(forKey: "writesXMPSidecars") {
+        didSet {
+            UserDefaults.standard.set(writesXMPSidecars, forKey: "writesXMPSidecars")
+            if writesXMPSidecars && !oldValue { writeAllSidecars() }
+        }
+    }
     let canvas = CanvasStrokeState()
     var gridColumnCount = 1
 
@@ -302,6 +309,9 @@ final class LibraryModel: ObservableObject {
     let splitQueue = DispatchQueue(label: "com.rian.lighthouse.split", qos: .userInitiated)
     let surveyQueue = DispatchQueue(label: "com.rian.lighthouse.survey", qos: .userInitiated)
     let autoAdjustQueue = DispatchQueue(label: "com.rian.lighthouse.auto", qos: .userInitiated)
+    let sidecarQueue = DispatchQueue(label: "com.rian.lighthouse.sidecar", qos: .utility)
+    var pendingSidecarIDs = Set<UUID>()
+    var sidecarDelay: DispatchWorkItem?
     var saveDelay: DispatchWorkItem?
     var renderDelay: DispatchWorkItem?
     var generation = 0
