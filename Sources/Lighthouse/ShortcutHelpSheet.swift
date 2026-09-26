@@ -41,6 +41,8 @@ enum ShortcutGuide {
         Section(title: "보정·내보내기", entries: [
             Entry(keys: "⌘Z / ⇧⌘Z", action: "실행 취소 / 다시 실행 (보정·별점·표시)"),
             Entry(keys: "⌘U", action: "자동 보정 (노출·색온도·틴트·하이라이트·섀도)"),
+            Entry(keys: "W", action: "회색 찍기 (누른 곳을 흰색 기준으로 색온도·틴트 맞추기, Esc 취소)"),
+            Entry(keys: "R", action: "자유 크롭·수평"),
             Entry(keys: "⇧⌘C / ⇧⌘V", action: "보정 복사 / 선택한 사진에 전체 보정·LUT 붙여넣기(한 번에 실행 취소)"),
             Entry(keys: "⌘[ / ⌘]", action: "왼쪽 / 오른쪽으로 90° 회전"),
             Entry(keys: "⌘'", action: "가상 사본 만들기"),

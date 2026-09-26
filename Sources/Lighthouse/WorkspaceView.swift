@@ -866,6 +866,8 @@ struct WorkspaceView: View {
                 case "j": model.showsClipping.toggle(); return nil
                 case "f": model.toggleFocusView(); return nil
                 case "y": model.toggleSplit(); return nil
+                case "w": model.beginWhiteBalancePick(); return nil
+                case "r": model.presentCrop(); return nil
                 default: break
                 }
                 // Delete: 내 폴더에서는 그 폴더에서만 빼고, 그 밖에서는 카탈로그에서 뺄지 묻는다.

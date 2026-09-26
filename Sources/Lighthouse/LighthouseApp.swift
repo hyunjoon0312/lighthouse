@@ -92,6 +92,10 @@ struct LighthouseApp: App {
                     .keyboardShortcut("u", modifiers: .command)
                     .disabled(library.selection == nil || library.isAutoAdjusting || library.hasModalPresentation)
                 Divider()
+                Button("회색 찍기 (W)") { library.beginWhiteBalancePick() }
+                    .disabled(library.selection == nil || library.isAutoAdjusting || library.hasModalPresentation)
+                Button("자유 크롭… (R)") { library.presentCrop() }
+                    .disabled(library.selection == nil || library.hasModalPresentation)
                 Button("왼쪽으로 회전") { library.rotate(clockwise: false) }
                     .keyboardShortcut("[", modifiers: .command)
                     .disabled(library.selection == nil || library.hasModalPresentation)
