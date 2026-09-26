@@ -36,6 +36,8 @@ struct LighthouseApp: App {
                 Button("내보내기…") { library.showExport = true }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
                     .disabled(library.selection == nil || library.isExporting || library.hasModalPresentation)
+                Button("바뀐 사진 다시 내보내기…") { library.showExport = true }
+                    .disabled(library.selection == nil || library.isExporting || library.hasModalPresentation)
                 Divider()
                 Button("카탈로그 보관본 보기") { library.revealBackups() }
             }

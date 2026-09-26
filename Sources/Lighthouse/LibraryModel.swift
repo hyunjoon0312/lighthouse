@@ -323,6 +323,8 @@ final class LibraryModel: ObservableObject {
     var moveDirection = 1
     private var pendingCollapse: DispatchWorkItem?
     var exportCancellation: CancellationFlag?
+    /// 다시 내보낼 때 이전 파일을 휴지통으로 옮긴다. 테스트는 임시 폴더로 옮기도록 바꾼다.
+    var moveToTrash: @Sendable (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
     var importCancellation: CancellationFlag?
     private(set) var visibleCache: [PhotoAsset]?
     private(set) var indexCache: [UUID: Int]?

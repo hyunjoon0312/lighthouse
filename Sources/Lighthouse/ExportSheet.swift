@@ -14,6 +14,9 @@ struct ExportSheet: View {
     @State private var actualSize = false
     @State private var savingPreset = false
     @State private var newPresetName = ""
+    /// 마지막으로 내보낸 뒤 바뀐 사진. 창을 열 때와 다시 내보낸 뒤에 센다.
+    @State private var changed: [PhotoAsset] = []
+    @AppStorage("reexportTrashesPrevious") private var trashPrevious = false
 
     private var targets: [PhotoAsset] { model.exportTargets(for: scope) }
     private var representative: PhotoAsset? { targets.first }
@@ -39,8 +42,10 @@ struct ExportSheet: View {
         .onAppear {
             model.exportReport = nil
             scope = model.selectedPhotos.count >= 2 ? .selected : .current
+            changed = model.changedSinceExport
             requestPreview(debounce: false)
         }
+        .onChange(of: model.isExporting) { _, exporting in if !exporting { changed = model.changedSinceExport } }
         .onDisappear { previewModel.cancel() }
         .onChange(of: scope) { _, _ in requestPreview() }
         .onChange(of: renderOptions) { _, _ in requestPreview() }
@@ -111,8 +116,27 @@ struct ExportSheet: View {
         }
     }
 
+    /// 보정이 바뀐 사진을 그때의 설정·폴더로 다시 내보낸다. 위 설정과 폴더는 쓰지 않는다.
+    @ViewBuilder private var reexportBox: some View {
+        if !changed.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("보정이 바뀐 사진 \(changed.count)장").font(.subheadline.weight(.semibold))
+                Text("마지막으로 내보낸 뒤 보정·키워드·설명이 바뀐 사진을 그때의 설정과 폴더, 같은 이름으로 다시 내보냅니다.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Toggle("이전 파일은 휴지통으로 (앱이 쓴 그대로일 때만)", isOn: $trashPrevious)
+                    .font(.caption)
+                    .help("끄면 이전 파일을 두고 이름 뒤에 번호를 붙입니다. 켜도 그 뒤 편집한 파일은 옮기지 않습니다.")
+                Button("\(changed.count)장 다시 내보내기") { model.reexport(changed, trashPrevious: trashPrevious) }
+                    .disabled(model.isExporting)
+            }
+            .padding(10)
+            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
     private var settings: some View {
         VStack(alignment: .leading, spacing: 12) {
+            reexportBox
             Picker("대상", selection: $scope) {
                 Text("현재 사진").tag(ExportScope.current)
                 Text("선택한 사진 (\(model.selectedPhotos.count)장)").tag(ExportScope.selected)

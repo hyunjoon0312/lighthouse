@@ -76,6 +76,11 @@ struct InspectorView: View {
                 metadataRow("조리개", photo.metadata.aperture.map { String(format: "f/%.1f", $0) })
                 metadataRow("셔터", photo.metadata.shutter.map(shutterText))
                 metadataRow("촬영", photo.metadata.capturedAt?.formatted(date: .abbreviated, time: .shortened))
+                if let record = photo.lastExport {
+                    metadataRow("내보냄", record.exportedAt.formatted(date: .abbreviated, time: .shortened) +
+                                (record.isChanged(photo) ? " · 그 뒤 보정 바뀜" : ""))
+                        .help(record.path)
+                }
                 Text(photo.path).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
                 Text("원본 보존 · 보정 자동 저장").font(.caption2.weight(.medium)).foregroundStyle(.orange)
             }
