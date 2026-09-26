@@ -62,7 +62,8 @@ struct BatchEditSheet: View {
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 150)
+                // 창이 내용 크기에 맞춰지면 스크롤 영역이 0으로 줄어 목록이 보이지 않으므로 줄 수만큼 높이를 준다.
+                .frame(height: min(150, CGFloat(snapshot.targets.count) * 20))
                 Text("원본 파일, 별점과 선택·제외 표시는 바뀌지 않습니다.")
                     .font(.caption2).foregroundStyle(.secondary)
                 HStack {
