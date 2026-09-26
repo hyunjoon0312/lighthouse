@@ -24,7 +24,7 @@ enum ShortcutGuide {
         Section(title: "이동·보기", entries: [
             Entry(keys: "← / →", action: "이전 / 다음 사진"),
             Entry(keys: "↑ / ↓", action: "그리드에서 위 / 아래 줄"),
-            Entry(keys: "G / E / C", action: "그리드 / 사진 / 비교"),
+            Entry(keys: "G / E / C / N", action: "그리드 / 사진 / 비교 / 여러 장 보기(선택한 사진을 한 화면에)"),
             Entry(keys: "\\", action: "원본 보기 전환"),
             Entry(keys: "Y", action: "보정 전·후 나눠 보기 (선을 끌어 옮기기)"),
             Entry(keys: "J", action: "하이라이트·섀도 잘림 표시"),

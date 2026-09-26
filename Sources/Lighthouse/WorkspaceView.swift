@@ -302,7 +302,7 @@ struct WorkspaceView: View {
             HStack(spacing: 5) {
                 ForEach(WorkspaceMode.allCases, id: \.self) { mode in
                     Button { model.setMode(mode) } label: {
-                        Image(systemName: mode == .grid ? "square.grid.2x2" : mode == .edit ? "photo" : "rectangle.split.2x1")
+                        Image(systemName: mode.icon)
                             .frame(width: 34, height: 28)
                             .background(model.mode == mode ? Palette.accent.opacity(0.20) : .clear, in: RoundedRectangle(cornerRadius: 6))
                     }
@@ -435,6 +435,8 @@ struct WorkspaceView: View {
             }
         } else if model.mode == .grid {
             grid
+        } else if model.mode == .survey {
+            SurveyView()
         } else {
             editorCanvas
         }
@@ -705,10 +707,11 @@ struct WorkspaceView: View {
                 case "p": model.markFromKeyboard(flag: .pick); return nil
                 case "x": model.markFromKeyboard(flag: .reject); return nil
                 case "u": model.markFromKeyboard(flag: PhotoFlag.none); return nil
-                case "z" where model.mode != .grid: model.toggleActualSize(); return nil
+                case "z" where model.showsSingleImage: model.toggleActualSize(); return nil
                 case "g": model.setMode(.grid); return nil
                 case "e": model.setMode(.edit); return nil
                 case "c": model.setMode(.compare); return nil
+                case "n": model.setMode(.survey); return nil
                 case "\\": model.toggleOriginal(); return nil
                 case "j": model.showsClipping.toggle(); return nil
                 case "f": model.toggleFocusView(); return nil
@@ -720,6 +723,8 @@ struct WorkspaceView: View {
                     if case .collection = model.filter { model.removeSelectedPhotosFromCurrentFolder() } else { model.requestRemoveFromCatalog() }
                     return nil
                 }
+                if model.mode == .survey, event.keyCode == 123 { model.moveInSurvey(-1); return nil }
+                if model.mode == .survey, event.keyCode == 124 { model.moveInSurvey(1); return nil }
                 if event.keyCode == 123 { model.move(-1); return nil }
                 if event.keyCode == 124 { model.move(1); return nil }
                 if model.mode == .grid, event.keyCode == 125 { model.move(model.gridColumnCount); return nil }
@@ -928,6 +933,109 @@ private struct BurstBar: View {
         .buttonStyle(.borderless)
         .padding(.horizontal, 20).padding(.vertical, 8)
         .background(Palette.panel)
+    }
+}
+
+extension WorkspaceMode {
+    var icon: String {
+        switch self {
+        case .grid: "square.grid.2x2"
+        case .edit: "photo"
+        case .compare: "rectangle.split.2x1"
+        case .survey: "square.grid.3x2"
+        }
+    }
+}
+
+/// 여러 장 보기: 선택한 사진을 화면을 나눠 크게 놓는다. 누르면 기준 사진이 되어 별점·표시 키가 그 사진에 붙고,
+/// ×는 그 사진을 선택에서 빼 비교에서 뺀다. 두 번 누르면 사진 보기로 연다.
+private struct SurveyView: View {
+    @EnvironmentObject private var model: LibraryModel
+
+    var body: some View {
+        let photos = model.surveyPhotos
+        GeometryReader { geometry in
+            if photos.count < 2 {
+                VStack(spacing: 12) {
+                    Image(systemName: "square.grid.3x2").font(.system(size: 44, weight: .ultraLight)).foregroundStyle(Palette.accent)
+                    Text("두 장 이상 선택하세요").font(.title3.weight(.semibold))
+                    Text("⌘클릭·⇧클릭으로 고른 사진을 한 화면에 나란히 놓고 비교합니다. 칸의 ×를 누르면 그 사진을 비교에서 뺍니다.")
+                        .font(.subheadline).foregroundStyle(Palette.muted).multilineTextAlignment(.center).frame(maxWidth: 420)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                let columns = photos.count <= 2 ? photos.count : photos.count <= 4 ? 2 : photos.count <= 9 ? 3 : 4
+                let rows = (photos.count + columns - 1) / columns
+                let spacing: CGFloat = 10
+                let cellWidth = max(80, (geometry.size.width - 24 - spacing * CGFloat(columns - 1)) / CGFloat(columns))
+                let cellHeight = max(80, (geometry.size.height - 24 - spacing * CGFloat(rows - 1)) / CGFloat(rows))
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(cellWidth), spacing: spacing), count: columns),
+                          spacing: spacing) {
+                    ForEach(photos) { photo in
+                        SurveyCell(photo: photo, active: photo.id == model.selectedID)
+                            .frame(width: cellWidth, height: cellHeight)
+                    }
+                }
+                .padding(12)
+            }
+        }
+        .background(Palette.canvas)
+        .overlay(alignment: .bottom) {
+            if model.selectedPhotoIDs.count > LibraryModel.surveyLimit {
+                Text("선택한 \(model.selectedPhotoIDs.count)장 중 앞의 \(LibraryModel.surveyLimit)장만 보입니다")
+                    .font(.caption).padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(.black.opacity(0.6), in: Capsule()).padding(.bottom, 8)
+            }
+        }
+        .onAppear { model.requestSurveyImages() }
+        .onChange(of: model.selectedPhotoIDs) { _, _ in model.requestSurveyImages() }
+    }
+}
+
+private struct SurveyCell: View {
+    @EnvironmentObject private var model: LibraryModel
+    let photo: PhotoAsset
+    let active: Bool
+
+    var body: some View {
+        VStack(spacing: 4) {
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let image = model.surveyImages[photo.id] ?? model.thumbnail(for: photo) {
+                        Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Button { model.togglePhotoSelection(photo) } label: {
+                    Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.white, .black.opacity(0.6))
+                }
+                .buttonStyle(.plain).padding(6)
+                .help("비교에서 빼기")
+                .accessibilityLabel("\(photo.displayName) 비교에서 빼기")
+            }
+            HStack(spacing: 6) {
+                Text(photo.displayName).lineLimit(1)
+                Spacer()
+                if photo.flag != .none {
+                    Image(systemName: photo.flag == .pick ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(photo.flag == .pick ? Palette.accent : .red)
+                }
+                if photo.rating > 0 { Text(String(repeating: "★", count: photo.rating)).foregroundStyle(Palette.accent) }
+                if let label = photo.colorLabel { Circle().fill(label.color).frame(width: 9, height: 9) }
+            }
+            .font(.caption)
+        }
+        .padding(6)
+        .background(active ? Palette.accent.opacity(0.14) : Palette.panel, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(active ? Palette.accent : .clear, lineWidth: 2))
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onTapGesture(count: 2) { model.focusPhoto(photo); model.setMode(.edit) }
+        .onTapGesture { model.focusPhoto(photo) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(photo.displayName), 별점 \(photo.rating)\(active ? ", 기준 사진" : "")")
+        .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
     }
 }
 

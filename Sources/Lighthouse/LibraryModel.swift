@@ -7,6 +7,7 @@ enum WorkspaceMode: String, CaseIterable {
     case grid = "그리드"
     case edit = "사진"
     case compare = "비교"
+    case survey = "여러 장"
 }
 
 enum LibraryFilter: Hashable {
@@ -215,6 +216,10 @@ final class LibraryModel: ObservableObject {
     @Published var rawCapabilities: RAWCapabilities?
     @Published var histogram: ImageHistogram?
     @Published var showsClipping = false { didSet { refreshClippingOverlay() } }
+    /// 여러 장 보기에서 사진마다 그린 모습과 그때의 보정.
+    @Published var surveyImages: [UUID: NSImage] = [:]
+    var surveyRenderedEdits: [UUID: EditSettings] = [:]
+    var surveyGeneration = 0
     /// 사진만 크게 보는 보기(F). 패널을 숨기며, 그리드로 돌아가면 끝난다.
     @Published var isFocusView = false
     @Published var clippingOverlay: NSImage?
@@ -292,6 +297,7 @@ final class LibraryModel: ObservableObject {
     let retouchQueue = DispatchQueue(label: "com.rian.lighthouse.retouch", qos: .userInitiated)
     let saveQueue = DispatchQueue(label: "com.rian.lighthouse.catalog", qos: .utility)
     let splitQueue = DispatchQueue(label: "com.rian.lighthouse.split", qos: .userInitiated)
+    let surveyQueue = DispatchQueue(label: "com.rian.lighthouse.survey", qos: .userInitiated)
     var saveDelay: DispatchWorkItem?
     var renderDelay: DispatchWorkItem?
     var generation = 0
@@ -834,11 +840,14 @@ final class LibraryModel: ObservableObject {
         requestRender()
     }
 
-    /// 그리드에서 누르면 사진 보기로 바꿔 들어간다.
+    /// 한 장을 크게 그리는 보기(사진·비교)인지.
+    var showsSingleImage: Bool { mode == .edit || mode == .compare }
+
+    /// 그리드·여러 장 보기에서 누르면 사진 보기로 바꿔 들어간다.
     func toggleFocusView() {
         if isFocusView { isFocusView = false; return }
         guard selection != nil else { return }
-        if mode == .grid { setMode(.edit) }
+        if !showsSingleImage { setMode(.edit) }
         isFocusView = true
     }
 

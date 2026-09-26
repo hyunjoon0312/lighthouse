@@ -18,7 +18,7 @@ extension LibraryModel {
         let entry = thumbnailCache.object(forKey: cacheKey as NSString)
         // 대신 보여 주던 마지막 썸네일은 원본이 없다고 확인된 동안만 그대로 둔다.
         if let entry, entry.edits == wanted, !entry.isFallback || isMissing(photo) { return }
-        if entry != nil, wanted != nil, photo.id == selectedID, mode != .grid, !isOriginal { return }
+        if entry != nil, wanted != nil, photo.id == selectedID, showsSingleImage, !isOriginal { return }
         guard !loadingThumbnails.contains(cacheKey), !unavailableThumbnails.contains(photo.id) else { return }
         loadingThumbnails.insert(cacheKey)
         let size = Self.thumbnailPixels
@@ -98,9 +98,10 @@ extension LibraryModel {
         }
         if mode != .compare { pinnedImage = nil; pinnedError = nil; pinnedSource = nil; pinnedRenderedEdits = nil }
         requestSplitBefore()
+        requestSurveyImages()
         requestMask()
         refreshRAWCapabilities()
-        guard mode != .grid, let photo = selection else { rendering = false; return }
+        guard showsSingleImage, let photo = selection else { rendering = false; return }
         let edits = isOriginal ? EditSettings.neutral : photo.edits
         let maxPixel: Int? = actualSize ? nil : 2200
         let compare = mode == .compare ? pinned : nil
@@ -316,7 +317,7 @@ extension LibraryModel {
 
     /// 방금 이동한 방향의 다음 사진을 미리 현상해 두면 넘기는 즉시 보인다.
     private func prefetchNeighbor() {
-        guard mode != .grid, !actualSize, let current = selectedID else { return }
+        guard showsSingleImage, !actualSize, let current = selectedID else { return }
         let visible = visiblePhotos
         guard let index = visible.firstIndex(where: { $0.id == current }),
               visible.indices.contains(index + moveDirection) else { return }

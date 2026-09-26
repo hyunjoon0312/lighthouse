@@ -24,7 +24,8 @@ extension LibraryModel {
     /// `toggleLabel`은 이미 그 라벨이면 떼고, 아니면 붙인다.
     func markFromKeyboard(rating: Int? = nil, flag: PhotoFlag? = nil, toggleLabel: PhotoColorLabel? = nil) {
         guard let id = selectedID else { return }
-        let visible = visiblePhotos
+        // 여러 장 보기에서는 비교 중인 사진 안에서만 넘어가 선택이 풀리지 않게 한다.
+        let visible = mode == .survey ? surveyPhotos : visiblePhotos
         let next = autoAdvance ? visible.firstIndex(where: { $0.id == id }).flatMap { index in
             visible.indices.contains(index + 1) ? visible[index + 1].id : nil
         } : nil
@@ -33,7 +34,7 @@ extension LibraryModel {
             if let flag { marks.flag = flag }
             if let toggleLabel { marks.colorLabel = marks.colorLabel == toggleLabel ? nil : toggleLabel }
         }
-        if let next, let photo = visiblePhotos.first(where: { $0.id == next }) {
+        if let next, let photo = (mode == .survey ? surveyPhotos : visiblePhotos).first(where: { $0.id == next }) {
             moveDirection = 1
             focusPhoto(photo)
         }
