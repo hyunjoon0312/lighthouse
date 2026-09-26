@@ -8,6 +8,7 @@ public struct PhotoCriteria: Codable, Equatable, Sendable {
     public var minimumRating = 0
     /// nil이면 표시와 관계없다. `.none`은 표시가 없는 사진만이다.
     public var flag: PhotoFlag?
+    public var colorLabel: PhotoColorLabel?
     public var camera: String?
     public var lens: String?
     public var minimumFocalLength: Double?
@@ -26,6 +27,7 @@ public struct PhotoCriteria: Codable, Equatable, Sendable {
         let metadata = photo.metadata
         if photo.rating < minimumRating { return false }
         if let flag, photo.flag != flag { return false }
+        if let colorLabel, photo.colorLabel != colorLabel { return false }
         if let camera, metadata.camera != camera { return false }
         if let lens, metadata.lens != lens { return false }
         if !Self.contains(metadata.focalLength, minimumFocalLength, maximumFocalLength) { return false }
@@ -63,6 +65,7 @@ public struct PhotoCriteria: Codable, Equatable, Sendable {
         case PhotoFlag.none?: parts.append("표시 없음")
         case nil: break
         }
+        if let colorLabel { parts.append("\(colorLabel.title) 라벨") }
         if let camera { parts.append(camera) }
         if let lens { parts.append(lens) }
         if let range = Self.rangeText(minimumFocalLength.map(Self.number), maximumFocalLength.map(Self.number)) {
@@ -92,7 +95,7 @@ public struct PhotoCriteria: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case text, minimumRating, flag, camera, lens, minimumFocalLength, maximumFocalLength
+        case text, minimumRating, flag, colorLabel, camera, lens, minimumFocalLength, maximumFocalLength
         case minimumISO, maximumISO, firstDay, lastDay
     }
 
@@ -102,6 +105,7 @@ public struct PhotoCriteria: Codable, Equatable, Sendable {
         text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
         minimumRating = try container.decodeIfPresent(Int.self, forKey: .minimumRating) ?? 0
         flag = try container.decodeIfPresent(PhotoFlag.self, forKey: .flag)
+        colorLabel = try container.decodeIfPresent(PhotoColorLabel.self, forKey: .colorLabel)
         camera = try container.decodeIfPresent(String.self, forKey: .camera)
         lens = try container.decodeIfPresent(String.self, forKey: .lens)
         minimumFocalLength = try container.decodeIfPresent(Double.self, forKey: .minimumFocalLength)

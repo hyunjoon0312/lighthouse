@@ -169,12 +169,15 @@ public struct PhotoMarks: Equatable, Sendable {
     public var flag: PhotoFlag
     public var keywords: [String]
     public var caption: String
+    public var colorLabel: PhotoColorLabel?
 
-    public init(rating: Int, flag: PhotoFlag, keywords: [String] = [], caption: String = "") {
+    public init(rating: Int, flag: PhotoFlag, keywords: [String] = [], caption: String = "",
+                colorLabel: PhotoColorLabel? = nil) {
         self.rating = rating
         self.flag = flag
         self.keywords = keywords
         self.caption = caption
+        self.colorLabel = colorLabel
     }
 }
 

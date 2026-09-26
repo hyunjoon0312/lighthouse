@@ -14,9 +14,15 @@ extension LibraryModel {
         changeMarks(of: id) { $0.flag = flag }
     }
 
-    /// 키보드로 별점·표시를 바꾼다. 자동 다음 사진이 켜져 있으면 바꾸기 전에 정한 다음 사진으로 넘어가므로
+    func setColorLabel(_ label: PhotoColorLabel?) {
+        guard let id = selectedID else { return }
+        changeMarks(of: id) { $0.colorLabel = label }
+    }
+
+    /// 키보드로 별점·표시·라벨을 바꾼다. 자동 다음 사진이 켜져 있으면 바꾸기 전에 정한 다음 사진으로 넘어가므로
     /// 필터 때문에 방금 표시한 사진이 목록에서 빠져도 한 장을 건너뛰지 않는다.
-    func markFromKeyboard(rating: Int? = nil, flag: PhotoFlag? = nil) {
+    /// `toggleLabel`은 이미 그 라벨이면 떼고, 아니면 붙인다.
+    func markFromKeyboard(rating: Int? = nil, flag: PhotoFlag? = nil, toggleLabel: PhotoColorLabel? = nil) {
         guard let id = selectedID else { return }
         let visible = visiblePhotos
         let next = autoAdvance ? visible.firstIndex(where: { $0.id == id }).flatMap { index in
@@ -25,6 +31,7 @@ extension LibraryModel {
         changeMarks(of: id) { marks in
             if let rating { marks.rating = rating }
             if let flag { marks.flag = flag }
+            if let toggleLabel { marks.colorLabel = marks.colorLabel == toggleLabel ? nil : toggleLabel }
         }
         if let next, let photo = visiblePhotos.first(where: { $0.id == next }) {
             moveDirection = 1

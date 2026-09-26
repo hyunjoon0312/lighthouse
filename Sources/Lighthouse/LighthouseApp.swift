@@ -73,6 +73,14 @@ struct LighthouseApp: App {
                     }
                 }
                 .disabled(library.selection == nil || library.hasModalPresentation)
+                Menu("색상 라벨") {
+                    ForEach(PhotoColorLabel.allCases, id: \.self) { label in
+                        Button(label.title + (label.keyHint.map { " (\($0))" } ?? "")) { library.markFromKeyboard(toggleLabel: label) }
+                    }
+                    Divider()
+                    Button("라벨 떼기") { library.setColorLabel(nil) }
+                }
+                .disabled(library.selection == nil || library.hasModalPresentation)
                 Divider()
                 Button("가상 사본 만들기") { library.createVirtualCopy() }
                     .keyboardShortcut("'", modifiers: .command)

@@ -4,6 +4,29 @@ public enum PhotoFlag: String, Codable, CaseIterable, Sendable {
     case none, pick, reject
 }
 
+/// 별점·선택과 따로 붙이는 색상 라벨(예: 블로그용, 인화용). 6–9 키가 빨강·노랑·초록·파랑이다.
+public enum PhotoColorLabel: String, Codable, CaseIterable, Sendable {
+    case red, yellow, green, blue, purple
+
+    public var title: String {
+        switch self {
+        case .red: "빨강"
+        case .yellow: "노랑"
+        case .green: "초록"
+        case .blue: "파랑"
+        case .purple: "보라"
+        }
+    }
+
+    /// XMP `xmp:Label`에 쓰는 이름. Lightroom·Bridge와 같은 영어 이름이다.
+    public var xmpName: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+
+    /// 6–9 키로 붙이는 라벨. 보라는 키가 없다.
+    public static func forKey(_ key: String) -> PhotoColorLabel? {
+        ["6": .red, "7": .yellow, "8": .green, "9": .blue][key]
+    }
+}
+
 public struct MaskPoint: Codable, Equatable, Sendable {
     public var x: Double
     public var y: Double
@@ -261,6 +284,7 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
     /// 검색과 내보내기(IPTC)에 쓰는 키워드와 설명. 비어 있으면 카탈로그에 쓰지 않는다.
     public var keywords: [String] = []
     public var caption: String = ""
+    public var colorLabel: PhotoColorLabel?
 
     public init(id: UUID = UUID(), url: URL, metadata: PhotoMetadata = PhotoMetadata(),
                 importedAt: Date = Date()) {
@@ -274,7 +298,7 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, path, importedAt, metadata, rating, flag, edits, copyName, keywords, caption
+        case id, path, importedAt, metadata, rating, flag, edits, copyName, keywords, caption, colorLabel
     }
 
     public init(from decoder: Decoder) throws {
@@ -289,6 +313,7 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
         copyName = try container.decodeIfPresent(String.self, forKey: .copyName)
         keywords = try container.decodeIfPresent([String].self, forKey: .keywords) ?? []
         caption = try container.decodeIfPresent(String.self, forKey: .caption) ?? ""
+        colorLabel = try container.decodeIfPresent(PhotoColorLabel.self, forKey: .colorLabel)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -303,16 +328,18 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
         try container.encodeIfPresent(copyName, forKey: .copyName)
         if !keywords.isEmpty { try container.encode(keywords, forKey: .keywords) }
         if !caption.isEmpty { try container.encode(caption, forKey: .caption) }
+        try container.encodeIfPresent(colorLabel, forKey: .colorLabel)
     }
 
-    /// 실행 취소 단위로 함께 바뀌는 별점·표시·키워드·설명.
+    /// 실행 취소 단위로 함께 바뀌는 별점·표시·키워드·설명·색상 라벨.
     public var marks: PhotoMarks {
-        get { PhotoMarks(rating: rating, flag: flag, keywords: keywords, caption: caption) }
+        get { PhotoMarks(rating: rating, flag: flag, keywords: keywords, caption: caption, colorLabel: colorLabel) }
         set {
             rating = newValue.rating
             flag = newValue.flag
             keywords = newValue.keywords
             caption = newValue.caption
+            colorLabel = newValue.colorLabel
         }
     }
 

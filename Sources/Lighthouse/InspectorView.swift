@@ -41,6 +41,7 @@ struct InspectorView: View {
                 if model.isMissing(photo) { missingOriginal }
                 HistogramView()
                 ratingRow
+                ColorLabelRow(current: photo.colorLabel) { model.setColorLabel($0) }
                 HStack(spacing: 8) {
                     flagButton("선택", icon: "checkmark", flag: .pick)
                     flagButton("제외", icon: "xmark", flag: .reject)

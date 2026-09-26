@@ -688,6 +688,8 @@ struct WorkspaceView: View {
                 switch key {
                 case "0", "1", "2", "3", "4", "5":
                     model.markFromKeyboard(rating: Int(key!)!); return nil
+                case "6", "7", "8", "9":
+                    model.markFromKeyboard(toggleLabel: PhotoColorLabel.forKey(key!)); return nil
                 case "p": model.markFromKeyboard(flag: .pick); return nil
                 case "x": model.markFromKeyboard(flag: .reject); return nil
                 case "u": model.markFromKeyboard(flag: PhotoFlag.none); return nil
@@ -777,7 +779,13 @@ private struct PhotoTile: View {
                     Text(photo.displayName).lineLimit(1).font(.system(size: 12, weight: .medium))
                     if active { Text("기준").font(.caption2.weight(.bold)).foregroundStyle(Palette.accent) }
                 }
-                Text(photo.rating == 0 ? "별점 없음" : String(repeating: "★", count: photo.rating)).font(.caption).foregroundStyle(photo.rating == 0 ? Palette.muted : Palette.accent)
+                HStack(spacing: 6) {
+                    Text(photo.rating == 0 ? "별점 없음" : String(repeating: "★", count: photo.rating)).font(.caption).foregroundStyle(photo.rating == 0 ? Palette.muted : Palette.accent)
+                    Spacer()
+                    if let label = photo.colorLabel {
+                        Circle().fill(label.color).frame(width: 10, height: 10).help("\(label.title) 라벨")
+                    }
+                }
             }
             .padding(8)
             .background(selected ? Palette.accent.opacity(0.14) : Palette.panel, in: RoundedRectangle(cornerRadius: 10))
@@ -786,7 +794,8 @@ private struct PhotoTile: View {
             .onTapGesture { tileClicked(model, photo) }
             .draggable(model.dragPayload(for: photo)) { dragPreview }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(photo.displayName), 별점 \(photo.rating), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")" + burstAccessibility)
+            .accessibilityLabel("\(photo.displayName), 별점 \(photo.rating), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")" +
+                                (photo.colorLabel.map { ", \($0.title) 라벨" } ?? "") + burstAccessibility)
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction { model.focusPhoto(photo) }
             .accessibilityAction(named: Text("선택 토글")) { model.togglePhotoSelection(photo) }
@@ -843,6 +852,9 @@ private struct FilmstripTile: View {
                 if photo.flag == .pick { Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.accent).padding(5) }
                 if photo.flag == .reject { Image(systemName: "xmark.circle.fill").foregroundStyle(.red).padding(5) }
                 if active { Text("기준").font(.system(size: 9, weight: .bold)).padding(3).background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 3)).padding(4) }
+                if let label = photo.colorLabel {
+                    VStack { Spacer(); Rectangle().fill(label.color).frame(height: 4) }
+                }
             }
             .frame(width: 92, height: 76)
             .clipShape(RoundedRectangle(cornerRadius: 5))
