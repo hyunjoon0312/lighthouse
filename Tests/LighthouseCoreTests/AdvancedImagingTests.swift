@@ -482,6 +482,7 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertNotNil(CoreImageKernels.clarity)
         XCTAssertNotNil(CoreImageKernels.grain)
         XCTAssertNotNil(CoreImageKernels.healCorrection)
+        XCTAssertNotNil(CoreImageKernels.contrast)
     }
 
     func testGradientHandlesMoveInSourceSpace() {
@@ -672,6 +673,31 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: existing), sentinel)
         XCTAssertEqual(try Data(contentsOf: written), high.data)
         XCTAssertTrue(written.lastPathComponent.hasSuffix("-edited-2.jpg"))
+    }
+
+    /// 예전에는 선형 값 0.5를 기준으로 늘려 대비 1.2에서 sRGB 40/255가 0이 되고, 0.8에서 검정이 89/255로 떴다.
+    func testContrastBendsAroundMiddleGrayAndKeepsBlackAndWhite() throws {
+        let input = try temporaryPNG(width: 256, height: 2) { x, _ in (UInt8(x), UInt8(x), UInt8(x), 255) }
+        defer { try? FileManager.default.removeItem(at: input) }
+        let pipeline = ImagePipeline()
+        func gray(_ contrast: Double, _ x: Int) throws -> Int {
+            Int(try rgba(pipeline.render(url: input, edits: EditSettings(contrast: contrast), maxPixel: nil), x: x, y: 0).0)
+        }
+        for contrast in [0.5, 0.8, 1.2, 1.5] {
+            XCTAssertLessThanOrEqual(try gray(contrast, 0), 1, "검정은 그대로 \(contrast)")
+            XCTAssertGreaterThanOrEqual(try gray(contrast, 255), 254, "흰색은 그대로 \(contrast)")
+            XCTAssertEqual(try gray(contrast, 128), 128, accuracy: 2, "중간 회색은 그대로 \(contrast)")
+        }
+        XCTAssertEqual(try gray(1.2, 40), 31, accuracy: 3, "어두운 쪽은 잘리지 않고 조금 어두워진다")
+        XCTAssertEqual(try gray(1.2, 215), 224, accuracy: 3)
+        XCTAssertGreaterThan(try gray(0.8, 40), 40)
+        XCTAssertLessThan(try gray(0.8, 215), 215)
+        var previous = -1
+        for x in stride(from: 0, through: 255, by: 15) {
+            let value = try gray(1.5, x)
+            XCTAssertGreaterThanOrEqual(value, previous, "최대 대비에서도 순서가 뒤집히지 않는다")
+            previous = value
+        }
     }
 
     private func temporaryPNG(width: Int, height: Int,

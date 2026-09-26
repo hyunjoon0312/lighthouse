@@ -34,7 +34,7 @@ Astra가 확정한 구현 인터페이스. 각 작업자는 자신의 파일만 
 - `render(url: URL, edits: EditSettings, maxPixel: Int? = 2200) throws -> CGImage`
 - `exportJPEG(url: URL, edits: EditSettings, to directory: URL, maxPixel: Int?, quality: Double) throws -> URL`
 
-RAW는 CIRAWFilter를 통해 실제 센서 데이터에서 현상한다. baseline exposure와 원본 neutral temperature/tint를 유지한 채 조절값을 적용한다. 일반 포맷은 orientation을 적용해 CIImage로 로드. 대비·채도는 CIColorControls, 하이라이트·섀도는 CIHighlightShadowAdjust, 선명도는 CISharpenLuminance. 온도는 RAW에서 as-shot 상대값, 일반 이미지에서 기준 6500 상대값. 90도 시계 방향 회전, 중앙 비율 크롭, 출력 원점 정규화. 중립 설정은 불필요한 필터를 건너뛴다. `maxPixel`은 출력 긴 변 상한으로 업스케일하지 않는다. 전체 출력에 draft 모드를 쓰지 않는다. 메타데이터 치수와 orientation도 일관되게 처리한다.
+RAW는 CIRAWFilter를 통해 실제 센서 데이터에서 현상한다. baseline exposure와 원본 neutral temperature/tint를 유지한 채 조절값을 적용한다. 일반 포맷은 orientation을 적용해 CIImage로 로드. 대비는 sRGB 값에서 검정·흰색을 고정한 3차 S자 곡선(Metal 커널, 부분 보정의 영역 대비도 같다), 채도는 CIColorControls, 하이라이트·섀도는 CIHighlightShadowAdjust, 선명도는 CISharpenLuminance. 온도는 RAW에서 as-shot 상대값, 일반 이미지에서 기준 6500 상대값. 90도 시계 방향 회전, 중앙 비율 크롭, 출력 원점 정규화. 중립 설정은 불필요한 필터를 건너뛴다. `maxPixel`은 출력 긴 변 상한으로 업스케일하지 않는다. 전체 출력에 draft 모드를 쓰지 않는다. 메타데이터 치수와 orientation도 일관되게 처리한다.
 
 JPEG는 sRGB, quality 0…1, 별도 `원래이름-edited.jpg`로 쓴다. 기존 파일·원본 덮어쓰기를 원자적으로 거부하고 충돌하면 접미사를 늘린다. 디코딩 실패·디렉터리 오류는 설명 가능한 localized error. 저장·렌더 메서드에서 UI를 호출하지 않는다.
 

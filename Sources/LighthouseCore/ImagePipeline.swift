@@ -342,10 +342,10 @@ public final class ImagePipeline: @unchecked Sendable {
                 filter.targetNeutral = CIVector(x: 6500 - min(1, max(-1, adjustment.temperature)) * 2000, y: 0)
                 adjusted = filter.outputImage ?? adjusted
             }
-            if adjustment.contrast != 1 || adjustment.saturation != 0 {
+            adjusted = applyContrast(adjustment.contrast, to: adjusted)
+            if adjustment.saturation != 0 {
                 let filter = CIFilter.colorControls()
                 filter.inputImage = adjusted
-                filter.contrast = Float(adjustment.contrast)
                 filter.saturation = Float(1 + min(1, max(-1, adjustment.saturation)))
                 adjusted = filter.outputImage ?? adjusted
             }
@@ -421,6 +421,17 @@ public final class ImagePipeline: @unchecked Sendable {
 
     /// 원본 짧은 변의 0.15%~1.5% 크기 대비(중간 주파수)를 중간 톤 위주로 더하거나 빼서 잔 디테일은 남긴다.
     /// 반경을 원본 크기에 맞추므로 미리보기와 내보내기가 같다.
+    /// 대비는 sRGB 값에서 S자 곡선으로 준다. CIColorControls는 선형 작업 공간의 0.5를 기준으로 늘려서
+    /// 대비 1.1만으로도 sRGB 약 60/255 아래가 모두 검게 잘렸다.
+    private func applyContrast(_ amount: Double, to image: CIImage) -> CIImage {
+        guard amount != 1, amount.isFinite, let kernel = CoreImageKernels.contrast,
+              let encoded = image.matchedFromWorkingSpace(to: colorSpace) else { return image }
+        let strength = Float(4 * (min(1.5, max(0.5, amount)) - 1))
+        guard let changed = kernel.apply(extent: encoded.extent, arguments: [encoded, strength]),
+              let restored = changed.matchedToWorkingSpace(from: colorSpace) else { return image }
+        return restored.cropped(to: image.extent)
+    }
+
     private func applyClarity(_ amount: Double, to image: CIImage) -> CIImage {
         guard amount != 0, amount.isFinite, let kernel = CoreImageKernels.clarity else { return image }
         let shortSide = min(image.extent.width, image.extent.height)
@@ -538,10 +549,10 @@ public final class ImagePipeline: @unchecked Sendable {
             }
         }
 
-        if edits.contrast != 1 || edits.saturation != 1 {
+        image = applyContrast(edits.contrast, to: image)
+        if edits.saturation != 1 {
             let filter = CIFilter.colorControls()
             filter.inputImage = image
-            filter.contrast = Float(edits.contrast)
             filter.saturation = Float(edits.saturation)
             image = filter.outputImage ?? image
         }

@@ -25,8 +25,10 @@ public struct ThumbnailStore: Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         guard let edits = try? encoder.encode(photo.edits) else { return nil }
+        // 대비 계산을 바꾼 뒤(v2) 대비를 쓴 사진의 썸네일만 다시 만든다.
+        let usesContrast = photo.edits.contrast != 1 || photo.edits.localAdjustments.contains { $0.contrast != 1 }
         var hasher = SHA256()
-        hasher.update(data: Data("v1|\(photo.path)|\(modified.timeIntervalSinceReferenceDate)|\(size)|".utf8))
+        hasher.update(data: Data("\(usesContrast ? "v2" : "v1")|\(photo.path)|\(modified.timeIntervalSinceReferenceDate)|\(size)|".utf8))
         hasher.update(data: edits)
         return hasher.finalize().prefix(16).map { String(format: "%02x", $0) }.joined()
     }
