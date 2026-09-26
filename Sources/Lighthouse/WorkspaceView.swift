@@ -787,6 +787,11 @@ private struct PhotoTile: View {
                                         .font(.system(size: 9, weight: .bold)).foregroundStyle(.black).padding(5)
                                         .background(Palette.accent, in: RoundedRectangle(cornerRadius: 4))
                                 }
+                                if burst.eyesClosed {
+                                    Label("눈 감음", systemImage: "eye.slash")
+                                        .font(.system(size: 9, weight: .bold)).padding(5)
+                                        .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 4))
+                                }
                                 Spacer()
                             }
                         }
@@ -849,7 +854,8 @@ private struct PhotoTile: View {
 
     private var burstAccessibility: String {
         guard let burst = model.burstBadge(for: photo) else { return "" }
-        return ", 연속 촬영 \(burst.count)컷 중 \(burst.shot)번째" + (burst.isBest == true ? ", 추천 컷" : "")
+        return ", 연속 촬영 \(burst.count)컷 중 \(burst.shot)번째" + (burst.isBest == true ? ", 추천 컷" : "") +
+            (burst.eyesClosed ? ", 눈 감음" : "")
     }
 }
 
@@ -915,7 +921,7 @@ private struct BurstBar: View {
                 } else {
                     Button("베스트 컷 분석") { model.analyzeBursts() }
                         .accessibilityLabel("연속 촬영 베스트 컷 분석")
-                        .help("컷마다 초점 선명도와 얼굴 촬영 품질(눈 감음·흔들림)을 Mac 안에서 비교합니다")
+                        .help("컷마다 초점 선명도, 얼굴 촬영 품질, 눈 감음을 Mac 안에서 비교합니다. 눈 감은 컷은 추천하지 않습니다")
                 }
                 Button("추천 컷 선택") { model.selectBurstRecommendations() }
                     .accessibilityLabel("추천 컷만 선택")

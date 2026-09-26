@@ -47,6 +47,8 @@ struct BurstBadge: Equatable {
     var count: Int
     /// nil이면 아직 분석하지 않았다.
     var isBest: Bool?
+    /// 분석에서 눈을 감은 얼굴을 찾았다.
+    var eyesClosed = false
 }
 
 struct PresetSheetRequest: Identifiable {

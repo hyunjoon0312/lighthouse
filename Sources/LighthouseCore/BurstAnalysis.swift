@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import Foundation
 import Vision
 
@@ -58,10 +59,13 @@ public struct PhotoQuality: Equatable, Sendable {
     public var sharpness: Double
     /// Vision 얼굴 촬영 품질(0…1). nil이면 얼굴 분석을 할 수 없었다. 빈 배열은 얼굴이 없다는 뜻이다.
     public var faceQualities: [Double]?
+    /// 두 눈을 감은(또는 가려진) 얼굴이 하나라도 있는지. 얼굴을 찾지 못했으면 nil이다.
+    public var eyesClosed: Bool?
 
-    public init(sharpness: Double, faceQualities: [Double]?) {
+    public init(sharpness: Double, faceQualities: [Double]?, eyesClosed: Bool? = nil) {
         self.sharpness = sharpness
         self.faceQualities = faceQualities
+        self.eyesClosed = eyesClosed
     }
 
     public var faceQuality: Double? {
@@ -74,7 +78,22 @@ public enum PhotoQualityAnalyzer {
     /// 긴 변 1024px 미리보기로 분석한다. RAW는 파일 안의 카메라 미리보기를 먼저 쓴다.
     public static func analyze(url: URL, pipeline: ImagePipeline) throws -> PhotoQuality {
         let image = try pipeline.thumbnail(for: url, maxPixel: 1024)
-        return PhotoQuality(sharpness: sharpness(of: image), faceQualities: faceQualities(in: image))
+        return PhotoQuality(sharpness: sharpness(of: image), faceQualities: faceQualities(in: image),
+                            eyesClosed: eyesClosed(in: image))
+    }
+
+    /// Core Image 얼굴 검출기의 눈 깜빡임 판정으로, 두 눈을 모두 감은 얼굴이 있으면 true다.
+    /// Vision 얼굴 특징점의 눈 높이·너비 비율은 표본에서 감은 눈과 뜬 눈을 가르지 못해(감은 눈 0.32, 뜬 눈 0.26) 쓰지 않는다.
+    /// 공개 사진으로 확인했을 때 눈 뜬 얼굴 13개는 모두 뜬 것으로, 감은 얼굴 7개는 모두 감은 것으로 봤고,
+    /// 눈을 거의 내리감은 1개와 눈을 가린 사진은 감은 것으로 봤다. 얼굴을 찾지 못하면 nil이다.
+    public static func eyesClosed(in image: CGImage) -> Bool? {
+        guard let detector = CIDetector(ofType: CIDetectorTypeFace, context: nil,
+                                        options: [CIDetectorAccuracy: CIDetectorAccuracyHigh]) else { return nil }
+        let faces = detector.features(in: CIImage(cgImage: image), options: [CIDetectorEyeBlink: true])
+            .compactMap { $0 as? CIFaceFeature }
+            .filter { $0.hasLeftEyePosition && $0.hasRightEyePosition }
+        guard !faces.isEmpty else { return nil }
+        return faces.contains { $0.leftEyeClosed && $0.rightEyeClosed }
     }
 
     /// 긴 변 768px 회색으로 줄여 32px 칸마다 라플라시안 분산을 구하고, 가장 선명한 10% 칸의 평균을 쓴다.
@@ -134,12 +153,15 @@ public struct BurstRecommendation: Equatable, Sendable {
     /// 컷마다의 점수(0…1). 분석하지 못한 컷은 nil이다.
     public var scores: [Double?]
     public var usedFaces: Bool
+    /// 눈을 감은 얼굴이 있는 컷. 눈을 뜬 컷이 있으면 추천하지 않는다.
+    public var closedEyeShots: Set<Int> = []
 }
 
 public enum BurstRanking {
     /// 선명도는 묶음 안의 최고값으로 나눈 뒤 제곱근으로 0…1에 맞춘다. 라플라시안 분산은 조금만 흐려져도 크게 줄어서
     /// 그대로 쓰면 약간 더 선명한 눈 감은 컷을 고르기 때문이다. 얼굴이 찍힌 컷이 있으면 얼굴 품질을 절반 반영하고,
     /// 얼굴이 없는 컷은 얼굴 점수 0으로 본다. 동점이면 먼저 찍은 컷이다.
+    /// 눈을 감은 얼굴이 있는 컷은 점수와 관계없이, 눈을 뜬 얼굴만 찍힌 컷이 있으면 추천하지 않는다.
     public static func recommend(_ group: BurstGroup, qualities: [UUID: PhotoQuality]) -> BurstRecommendation? {
         let shotQualities = group.shots.map { shot in shot.lazy.compactMap { qualities[$0] }.first }
         let maxSharpness = shotQualities.compactMap { $0?.sharpness }.max() ?? 0
@@ -150,11 +172,13 @@ public enum BurstRanking {
             let sharp = maxSharpness > 0 ? (quality.sharpness / maxSharpness).squareRoot() : 0
             return usedFaces ? 0.5 * sharp + 0.5 * (quality.faceQuality ?? 0) : sharp
         }
+        let closed = Set(shotQualities.indices.filter { shotQualities[$0]?.eyesClosed == true })
+        let hasOpenEyes = shotQualities.contains { $0?.eyesClosed == false }
         var best = 0
         var bestScore = -Double.infinity
-        for (index, score) in scores.enumerated() {
+        for (index, score) in scores.enumerated() where !(hasOpenEyes && closed.contains(index)) {
             if let score, score > bestScore { best = index; bestScore = score }
         }
-        return BurstRecommendation(bestShot: best, scores: scores, usedFaces: usedFaces)
+        return BurstRecommendation(bestShot: best, scores: scores, usedFaces: usedFaces, closedEyeShots: closed)
     }
 }

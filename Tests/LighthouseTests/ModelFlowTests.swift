@@ -715,6 +715,9 @@ final class ModelFlowTests: XCTestCase {
               "sharpest shot recommended (faces used: \(faces != nil)): \(String(describing: recommendation?.scores))")
         check(model.burstBadge(for: model.photo(withID: burstIDs[0])!)?.isBest == true &&
               model.burstBadge(for: model.photo(withID: burstIDs[3])!)?.isBest == false, "badge marks recommendation")
+        check(burstIDs.map { model.burstBadge(for: model.photo(withID: $0)!)?.eyesClosed ?? false } ==
+              (faces != nil ? [false, false, false, true] : [false, false, false, false]),
+              "the shot with covered eyes is marked (faces used: \(faces != nil))")
         print("  " + (model.burstMessage ?? ""))
         model.focusPhoto(model.photo(withID: burstIDs[2])!)
         model.setFlag(.pick)

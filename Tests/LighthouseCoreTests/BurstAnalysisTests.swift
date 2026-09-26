@@ -96,6 +96,25 @@ final class BurstAnalysisTests: XCTestCase {
         XCTAssertNil(BurstRanking.recommend(group, qualities: [:]))
     }
 
+    func testClosedEyeShotsAreNotRecommendedWhileAnOpenEyeShotExists() throws {
+        let ids = (0..<3).map { _ in UUID() }
+        let group = BurstGroup(shots: ids.map { [$0] })
+        let blinking = BurstRanking.recommend(group, qualities: [
+            ids[0]: PhotoQuality(sharpness: 30, faceQualities: [0.6], eyesClosed: true),
+            ids[1]: PhotoQuality(sharpness: 20, faceQualities: [0.4], eyesClosed: false),
+            ids[2]: PhotoQuality(sharpness: 25, faceQualities: [0.5], eyesClosed: nil)
+        ])
+        XCTAssertEqual(blinking?.bestShot, 2, "점수가 가장 높아도 눈 감은 컷은 추천하지 않는다")
+        XCTAssertEqual(blinking?.closedEyeShots, [0])
+        let allClosed = BurstRanking.recommend(group, qualities: [
+            ids[0]: PhotoQuality(sharpness: 30, faceQualities: [0.6], eyesClosed: true),
+            ids[1]: PhotoQuality(sharpness: 20, faceQualities: [0.4], eyesClosed: true)
+        ])
+        XCTAssertEqual(allClosed?.bestShot, 0, "모두 눈을 감았으면 점수로 고른다")
+        XCTAssertNil(PhotoQualityAnalyzer.eyesClosed(in: try image(width: 64, height: 64) { x, _ in UInt8(x * 4) }),
+                     "얼굴이 없으면 판단하지 않는다")
+    }
+
     func testCaptureTimeKeepsSubseconds() throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jpg")
         defer { try? FileManager.default.removeItem(at: url) }

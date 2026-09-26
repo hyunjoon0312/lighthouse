@@ -47,7 +47,8 @@ extension LibraryModel {
         let group = burstIndex.groups[position.group]
         let recommendation = burstRecommendations[group.id]
         return BurstBadge(shot: position.shot + 1, count: group.shots.count,
-                          isBest: recommendation.map { $0.bestShot == position.shot })
+                          isBest: recommendation.map { $0.bestShot == position.shot },
+                          eyesClosed: recommendation?.closedEyeShots.contains(position.shot) ?? false)
     }
 
     /// 지금 목록에 한 장이라도 보이는 묶음.
