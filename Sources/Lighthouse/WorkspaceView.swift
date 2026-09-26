@@ -672,6 +672,9 @@ struct WorkspaceView: View {
                             BrushCanvasView(canvas: model.canvas, photo: photo, imageSize: image.size,
                                             availableSize: geometry.size)
                         }
+                        if zoomable && model.isPickingWhiteBalance {
+                            whiteBalancePicker(imageSize: image.size, available: geometry.size)
+                        }
                     }
                 } else if let photo, model.isMissing(photo) {
                     missingOriginal(photo)
@@ -712,13 +715,36 @@ struct WorkspaceView: View {
 
     /// 화면 맞춤 사진의 클릭 위치를 사진 안의 0…1 좌표로 바꿔 그 위치를 100%로 연다.
     private func zoomIn(at location: CGPoint, imageSize: NSSize, available: CGSize) {
+        guard let anchor = imagePoint(at: location, imageSize: imageSize, available: available) else { return }
+        model.toggleActualSize(at: anchor)
+    }
+
+    /// 화면 맞춤(여백 20)으로 그린 사진 안의 위치를 0…1 좌표(위쪽이 0)로 바꾼다. 사진 밖이면 nil.
+    private func imagePoint(at location: CGPoint, imageSize: NSSize, available: CGSize) -> CGPoint? {
         let width = max(1, available.width - 40), height = max(1, available.height - 40)
         let scale = min(width / max(1, imageSize.width), height / max(1, imageSize.height))
         let fitted = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
         let origin = CGPoint(x: (available.width - fitted.width) / 2, y: (available.height - fitted.height) / 2)
-        let anchor = CGPoint(x: (location.x - origin.x) / fitted.width, y: (location.y - origin.y) / fitted.height)
-        guard (0...1).contains(anchor.x), (0...1).contains(anchor.y) else { return }
-        model.toggleActualSize(at: anchor)
+        let point = CGPoint(x: (location.x - origin.x) / fitted.width, y: (location.y - origin.y) / fitted.height)
+        return (0...1).contains(point.x) && (0...1).contains(point.y) ? point : nil
+    }
+
+    /// 흰색 기준 찍기 중에는 사진 위를 십자 커서로 누르게 한다.
+    private func whiteBalancePicker(imageSize: NSSize, available: CGSize) -> some View {
+        ZStack(alignment: .top) {
+            Color.clear.contentShape(Rectangle())
+                .onTapGesture(coordinateSpace: .local) { location in
+                    if let point = imagePoint(at: location, imageSize: imageSize, available: available) {
+                        model.pickWhiteBalance(at: point)
+                    }
+                }
+                .pointerStyle(.rectSelection)
+                .accessibilityLabel("누른 곳을 흰색 기준으로")
+            Label("회색·흰색이어야 할 곳을 누르세요 · Esc 취소", systemImage: "eyedropper")
+                .font(.caption).padding(.horizontal, 12).padding(.vertical, 6)
+                .background(.black.opacity(0.7), in: Capsule()).padding(.top, 14)
+                .allowsHitTesting(false)
+        }
     }
 
     private func scrollToZoomAnchor(content: CGSize, viewport: CGSize) {
@@ -798,6 +824,7 @@ struct WorkspaceView: View {
                 return nil
             }
             if NSApp.keyWindow?.firstResponder is NSTextView { return event }
+            if event.keyCode == 53, model.isPickingWhiteBalance { model.isPickingWhiteBalance = false; return nil }
             if event.keyCode == 53, model.isFocusView { model.isFocusView = false; return nil }
             // ?(⇧/)는 자판 배열과 입력 상태에 관계없이 같은 자리의 키로 읽는다.
             if event.keyCode == 44, event.modifierFlags.intersection([.command, .control, .option, .shift]) == .shift {

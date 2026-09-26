@@ -81,7 +81,7 @@ final class AutoAdjustTests: XCTestCase {
         XCTAssertEqual(try AutoAdjust.solve(from: 0, step: 10, limit: 20) { _ in XCTFail(); return 0 }, 0)
     }
 
-    func testS9RAWSuggestionStaysInRange() throws {
+    private var s9Sample: URL? {
         let path = ProcessInfo.processInfo.environment["LIGHTHOUSE_SAMPLE_RW2"] ?? {
             var directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             for _ in 0..<5 {
@@ -91,9 +91,13 @@ final class AutoAdjustTests: XCTestCase {
             }
             return ""
         }()
-        guard FileManager.default.fileExists(atPath: path) else { throw XCTSkip("RAW 표본이 없습니다.") }
+        return FileManager.default.fileExists(atPath: path) ? URL(fileURLWithPath: path) : nil
+    }
+
+    func testS9RAWSuggestionStaysInRange() throws {
+        guard let url = s9Sample else { throw XCTSkip("RAW 표본이 없습니다.") }
         let start = Date()
-        let result = try AutoAdjust.suggest(url: URL(fileURLWithPath: path), current: .neutral, pipeline: ImagePipeline())
+        let result = try AutoAdjust.suggest(url: url, current: .neutral, pipeline: ImagePipeline())
         let edits = result.edits
         print(String(format: "  S9 auto: %.0fK tint %.1f %.2fEV highlights %.1f shadows %.2f, %d renders %.2fs",
                      edits.temperatureShift, edits.tintShift, edits.exposure, edits.highlights, edits.shadows,
@@ -101,5 +105,51 @@ final class AutoAdjustTests: XCTestCase {
         XCTAssertLessThanOrEqual(abs(edits.temperatureShift), AutoAdjust.temperatureLimit)
         XCTAssertLessThanOrEqual(abs(edits.tintShift), AutoAdjust.tintLimit)
         XCTAssertLessThanOrEqual(abs(edits.exposure), 2)
+    }
+
+    /// 흰색 기준 찍기: 누른 쪽의 색만 회색으로 맞추고, 노출 등 다른 값은 그대로 둔다. y는 위쪽이 0이다.
+    func testWhiteBalanceNeutralizesThePickedArea() throws {
+        // 위쪽 절반은 푸른 회색, 아래쪽 절반은 붉은 회색.
+        let url = try temporaryJPEG { _, y in y < 80 ? (0.42, 0.45, 0.54) : (0.54, 0.46, 0.42) }
+        let pipeline = ImagePipeline()
+        var current = EditSettings.neutral
+        current.exposure = 0.3
+        func cast(_ edits: EditSettings, at point: CGPoint) throws -> Double {
+            let image = try pipeline.renderPreview(url: url, edits: edits, maxPixel: AutoAdjust.measurePixels).image
+            let stats = AutoAdjust.Stats(image, neutralIndices: AutoAdjust.patch(around: point, width: image.width,
+                                                                                  height: image.height))
+            return stats.gray.b - stats.gray.r
+        }
+        let top = CGPoint(x: 0.5, y: 0.25), bottom = CGPoint(x: 0.5, y: 0.75)
+        let warmed = try AutoAdjust.whiteBalance(url: url, current: current, at: top, pipeline: pipeline)
+        XCTAssertGreaterThan(warmed.edits.temperatureShift, 300, "푸른 곳을 누르면 따뜻하게")
+        XCTAssertEqual(warmed.edits.exposure, 0.3, "색온도·틴트 말고는 그대로")
+        XCTAssertLessThan(abs(try cast(warmed.edits, at: top)), abs(try cast(current, at: top)) * 0.2)
+        let cooled = try AutoAdjust.whiteBalance(url: url, current: current, at: bottom, pipeline: pipeline)
+        XCTAssertLessThan(cooled.edits.temperatureShift, -300, "붉은 곳을 누르면 차갑게")
+        XCTAssertLessThan(abs(try cast(cooled.edits, at: bottom)), abs(try cast(current, at: bottom)) * 0.2)
+        print(String(format: "  white balance: top %.0fK tint %.1f, bottom %.0fK tint %.1f, %d renders",
+                     warmed.edits.temperatureShift, warmed.edits.tintShift, cooled.edits.temperatureShift,
+                     cooled.edits.tintShift, warmed.renders))
+    }
+
+    /// 실제 S9 RAW에서 흰 벽(왼쪽 가운데)을 찍으면 그곳의 색 치우침이 줄어든다.
+    func testWhiteBalanceOnS9Wall() throws {
+        guard let url = s9Sample else { throw XCTSkip("RAW 표본이 없습니다.") }
+        let pipeline = ImagePipeline()
+        let wall = CGPoint(x: 0.2, y: 0.45)
+        func cast(_ edits: EditSettings) throws -> (blue: Double, green: Double) {
+            let image = try pipeline.renderPreview(url: url, edits: edits, maxPixel: AutoAdjust.measurePixels).image
+            let gray = AutoAdjust.Stats(image, neutralIndices: AutoAdjust.patch(around: wall, width: image.width,
+                                                                                 height: image.height)).gray
+            return (gray.b - gray.r, gray.g - (gray.r + gray.b) / 2)
+        }
+        let result = try AutoAdjust.whiteBalance(url: url, current: .neutral, at: wall, pipeline: pipeline)
+        let before = try cast(.neutral), after = try cast(result.edits)
+        print(String(format: "  S9 wall: %.0fK tint %.1f, b-r %.4f → %.4f, g-rb %.4f → %.4f, %d renders",
+                     result.edits.temperatureShift, result.edits.tintShift, before.blue, after.blue,
+                     before.green, after.green, result.renders))
+        XCTAssertLessThanOrEqual(abs(after.blue), max(0.004, abs(before.blue) * 0.5))
+        XCTAssertLessThanOrEqual(abs(after.green), max(0.004, abs(before.green) * 0.5))
     }
 }

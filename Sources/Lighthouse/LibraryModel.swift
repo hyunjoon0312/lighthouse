@@ -234,6 +234,8 @@ final class LibraryModel: ObservableObject {
     @Published var histogram: ImageHistogram?
     @Published var showsClipping = false { didSet { refreshClippingOverlay() } }
     @Published var isAutoAdjusting = false
+    /// 흰색 기준 찍기 중이다. 사진을 누르면 그곳이 회색이 되게 색온도·틴트를 맞춘다.
+    @Published var isPickingWhiteBalance = false
     /// 여러 장 보기에서 사진마다 그린 모습과 그때의 보정.
     @Published var surveyImages: [UUID: NSImage] = [:]
     var surveyRenderedEdits: [UUID: EditSettings] = [:]
@@ -870,6 +872,7 @@ final class LibraryModel: ObservableObject {
 
     func setMode(_ newMode: WorkspaceMode) {
         NSApp.keyWindow?.makeFirstResponder(nil)
+        isPickingWhiteBalance = false
         if newMode != .edit { cancelDraft(); cancelRetouchDraft(); isLocalEditing = false }
         if newMode == .compare && mode != .compare {
             pinnedID = selectedID
@@ -1043,6 +1046,45 @@ final class LibraryModel: ObservableObject {
                 case .failure(let error):
                     AppLog.render.error("auto adjust failed: \(error.localizedDescription, privacy: .private)")
                     self.operationMessage = "자동 보정을 할 수 없습니다: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    /// 흰색 기준 찍기를 시작한다. 사진 보기(화면 맞춤, 보정 보기)에서 사진을 누르면 된다.
+    func beginWhiteBalancePick() {
+        guard catalogLoaded, loadError == nil, selection != nil, !isAutoAdjusting else { return }
+        if mode != .edit { setMode(.edit) }
+        if actualSize { actualSize = false }
+        if isOriginal { isOriginal = false }
+        isPickingWhiteBalance = true
+        requestRender()
+    }
+
+    /// 누른 곳(구도를 적용한 사진의 0…1 좌표, 위쪽이 0)이 회색이 되게 색온도·틴트를 맞춘다. 한 번에 실행 취소된다.
+    func pickWhiteBalance(at point: CGPoint) {
+        isPickingWhiteBalance = false
+        guard catalogLoaded, loadError == nil, !isAutoAdjusting, let photo = selection else { return }
+        isAutoAdjusting = true
+        autoAdjustQueue.async { [pipeline] in
+            let result = Result { try AutoAdjust.whiteBalance(url: photo.url, current: photo.edits, at: point, pipeline: pipeline) }
+            DispatchQueue.main.async {
+                self.isAutoAdjusting = false
+                switch result {
+                case .success(let suggestion):
+                    guard self.selectedID == photo.id, self.selection?.edits == photo.edits else {
+                        self.operationMessage = "흰색 기준을 계산하는 동안 사진이나 보정이 바뀌어 적용하지 않았습니다."
+                        return
+                    }
+                    self.updateEdits(suggestion.edits)
+                    let edits = suggestion.edits
+                    let atLimit = abs(edits.temperatureShift) >= 2500 || abs(edits.tintShift) >= 100
+                    self.operationMessage = String(format: "누른 곳을 회색으로 맞췄습니다: 색온도 %+.0f K · 틴트 %+.0f.",
+                                                   edits.temperatureShift, edits.tintShift) +
+                        (atLimit ? " 슬라이더 끝까지 옮겨도 다 맞추지 못했습니다." : "") + " ⌘Z로 되돌릴 수 있습니다."
+                case .failure(let error):
+                    AppLog.render.error("white balance pick failed: \(error.localizedDescription, privacy: .private)")
+                    self.operationMessage = "흰색 기준을 맞출 수 없습니다: \(error.localizedDescription)"
                 }
             }
         }

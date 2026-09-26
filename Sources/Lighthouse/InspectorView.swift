@@ -120,7 +120,16 @@ struct InspectorView: View {
             adjustment("섀도", \.shadows, range: 0...1) { $0 == 0 ? "0" : String(format: "%+.0f", $0 * 100) }
             adjustment("명료도", \.clarity, range: -1...1, format: "%+.2f")
             Divider()
-            section("색상")
+            HStack {
+                section("색상")
+                Spacer()
+                if model.isAutoAdjusting { ProgressView().controlSize(.small) }
+                Button { model.beginWhiteBalancePick() } label: { Label("회색 찍기", systemImage: "eyedropper") }
+                    .font(.caption).buttonStyle(.bordered)
+                    .disabled(model.isAutoAdjusting || model.isMissing(photo))
+                    .help("사진에서 회색·흰색이어야 할 곳을 눌러 색온도·틴트를 맞춥니다. Esc로 취소, ⌘Z로 되돌립니다")
+                    .accessibilityLabel("흰색 기준 찍기")
+            }
             adjustment("색온도 이동", \.temperatureShift, range: -2500...2500, format: "%.0f K")
             adjustment("틴트", \.tintShift, range: -100...100, format: "%.0f")
             adjustment("생동감", \.vibrance, range: -1...1, format: "%+.2f")

@@ -18,36 +18,13 @@ public enum AutoAdjust {
     /// 매번 실제로 현상해 잰다. 편집 미리보기의 빠른 근사는 S9에서 색이 실제보다 1.5–2배 움직여 쓰지 않는다.
     /// 색 변화는 색온도·틴트에 거의 비례해 할선법으로 축마다 2–3번이면 찾는다(S9 RAW 약 9번 현상).
     public static func suggest(url: URL, current: EditSettings, pipeline: ImagePipeline) throws -> Result {
-        var renders = 0
-        // 구도만 남긴 상태로 잰다. 크롭한 부분만 보고, 이미 적용한 톤·색 보정에 끌려가지 않는다.
-        var probe = EditSettings.neutral.merging(from: current, components: .geometry)
-        probe.rawDevelop = current.rawDevelop
-        var reference: [Int]?
-        func measure(_ edits: EditSettings) throws -> Stats {
-            renders += 1
-            let stats = Stats(try pipeline.renderPreview(url: url, edits: edits, maxPixel: measurePixels).image,
-                              neutralIndices: reference)
-            reference = stats.neutralIndices
-            return stats
-        }
-        func blueCast(_ stats: Stats) -> Double { stats.gray.b - stats.gray.r }
-        func greenCast(_ stats: Stats) -> Double { stats.gray.g - (stats.gray.r + stats.gray.b) / 2 }
+        var measurement = Measurement(url: url, current: current, pipeline: pipeline)
         // 처음 모습에서 기준 픽셀을 한 번 고른다.
-        let start = try measure(probe)
+        let start = try measurement.measure()
+        try measurement.neutralize(from: start, temperatureLimit: temperatureLimit, tintLimit: tintLimit)
+        let probe = measurement.probe
 
-        // 색온도를 올리면 따뜻해져(파랑↓ 빨강↑) 회색 부분의 파랑−빨강 차이가 줄어든다. 차이가 0이 되는 곳을 찾는다.
-        probe.temperatureShift = try solve(from: blueCast(start), step: 400, limit: temperatureLimit) { value in
-            probe.temperatureShift = value
-            return blueCast(try measure(probe))
-        }
-        // 틴트를 올리면 마젠타로 가(초록↓) 초록−(빨강·파랑 평균) 차이가 줄어든다.
-        let warmed = try measure(probe)
-        probe.tintShift = try solve(from: greenCast(warmed), step: 10, limit: tintLimit) { value in
-            probe.tintShift = value
-            return greenCast(try measure(probe))
-        }
-
-        let stats = try measure(probe)
+        let stats = try measurement.measure()
         // 평균 밝기(로그 평균)를 18% 회색(sRGB 약 0.46)에 맞춘다. 밝게 할 때는 가장 밝은 0.5%가 잘리지 않는 만큼만 올리고
         // 남은 어두운 부분은 섀도로 끌어올린다. 흰 벽과 짙은 그늘이 함께 있는 사진을 날리지 않기 위해서다.
         let key = min(2, max(-2, log2(0.18 / max(0.002, stats.logAverage))))
@@ -63,7 +40,79 @@ public enum AutoAdjust {
         result.exposure = (exposure * 100).rounded() / 100
         result.highlights = clipped > 0.02 ? 0.6 : clipped > 0.005 ? 0.8 : 1
         result.shadows = crushed > 0.10 ? 0.3 : crushed > 0.03 ? 0.15 : 0
-        return Result(edits: result, renders: renders)
+        return Result(edits: result, renders: measurement.renders)
+    }
+
+    /// 누른 곳이 회색이 되도록 색온도·틴트만 정한다(흰색 기준 찍기). `point`는 구도를 적용한 사진의 0…1 좌표이며
+    /// y는 위쪽이 0이다. 누른 곳 주변 작은 영역을 기준으로 삼고, 사람이 고른 곳이라 자동 보정보다 넓게(슬라이더 끝까지) 움직인다.
+    public static func whiteBalance(url: URL, current: EditSettings, at point: CGPoint,
+                                    pipeline: ImagePipeline) throws -> Result {
+        var measurement = Measurement(url: url, current: current, pipeline: pipeline)
+        let first = try measurement.render()
+        measurement.reference = patch(around: point, width: first.width, height: first.height)
+        let start = Stats(first, neutralIndices: measurement.reference)
+        try measurement.neutralize(from: start, temperatureLimit: 2500, tintLimit: 100)
+        var result = current
+        result.temperatureShift = (measurement.probe.temperatureShift * 10).rounded() / 10
+        result.tintShift = (measurement.probe.tintShift * 10).rounded() / 10
+        return Result(edits: result, renders: measurement.renders)
+    }
+
+    /// 누른 곳을 가운데로 한 사각형(짧은 변의 약 3%) 안의 픽셀 위치.
+    static func patch(around point: CGPoint, width: Int, height: Int) -> [Int] {
+        let radius = max(1, Int((Double(min(width, height)) * 0.015).rounded()))
+        let centerX = min(width - 1, max(0, Int(point.x * Double(width))))
+        let centerY = min(height - 1, max(0, Int(point.y * Double(height))))
+        var indices: [Int] = []
+        for y in max(0, centerY - radius)...min(height - 1, centerY + radius) {
+            for x in max(0, centerX - radius)...min(width - 1, centerX + radius) { indices.append(y * width + x) }
+        }
+        return indices
+    }
+
+    /// 구도만 남긴 상태로 작게 그려 잰다. 크롭한 부분만 보고, 이미 적용한 톤·색 보정에 끌려가지 않는다.
+    struct Measurement {
+        let url: URL
+        let pipeline: ImagePipeline
+        var probe: EditSettings
+        var reference: [Int]?
+        var renders = 0
+
+        init(url: URL, current: EditSettings, pipeline: ImagePipeline) {
+            self.url = url
+            self.pipeline = pipeline
+            probe = EditSettings.neutral.merging(from: current, components: .geometry)
+            probe.rawDevelop = current.rawDevelop
+        }
+
+        mutating func render() throws -> CGImage {
+            renders += 1
+            return try pipeline.renderPreview(url: url, edits: probe, maxPixel: measurePixels).image
+        }
+
+        /// 처음 잴 때 고른 기준 픽셀을 다음 측정에도 쓴다.
+        mutating func measure() throws -> Stats {
+            let stats = Stats(try render(), neutralIndices: reference)
+            reference = stats.neutralIndices
+            return stats
+        }
+
+        /// 기준 픽셀의 색이 회색이 되도록 색온도, 이어서 틴트를 찾는다.
+        mutating func neutralize(from start: Stats, temperatureLimit: Double, tintLimit: Double) throws {
+            func blueCast(_ stats: Stats) -> Double { stats.gray.b - stats.gray.r }
+            func greenCast(_ stats: Stats) -> Double { stats.gray.g - (stats.gray.r + stats.gray.b) / 2 }
+            // 색온도를 올리면 따뜻해져(파랑↓ 빨강↑) 회색 부분의 파랑−빨강 차이가 줄어든다. 차이가 0이 되는 곳을 찾는다.
+            probe.temperatureShift = try AutoAdjust.solve(from: blueCast(start), step: 400, limit: temperatureLimit) { value in
+                probe.temperatureShift = value
+                return blueCast(try measure())
+            }
+            // 틴트를 올리면 마젠타로 가(초록↓) 초록−(빨강·파랑 평균) 차이가 줄어든다.
+            let warmed = try measure()
+            probe.tintShift = try AutoAdjust.solve(from: greenCast(warmed), step: 10, limit: tintLimit) { value in
+                probe.tintShift = value
+                return greenCast(try measure())
+            }
+        }
     }
 
     /// `function(0) = start`에서 시작해 `function`이 0이 되는 값을 할선법으로 찾는다. 값이 커질수록 `function`이
