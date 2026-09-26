@@ -68,12 +68,18 @@ extension LibraryModel {
         objectWillChange.send()
     }
 
+    /// HDR을 표시할 수 있는 화면이 있는지. 없으면 HDR 하이라이트를 쓴 사진도 SDR로 그려 시간을 아낀다.
+    static var hdrDisplayAvailable: Bool {
+        NSScreen.screens.contains { $0.maximumPotentialExtendedDynamicRangeColorComponentValue > 1 }
+    }
+
+    /// 썸네일은 sRGB 8비트로 줄인다. HDR로 그린 결과도 SDR 흰색에서 잘린다.
     nonisolated private static func downscaled(_ image: CGImage, maxPixel: Int) -> CGImage? {
         let scale = min(1, Double(maxPixel) / Double(max(image.width, image.height)))
         let width = max(1, Int((Double(image.width) * scale).rounded()))
         let height = max(1, Int((Double(image.height) * scale).rounded()))
         guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
-                                      space: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         context.interpolationQuality = .high
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
@@ -136,11 +142,12 @@ extension LibraryModel {
         let approximate = editDragActive && !isOriginal && !actualSize
         requestedApproximation = approximate
         let thumbnailSize = renderCurrent && !isOriginal && edits.isModified ? Self.thumbnailPixels : nil
+        let hdr = !isOriginal && photo.isRAW && edits.hdrAmount > 0 && Self.hdrDisplayAvailable
         // 백그라운드 큐에서 돈다. @Sendable로 표시해 화면 상태를 여기서 건드리지 않는지 컴파일러가 검사하게 한다.
         let job = DispatchWorkItem { @Sendable [previewPipeline] in
             let preview = renderCurrent
                 ? Result { try previewPipeline.renderPreview(url: photo.url, edits: edits, maxPixel: maxPixel,
-                                                             allowApproximation: approximate) } : nil
+                                                             allowApproximation: approximate, hdr: hdr) } : nil
             let current = preview.map { result in result.map(\.image) }
             let isApproximate = (try? preview?.get())?.isApproximate ?? false
             let thumbnail = isApproximate ? nil : thumbnailSize.flatMap { size in

@@ -200,11 +200,12 @@ public final class ImagePipeline: @unchecked Sendable {
     /// 화면 표시용. RAW는 출력에 필요한 만큼 줄여서 현상해 메모리를 아낀다. 원본 해상도로 현상해 줄인 결과와
     /// 픽셀이 같지는 않다. `allowApproximation`이면 RAW 노출·색온도·틴트만 바뀐 경우 최근 현상 결과에 차이를
     /// 덧씌워 RAW를 다시 현상하지 않고 그린다(슬라이더를 끄는 동안). 근사 결과인지 함께 돌려주므로 끝난 뒤 정확히 다시 그린다.
+    /// `hdr`이면 HDR 하이라이트를 쓴 RAW를 확장 범위(Display P3 선형, 16비트 부동소수)로 그린다. 근사로 그릴 때는 SDR이다.
     public func renderPreview(url: URL, edits: EditSettings, maxPixel: Int?,
-                              allowApproximation: Bool = false) throws -> (image: CGImage, isApproximate: Bool) {
+                              allowApproximation: Bool = false, hdr: Bool = false) throws -> (image: CGImage, isApproximate: Bool) {
         try render(url: url, edits: edits, maxPixel: maxPixel,
                    scale: decodeScale(url: url, edits: edits, maxPixel: maxPixel),
-                   allowApproximation: allowApproximation)
+                   allowApproximation: allowApproximation, hdr: hdr)
     }
 
     /// 화면에 필요한 해상도 비율의 1.6배보다 크거나 같은 2^(-k/4) 값(최소 1/8). 크롭을 조금 바꿔도 같은 값이 나와
@@ -262,8 +263,53 @@ public final class ImagePipeline: @unchecked Sendable {
     }
 
     private func render(url: URL, edits: EditSettings, maxPixel: Int?, scale: Double, allowApproximation: Bool,
-                        format: CIFormat = .RGBA8,
-                        colorSpace outputSpace: CGColorSpace? = nil) throws -> (image: CGImage, isApproximate: Bool) {
+                        format: CIFormat = .RGBA8, colorSpace outputSpace: CGColorSpace? = nil,
+                        hdr: Bool = false) throws -> (image: CGImage, isApproximate: Bool) {
+        let composition = try composed(url: url, edits: edits, maxPixel: maxPixel, scale: scale,
+                                       allowApproximation: allowApproximation)
+        var image = composition.image
+        var format = format, space = outputSpace ?? colorSpace
+        if hdr, let gain = try hdrGain(for: composition, url: url, edits: edits, maxPixel: maxPixel, scale: scale) {
+            image = Self.applying(gain, to: image)
+            format = .RGBAh
+            space = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)!
+        }
+        let rect = CGRect(x: 0, y: 0, width: floor(image.extent.width), height: floor(image.extent.height))
+        guard rect.width > 0, rect.height > 0,
+              let result = context.createCGImage(image, from: rect, format: format, colorSpace: space) else {
+            throw ImagePipelineError.renderFailed(url)
+        }
+        return (result, composition.isApproximate)
+    }
+
+    /// 내보내기용 원본 해상도 구성.
+    func composedForExport(url: URL, edits: EditSettings, maxPixel: Int?) throws -> Composition {
+        try composed(url: url, edits: edits, maxPixel: maxPixel, scale: 1, allowApproximation: false)
+    }
+
+    func outputImage(_ image: CIImage, url: URL, format: CIFormat, colorSpace outputSpace: CGColorSpace) throws -> CGImage {
+        let rect = CGRect(x: 0, y: 0, width: floor(image.extent.width), height: floor(image.extent.height))
+        guard rect.width > 0, rect.height > 0,
+              let result = context.createCGImage(image, from: rect, format: format, colorSpace: outputSpace) else {
+            throw ImagePipelineError.renderFailed(url)
+        }
+        return result
+    }
+
+    /// 보정을 모두 적용한 작업 공간 이미지와, HDR 배율을 같은 구도로 옮기는 데 필요한 현상 결과·위치.
+    struct Composition {
+        let image: CIImage
+        let isApproximate: Bool
+        /// 보정 전 RAW 현상 결과(근사가 아닐 때).
+        let source: CIImage
+        /// 현상 결과를 원점으로 옮긴 거리.
+        let offset: CGPoint
+        /// 구도(회전·크롭·크기)를 적용하기 전의 범위.
+        let baseExtent: CGRect
+    }
+
+    func composed(url: URL, edits: EditSettings, maxPixel: Int?, scale: Double,
+                          allowApproximation: Bool) throws -> Composition {
         let development = try developed(url: url, edits: edits, scale: scale, allowApproximation: allowApproximation)
         var image = development.image
         image = try RetouchProcessor.apply(to: image, strokes: edits.retouchStrokes,
@@ -313,15 +359,40 @@ public final class ImagePipeline: @unchecked Sendable {
             }
         }
         image = try AdvancedColorProcessor.applyGrain(to: image, settings: edits.grain)
+        let baseExtent = image.extent
         image = transformedForDisplay(image, edits: edits, maxPixel: maxPixel)
         image = applyVignette(edits.vignette, to: image)
-        let rect = CGRect(x: 0, y: 0, width: floor(image.extent.width), height: floor(image.extent.height))
-        guard rect.width > 0, rect.height > 0,
-              let result = context.createCGImage(image, from: rect, format: format,
-                                                 colorSpace: outputSpace ?? colorSpace) else {
-            throw ImagePipelineError.renderFailed(url)
-        }
-        return (result, development.isApproximate)
+        return Composition(image: image, isApproximate: development.isApproximate, source: development.source,
+                           offset: development.offset, baseExtent: baseExtent)
+    }
+
+    /// HDR 하이라이트의 밝기 배율(1 이상). RAW를 확장 범위로 한 번 더 현상해 보통 현상과의 밝기 비율을 구하고
+    /// 보정 결과와 같은 구도로 옮긴다. 톤·색 보정은 SDR 결과를 그대로 따르고 밝은 부분만 화면의 여유 밝기로 올라간다.
+    /// RAW가 아니거나, HDR을 쓰지 않거나, 근사로 그린 결과면 nil이다.
+    func hdrGain(for composition: Composition, url: URL, edits: EditSettings, maxPixel: Int?,
+                 scale: Double) throws -> CIImage? {
+        guard edits.hdrAmount > 0, edits.hdrAmount.isFinite, Self.isRAW(url), !composition.isApproximate else { return nil }
+        let extended = try developedSource(url: url, edits: edits, scale: scale, allowApproximation: false,
+                                           extendedRange: min(2, edits.hdrAmount)).image
+        let gain = Self.brightnessRatio(standard: composition.source, extended: extended)
+            .transformed(by: CGAffineTransform(translationX: composition.offset.x, y: composition.offset.y))
+            .cropped(to: composition.baseExtent)
+        return transformedForDisplay(gain, edits: edits, maxPixel: maxPixel).cropped(to: composition.image.extent)
+    }
+
+    /// 확장 범위 현상의 밝기를 보통 현상의 밝기로 나눈 값(1…16). 세 채널에 같은 값을 넣는다.
+    /// Core Image의 나누기·곱하기 혼합 필터는 결과를 0…1로 잘라 직접 만든 커널을 쓴다.
+    static func brightnessRatio(standard: CIImage, extended: CIImage) -> CIImage {
+        guard let kernel = CoreImageKernels.brightnessRatio,
+              let ratio = kernel.apply(extent: standard.extent, arguments: [standard, extended]) else { return standard }
+        return ratio
+    }
+
+    /// 선형 작업 공간에서 밝기 배율을 곱한다.
+    static func applying(_ gain: CIImage, to image: CIImage) -> CIImage {
+        guard let kernel = CoreImageKernels.applyGain,
+              let result = kernel.apply(extent: image.extent, arguments: [image, gain]) else { return image }
+        return result
     }
 
     /// 새 스팟 복구의 패치 위치를 한 번 찾는다. 결과를 stroke에 저장하면 렌더마다 다시 찾지 않는다.
@@ -355,12 +426,13 @@ public final class ImagePipeline: @unchecked Sendable {
         return output
     }
 
-    private func developedSource(url: URL, edits: EditSettings, scale: Double,
-                                 allowApproximation: Bool) throws -> (image: CIImage, delta: DevelopmentDelta?) {
+    /// `extendedRange`는 RAW 디코더의 확장 범위 출력(0…2)이다. 0이 아니면 따로 기억한다.
+    private func developedSource(url: URL, edits: EditSettings, scale: Double, allowApproximation: Bool,
+                                 extendedRange: Double = 0) throws -> (image: CIImage, delta: DevelopmentDelta?) {
         guard cachesDevelopment else {
-            return (try makeDevelopedSource(url: url, edits: edits, scale: scale).image, nil)
+            return (try makeDevelopedSource(url: url, edits: edits, scale: scale, extendedRange: extendedRange).image, nil)
         }
-        var base = "\(Self.fileIdentity(url))|\(scale)"
+        var base = "\(Self.fileIdentity(url))|\(scale)|\(extendedRange)"
         var key = base
         if Self.isRAW(url) {
             base += "|\(edits.rawDevelop)"
@@ -381,7 +453,8 @@ public final class ImagePipeline: @unchecked Sendable {
                                                  neutralTemperature: near.neutralTemperature))
         }
         developmentLock.unlock()
-        let (image, neutralTemperature) = try makeDevelopedSource(url: url, edits: edits, scale: scale)
+        let (image, neutralTemperature) = try makeDevelopedSource(url: url, edits: edits, scale: scale,
+                                                                  extendedRange: extendedRange)
         developmentLock.lock()
         developedSources.removeAll { $0.key == key }
         developedSources.append(DevelopedSource(key: key, base: base, exposure: edits.exposure,
@@ -395,11 +468,12 @@ public final class ImagePipeline: @unchecked Sendable {
     }
 
     /// `scale`이 1보다 작으면 RAW 디코더가 줄여서 현상한다.
-    private func makeDevelopedSource(url: URL, edits: EditSettings,
-                                     scale: Double) throws -> (image: CIImage, neutralTemperature: Double?) {
+    private func makeDevelopedSource(url: URL, edits: EditSettings, scale: Double,
+                                     extendedRange: Double = 0) throws -> (image: CIImage, neutralTemperature: Double?) {
         if Self.isRAW(url) {
             guard let raw = CIRAWFilter(imageURL: url) else { throw ImagePipelineError.unreadable(url) }
             if scale < 1 { raw.scaleFactor = Float(scale) }
+            if extendedRange > 0 { raw.extendedDynamicRangeAmount = Float(extendedRange) }
             let originalExposure = raw.exposure
             let originalTemperature = raw.neutralTemperature
             let originalTint = raw.neutralTint
@@ -428,8 +502,8 @@ public final class ImagePipeline: @unchecked Sendable {
         return (source, nil)
     }
 
-    private func developed(url: URL, edits: EditSettings, scale: Double,
-                           allowApproximation: Bool) throws -> (image: CIImage, isApproximate: Bool) {
+    private func developed(url: URL, edits: EditSettings, scale: Double, allowApproximation: Bool)
+        throws -> (image: CIImage, isApproximate: Bool, source: CIImage, offset: CGPoint) {
         let source = try developedSource(url: url, edits: edits, scale: scale, allowApproximation: allowApproximation)
         var image = source.image
         if let delta = source.delta {
@@ -481,8 +555,9 @@ public final class ImagePipeline: @unchecked Sendable {
             if scale < 1 { filter.radius *= Float(scale) }
             image = filter.outputImage ?? image
         }
-        return (image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY)),
-                source.delta != nil)
+        let offset = CGPoint(x: -image.extent.minX, y: -image.extent.minY)
+        return (image.transformed(by: CGAffineTransform(translationX: offset.x, y: offset.y)),
+                source.delta != nil, source.image, offset)
     }
 
     /// RAW 현상 결과에 노출·색온도·틴트 차이를 덧씌운 근사. 색온도는 켈빈이 아니라 미레드(1/K) 차이로 옮긴다.

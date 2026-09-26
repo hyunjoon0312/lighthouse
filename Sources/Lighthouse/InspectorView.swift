@@ -287,6 +287,17 @@ struct InspectorView: View {
                     set: { enabled in change { $0.rawDevelop.highlightRecovery = enabled } }
                 )).font(.caption).accessibilityLabel("하이라이트 복구")
             }
+            SliderRow(title: "HDR 하이라이트", value: edits.hdrAmount, range: 0...2,
+                      valueText: edits.hdrAmount == 0 ? "끔" : String(format: "%.1f", edits.hdrAmount),
+                      set: { value in change(continuous: true) { $0.hdrAmount = value < 0.05 ? 0 : value } },
+                      end: { model.endContinuousEdit() },
+                      reset: { change { $0.hdrAmount = 0 } })
+            if edits.hdrAmount > 0 {
+                Text(LibraryModel.hdrDisplayAvailable
+                     ? "SDR 흰색을 넘는 밝은 부분이 HDR 화면에서 더 밝게 보입니다. 노출을 올릴수록 커지며, HEIF·JPEG로 내보내면 게인 맵이 들어갑니다."
+                     : "이 화면은 HDR을 표시하지 못해 SDR로 보입니다. HEIF·JPEG로 내보내면 게인 맵이 들어가 HDR 화면에서 밝게 보입니다.")
+                    .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             if capabilities == RAWCapabilities(luminanceNoiseReduction: nil, colorNoiseReduction: nil,
                                                lensCorrection: nil, highlightRecovery: nil) {
                 Text("이 RAW는 macOS 디코더에서 조절할 수 있는 현상 항목이 없습니다.")

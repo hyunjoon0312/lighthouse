@@ -34,6 +34,7 @@ public extension EditSettings {
             result.vibrance = source.vibrance
             result.clarity = source.clarity
             result.vignette = source.vignette
+            result.hdrAmount = source.hdrAmount
         }
         if components.contains(.lut) {
             result.lut = source.lut

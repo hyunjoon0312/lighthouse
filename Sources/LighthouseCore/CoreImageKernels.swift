@@ -40,6 +40,22 @@ enum CoreImageKernels {
         }
         """)
 
+    /// 확장 범위 현상과 보통 현상의 밝기 비율(1…16)을 세 채널에 넣는다(HDR 배율). 기본 혼합 필터는 0…1로 잘라 쓰지 않는다.
+    static let brightnessRatio = compile("""
+        [[stitchable]] float4 lighthouseBrightnessRatio(coreimage::sample_t standard, coreimage::sample_t extended) {
+            float3 weights = float3(0.2126, 0.7152, 0.0722);
+            float ratio = (dot(extended.rgb, weights) + 0.002) / (dot(standard.rgb, weights) + 0.002);
+            return float4(float3(clamp(ratio, 1.0, 16.0)), 1.0);
+        }
+        """)
+
+    /// 선형 값에 배율을 곱한다. 1을 넘는 값을 그대로 둔다.
+    static let applyGain = compile("""
+        [[stitchable]] float4 lighthouseApplyGain(coreimage::sample_t image, coreimage::sample_t gain) {
+            return float4(image.rgb * gain.r, image.a);
+        }
+        """)
+
     private static func compile(_ body: String) -> CIColorKernel? {
         let source = """
             #include <metal_stdlib>

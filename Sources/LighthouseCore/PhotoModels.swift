@@ -166,6 +166,8 @@ public struct EditSettings: Codable, Equatable, Sendable {
     public var vibrance: Double
     public var clarity: Double
     public var vignette: Double
+    /// RAW HDR 하이라이트(0…2). 0이면 쓰지 않는다. HDR 화면에서 밝은 부분을 더 밝게 보이고 HEIF·JPEG에 게인 맵을 넣는다.
+    public var hdrAmount: Double
 
     public init(exposure: Double = 0, contrast: Double = 1, saturation: Double = 1,
                 temperatureShift: Double = 0, tintShift: Double = 0, highlights: Double = 1,
@@ -175,7 +177,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
                 colorRanges: [ColorRangeAdjustment] = [], grain: GrainSettings = GrainSettings(),
                 straightenDegrees: Double = 0, cropRect: NormalizedCrop? = nil,
                 retouchStrokes: [RetouchStroke] = [], rawDevelop: RAWDevelopSettings = RAWDevelopSettings(),
-                vibrance: Double = 0, clarity: Double = 0, vignette: Double = 0) {
+                vibrance: Double = 0, clarity: Double = 0, vignette: Double = 0, hdrAmount: Double = 0) {
         self.exposure = exposure
         self.contrast = contrast
         self.saturation = saturation
@@ -198,6 +200,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
         self.vibrance = vibrance
         self.clarity = clarity
         self.vignette = vignette
+        self.hdrAmount = hdrAmount
     }
 
     public static let neutral = EditSettings()
@@ -207,7 +210,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
         case exposure, contrast, saturation, temperatureShift, tintShift, highlights, shadows
         case sharpness, rotationQuarterTurns, cropAspect, localAdjustments, lut
         case curves, colorRanges, grain, straightenDegrees, cropRect, retouchStrokes, rawDevelop
-        case vibrance, clarity, vignette
+        case vibrance, clarity, vignette, hdrAmount
     }
 
     public init(from decoder: Decoder) throws {
@@ -241,6 +244,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
         vibrance = try container.decodeIfPresent(Double.self, forKey: .vibrance) ?? 0
         clarity = try container.decodeIfPresent(Double.self, forKey: .clarity) ?? 0
         vignette = try container.decodeIfPresent(Double.self, forKey: .vignette) ?? 0
+        hdrAmount = try container.decodeIfPresent(Double.self, forKey: .hdrAmount) ?? 0
     }
 }
 

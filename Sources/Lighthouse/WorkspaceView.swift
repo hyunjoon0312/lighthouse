@@ -548,7 +548,8 @@ struct WorkspaceView: View {
                         }
                     } else {
                         let splitting = zoomable && model.isSplitActive
-                        Image(nsImage: image).resizable().interpolation(.high).scaledToFit().padding(20)
+                        Image(nsImage: image).resizable().interpolation(.high).allowedDynamicRange(.high)
+                            .scaledToFit().padding(20)
                         if zoomable && !splitting {
                             Color.clear.contentShape(Rectangle())
                                 .onTapGesture(coordinateSpace: .local) { location in
@@ -595,7 +596,7 @@ struct WorkspaceView: View {
                                   viewport: CGSize) -> some View {
         ScrollView([.horizontal, .vertical]) {
             ZStack {
-                Image(nsImage: image).resizable().interpolation(.high)
+                Image(nsImage: image).resizable().interpolation(.high).allowedDynamicRange(.high)
                 if let overlay {
                     Image(nsImage: overlay).resizable().interpolation(.none).allowsHitTesting(false)
                 }

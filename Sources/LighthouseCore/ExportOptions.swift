@@ -36,6 +36,9 @@ public enum ExportFormat: String, Codable, CaseIterable, Sendable {
     /// 품질 설정을 쓰는 손실 압축인지.
     public var usesQuality: Bool { self != .tiff16 }
 
+    /// HDR 게인 맵을 넣을 수 있는지. TIFF는 SDR로만 쓴다.
+    public var supportsHDR: Bool { self != .tiff16 }
+
     var renderFormat: CIFormat { self == .jpeg ? .RGBA8 : .RGBA16 }
 }
 
@@ -124,10 +127,12 @@ public struct ExportOptions: Codable, Equatable, Sendable {
     public var watermark: Watermark?
     public var format: ExportFormat
     public var colorSpace: ExportColorSpace
+    /// HDR 하이라이트를 쓴 RAW를 게인 맵이 든 HDR 파일(JPEG·HEIF)로 쓴다. HDR을 모르는 곳에서는 SDR로 보인다.
+    public var includesHDR: Bool
 
     public init(maxPixel: Int? = nil, quality: Double = 0.85, includeLocation: Bool = false,
                 filenameTemplate: String = ExportOptions.defaultFilenameTemplate, watermark: Watermark? = nil,
-                format: ExportFormat = .jpeg, colorSpace: ExportColorSpace = .sRGB) {
+                format: ExportFormat = .jpeg, colorSpace: ExportColorSpace = .sRGB, includesHDR: Bool = true) {
         self.maxPixel = maxPixel
         self.quality = quality
         self.includeLocation = includeLocation
@@ -135,10 +140,11 @@ public struct ExportOptions: Codable, Equatable, Sendable {
         self.watermark = watermark
         self.format = format
         self.colorSpace = colorSpace
+        self.includesHDR = includesHDR
     }
 
     private enum CodingKeys: String, CodingKey {
-        case maxPixel, quality, includeLocation, filenameTemplate, watermark, format, colorSpace
+        case maxPixel, quality, includeLocation, filenameTemplate, watermark, format, colorSpace, includesHDR
     }
 
     /// 형식·색 공간이 없던 예전 설정과 프리셋은 JPEG·sRGB로 읽는다.
@@ -151,6 +157,7 @@ public struct ExportOptions: Codable, Equatable, Sendable {
         watermark = try container.decodeIfPresent(Watermark.self, forKey: .watermark)
         format = try container.decodeIfPresent(ExportFormat.self, forKey: .format) ?? .jpeg
         colorSpace = try container.decodeIfPresent(ExportColorSpace.self, forKey: .colorSpace) ?? .sRGB
+        includesHDR = try container.decodeIfPresent(Bool.self, forKey: .includesHDR) ?? true
     }
 
     /// `{원본}` 원본 파일 이름, `{날짜}` 촬영일(yyyy-MM-dd), `{시간}` 촬영 시각(HHmmss), `{번호}` 이번 내보내기의 순번(001부터),

@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
@@ -31,11 +32,19 @@ public extension ImagePipeline {
     func prepareExport(url: URL, edits: EditSettings, options: ExportOptions,
                        keywords: [String] = [], caption: String = "") throws -> JPEGPreview {
         guard options.quality.isFinite else { throw ImagePipelineError.invalidJPEGQuality }
-        var rendered = try render(url: url, edits: edits, maxPixel: options.maxPixel,
-                                  format: options.format.renderFormat, colorSpace: options.colorSpace.cgColorSpace)
+        let composition = try composedForExport(url: url, edits: edits, maxPixel: options.maxPixel)
+        var rendered = try outputImage(composition.image, url: url, format: options.format.renderFormat,
+                                       colorSpace: options.colorSpace.cgColorSpace)
         if let watermark = options.watermark {
             guard let marked = watermark.applied(to: rendered) else { throw ImagePipelineError.exportFailed(url) }
             rendered = marked
+        }
+        if options.includesHDR, options.format.supportsHDR,
+           let gain = try hdrGain(for: composition, url: url, edits: edits, maxPixel: options.maxPixel, scale: 1) {
+            let metadata = Self.exportMetadata(from: url, width: rendered.width, height: rendered.height,
+                                               includeLocation: options.includeLocation, keywords: keywords,
+                                               caption: caption, colorSpace: options.colorSpace)
+            return try hdrExport(rendered, gain: gain, metadata: metadata, options: options, url: url)
         }
         if options.format == .tiff16 {
             // TIFF는 알파가 있으면 채널을 하나 더 저장한다(24MP 183MB → 137MB). HEIF는 알파를 저장하지 않고,
@@ -63,6 +72,29 @@ public extension ImagePipeline {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               let decoded = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw ImagePipelineError.invalidJPEGData
+        }
+        return JPEGPreview(data: data, image: decoded)
+    }
+
+    /// SDR 결과(워터마크 포함)를 기본 이미지로, 배율을 곱한 HDR 이미지로 게인 맵을 만들어 JPEG·HEIF(10비트)로 쓴다.
+    /// HDR을 모르는 앱·화면에서는 기본 이미지(SDR)가 보인다. 촬영 정보·키워드는 기본 이미지의 속성으로 넣는다.
+    private func hdrExport(_ standard: CGImage, gain: CIImage, metadata: [CFString: Any], options: ExportOptions,
+                           url: URL) throws -> JPEGPreview {
+        let space = options.colorSpace.cgColorSpace
+        let base = CIImage(cgImage: standard, options: [.properties: metadata as NSDictionary])
+        let hdr = Self.applying(gain, to: CIImage(cgImage: standard))
+        var representation: [CIImageRepresentationOption: Any] = [.hdrImage: hdr]
+        representation[CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String)] =
+            min(1, max(0, options.quality))
+        let encoded: Data?
+        switch options.format {
+        case .jpeg: encoded = context.jpegRepresentation(of: base, colorSpace: space, options: representation)
+        case .heif: encoded = try context.heif10Representation(of: base, colorSpace: space, options: representation)
+        case .tiff16: encoded = nil
+        }
+        guard let data = encoded, let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let decoded = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw ImagePipelineError.exportFailed(url)
         }
         return JPEGPreview(data: data, image: decoded)
     }

@@ -147,6 +147,13 @@ struct ExportSheet: View {
                 ForEach(ExportFormat.allCases, id: \.self) { Text($0.title).tag($0) }
             }
             .accessibilityLabel("파일 형식")
+            if targets.contains(where: { $0.isRAW && $0.edits.hdrAmount > 0 }) {
+                Toggle("HDR 하이라이트를 쓴 사진은 HDR로 저장", isOn: $options.includesHDR)
+                    .help("SDR 이미지에 게인 맵을 더해 HDR 화면에서는 밝은 부분이 더 밝게, 그 밖에서는 SDR로 보입니다")
+                if options.includesHDR && !options.format.supportsHDR {
+                    Text("TIFF는 SDR로만 저장합니다.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Picker("색 공간", selection: $options.colorSpace) {
                 ForEach(ExportColorSpace.allCases, id: \.self) { Text($0.title).tag($0) }
             }
