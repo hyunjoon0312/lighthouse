@@ -48,6 +48,8 @@ struct LighthouseApp: App {
                 Button("비교 (C)") { library.setMode(.compare) }
                     .disabled(library.hasModalPresentation)
                 Divider()
+                Button(library.showsSplit ? "나눠 보기 끄기 (Y)" : "보정 전·후 나눠 보기 (Y)") { library.toggleSplit() }
+                    .disabled(library.selection == nil || library.hasModalPresentation)
                 Button(library.isOriginal ? "보정 보기 (\\)" : "원본 보기 (\\)") { library.toggleOriginal() }
                     .disabled(library.selection == nil || library.hasModalPresentation)
                 Button(library.actualSize ? "화면 맞춤 (Z)" : "100% 보기 (Z)") { library.toggleActualSize() }

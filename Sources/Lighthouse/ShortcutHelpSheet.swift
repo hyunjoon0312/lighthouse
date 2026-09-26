@@ -26,6 +26,7 @@ enum ShortcutGuide {
             Entry(keys: "↑ / ↓", action: "그리드에서 위 / 아래 줄"),
             Entry(keys: "G / E / C", action: "그리드 / 사진 / 비교"),
             Entry(keys: "\\", action: "원본 보기 전환"),
+            Entry(keys: "Y", action: "보정 전·후 나눠 보기 (선을 끌어 옮기기)"),
             Entry(keys: "J", action: "하이라이트·섀도 잘림 표시"),
             Entry(keys: "Z", action: "100% 보기 전환 (가운데 기준)"),
             Entry(keys: "F / Esc", action: "사진만 크게 보기(패널을 숨기고 전체 화면) / 끝내기"),

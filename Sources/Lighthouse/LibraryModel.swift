@@ -219,6 +219,13 @@ final class LibraryModel: ObservableObject {
     @Published var isFocusView = false
     @Published var clippingOverlay: NSImage?
     @Published var zoomAnchor = CGPoint(x: 0.5, y: 0.5)
+    /// 사진 보기에서 보정 전(왼쪽)과 보정 후(오른쪽)를 한 장에 나눠 보인다(Y).
+    @Published var showsSplit = false
+    /// 나누는 선의 위치(사진 너비에 대한 비율).
+    @Published var splitPosition = 0.5
+    /// 구도(회전·크롭·수평)만 적용한 보정 전 모습. 보정 후 사진과 같은 크기로 겹친다.
+    @Published var splitBefore: NSImage?
+    var splitBeforeState: (id: UUID, edits: EditSettings)?
     /// 비교 모드의 기준 사진을 보정한 모습으로 보인다. 끄면 보정 전 원본이다.
     @Published var compareShowsPinnedEdits = UserDefaults.standard.object(forKey: "comparePinnedEdits") as? Bool ?? true {
         didSet {
@@ -284,6 +291,7 @@ final class LibraryModel: ObservableObject {
     let lutQueue = DispatchQueue(label: "com.rian.lighthouse.lut", qos: .userInitiated)
     let retouchQueue = DispatchQueue(label: "com.rian.lighthouse.retouch", qos: .userInitiated)
     let saveQueue = DispatchQueue(label: "com.rian.lighthouse.catalog", qos: .utility)
+    let splitQueue = DispatchQueue(label: "com.rian.lighthouse.split", qos: .userInitiated)
     var saveDelay: DispatchWorkItem?
     var renderDelay: DispatchWorkItem?
     var generation = 0

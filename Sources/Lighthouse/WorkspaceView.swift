@@ -503,6 +503,10 @@ struct WorkspaceView: View {
                     }
                     .accessibilityLabel(model.compareShowsPinnedEdits ? "기준 사진을 보정 전 원본으로 보기" : "기준 사진을 보정한 모습으로 보기")
                 }
+                if model.mode == .edit {
+                    Button(model.showsSplit ? "나눠 보기 끄기" : "전·후 나눠 보기") { model.toggleSplit() }
+                        .help("왼쪽은 보정 전, 오른쪽은 보정 후 (Y). 선을 끌어 옮깁니다.")
+                }
                 Button(model.actualSize ? "화면 맞춤" : "100%") { model.toggleActualSize() }
                 Button(model.isOriginal ? "보정 보기" : "원본 보기") { model.toggleOriginal() }
             }
@@ -541,8 +545,9 @@ struct WorkspaceView: View {
                             actualSizeScroll(image, overlay: overlay, content: content, viewport: geometry.size)
                         }
                     } else {
+                        let splitting = zoomable && model.isSplitActive
                         Image(nsImage: image).resizable().interpolation(.high).scaledToFit().padding(20)
-                        if zoomable {
+                        if zoomable && !splitting {
                             Color.clear.contentShape(Rectangle())
                                 .onTapGesture(coordinateSpace: .local) { location in
                                     zoomIn(at: location, imageSize: image.size, available: geometry.size)
@@ -553,7 +558,14 @@ struct WorkspaceView: View {
                             Image(nsImage: overlay).resizable().interpolation(.none).scaledToFit().padding(20)
                                 .allowsHitTesting(false)
                         }
-                        if model.mode == .edit, let photo = model.selection {
+                        if splitting {
+                            if let before = model.splitBefore {
+                                SplitBeforeOverlay(before: before, imageSize: image.size, available: geometry.size,
+                                                   position: $model.splitPosition)
+                            } else {
+                                ProgressView("보정 전 모습 그리는 중…").controlSize(.small)
+                            }
+                        } else if model.mode == .edit, let photo = model.selection {
                             BrushCanvasView(canvas: model.canvas, photo: photo, imageSize: image.size,
                                             availableSize: geometry.size)
                         }
@@ -700,6 +712,7 @@ struct WorkspaceView: View {
                 case "\\": model.toggleOriginal(); return nil
                 case "j": model.showsClipping.toggle(); return nil
                 case "f": model.toggleFocusView(); return nil
+                case "y": model.toggleSplit(); return nil
                 default: break
                 }
                 // Delete: 내 폴더에서는 그 폴더에서만 빼고, 그 밖에서는 카탈로그에서 뺄지 묻는다.
@@ -915,6 +928,48 @@ private struct BurstBar: View {
         .buttonStyle(.borderless)
         .padding(.horizontal, 20).padding(.vertical, 8)
         .background(Palette.panel)
+    }
+}
+
+/// 나눠 보기: 사진이 그려진 자리에 보정 전 모습을 겹쳐 나누는 선 왼쪽만 보인다. 사진 위 어디를 끌어도 선이 따라온다.
+private struct SplitBeforeOverlay: View {
+    let before: NSImage
+    let imageSize: NSSize
+    let available: CGSize
+    @Binding var position: Double
+
+    var body: some View {
+        let width = max(1, available.width - 40), height = max(1, available.height - 40)
+        let scale = min(width / max(1, imageSize.width), height / max(1, imageSize.height))
+        let fitted = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let origin = CGPoint(x: (available.width - fitted.width) / 2, y: (available.height - fitted.height) / 2)
+        let lineX = fitted.width * position
+        ZStack(alignment: .topLeading) {
+            Image(nsImage: before).resizable().interpolation(.high)
+                .frame(width: fitted.width, height: fitted.height)
+                .mask(alignment: .leading) { Rectangle().frame(width: lineX) }
+            Rectangle().fill(.white).frame(width: 2, height: fitted.height).offset(x: lineX - 1)
+            Image(systemName: "arrow.left.and.right.circle.fill").font(.title2).foregroundStyle(.white, .black.opacity(0.6))
+                .offset(x: lineX - 12, y: fitted.height / 2 - 12)
+            HStack {
+                Text("보정 전"); Spacer(); Text("보정 후")
+            }
+            .font(.caption.weight(.semibold)).padding(6)
+            .background(.black.opacity(0.001))
+            .frame(width: fitted.width)
+        }
+        .frame(width: fitted.width, height: fitted.height, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+            position = min(1, max(0, value.location.x / max(1, fitted.width)))
+        })
+        .position(x: origin.x + fitted.width / 2, y: origin.y + fitted.height / 2)
+        .accessibilityElement()
+        .accessibilityLabel("보정 전후 나누는 선")
+        .accessibilityValue("\(Int((position * 100).rounded()))%")
+        .accessibilityAdjustableAction { direction in
+            position = min(1, max(0, position + (direction == .increment ? 0.05 : -0.05)))
+        }
     }
 }
 

@@ -97,6 +97,7 @@ extension LibraryModel {
             clippingOverlay = nil
         }
         if mode != .compare { pinnedImage = nil; pinnedError = nil; pinnedSource = nil; pinnedRenderedEdits = nil }
+        requestSplitBefore()
         requestMask()
         refreshRAWCapabilities()
         guard mode != .grid, let photo = selection else { rendering = false; return }
@@ -225,6 +226,37 @@ extension LibraryModel {
         }
         renderDelay = dispatch
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: dispatch)
+    }
+
+    /// 나눠 보기의 보정 전 모습이 보여야 하는지.
+    var isSplitActive: Bool { showsSplit && mode == .edit && !isOriginal && !actualSize }
+
+    func toggleSplit() {
+        if mode != .edit { setMode(.edit) }
+        if isOriginal { isOriginal = false }
+        if actualSize { actualSize = false }
+        showsSplit.toggle()
+        requestRender()
+    }
+
+    /// 보정 전 모습은 구도만 적용해 그린다. 사진이나 구도가 바뀔 때만 다시 그리고, 다른 보정을 바꾸는 동안에는 그대로 둔다.
+    private func requestSplitBefore() {
+        guard isSplitActive, let photo = selection else {
+            splitBefore = nil
+            splitBeforeState = nil
+            return
+        }
+        let before = EditSettings.neutral.merging(from: photo.edits, components: .geometry)
+        if let state = splitBeforeState, state.id == photo.id, state.edits == before { return }
+        splitBefore = nil
+        splitBeforeState = (photo.id, before)
+        splitQueue.async { [pipeline] in
+            let image = try? pipeline.renderPreview(url: photo.url, edits: before, maxPixel: 2200).image
+            DispatchQueue.main.async {
+                guard let state = self.splitBeforeState, state.id == photo.id, state.edits == before else { return }
+                self.splitBefore = image.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+            }
+        }
     }
 
     /// 선택한 RAW에서 조절할 수 있는 디코더 항목과 기본값을 읽는다. 파일마다 한 번만 읽는다.
