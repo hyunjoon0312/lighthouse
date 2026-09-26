@@ -909,7 +909,9 @@ private struct PhotoTile: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: 7).fill(.white.opacity(0.06))
                     if let image = model.thumbnail(for: photo) {
+                        // 제외한 사진은 흐리게 보여 고른 사진이 눈에 띄게 한다.
                         Image(nsImage: image).resizable().scaledToFit().padding(4)
+                            .opacity(photo.flag == .reject ? 0.4 : 1)
                     } else {
                         Image(systemName: "photo").font(.title).foregroundStyle(Palette.muted)
                     }
@@ -921,7 +923,6 @@ private struct PhotoTile: View {
                                     .background(.black.opacity(0.68), in: RoundedRectangle(cornerRadius: 4))
                             }
                             Spacer()
-                            if photo.flag != .none { Image(systemName: photo.flag == .pick ? "checkmark.circle.fill" : "xmark.circle.fill").foregroundStyle(photo.flag == .pick ? Palette.accent : .red) }
                         }
                         Spacer()
                         if model.isMissing(photo) {
@@ -960,6 +961,13 @@ private struct PhotoTile: View {
                 HStack(spacing: 6) {
                     Text(photo.rating == 0 ? "별점 없음" : String(repeating: "★", count: photo.rating)).font(.caption).foregroundStyle(photo.rating == 0 ? Palette.muted : Palette.accent)
                     Spacer()
+                    // 오른쪽 위는 다중 선택 단추 자리라, 선택·제외 표시는 별점 줄에 둔다.
+                    if photo.flag != .none {
+                        Label(photo.flag == .pick ? "선택" : "제외",
+                              systemImage: photo.flag == .pick ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(photo.flag == .pick ? Palette.accent : .red)
+                    }
                     if let label = photo.colorLabel {
                         Circle().fill(label.color).frame(width: 10, height: 10).help("\(label.title) 라벨")
                     }
@@ -1010,7 +1018,8 @@ private struct PhotoTile: View {
     private var accessibilityText: String {
         let state = active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨"
         let label = photo.colorLabel.map { ", \($0.title) 라벨" } ?? ""
-        return "\(photo.displayName), 별점 \(photo.rating), \(state)" + label + burstAccessibility
+        let flag = photo.flag == .pick ? ", 선택 표시" : photo.flag == .reject ? ", 제외 표시" : ""
+        return "\(photo.displayName), 별점 \(photo.rating), \(state)" + flag + label + burstAccessibility
     }
 
     private var burstAccessibility: String {
