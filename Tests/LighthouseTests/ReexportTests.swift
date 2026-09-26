@@ -52,4 +52,36 @@ final class ReexportTests: XCTestCase {
         try await TestSupport.wait("restart") { restarted.catalogLoaded }
         XCTAssertEqual(restarted.photo(withID: photos[0].id)?.lastExport?.baseName, first.baseName, "기록은 카탈로그에 남는다")
     }
+
+    func testPreviousFileStaysWhenTheNewOneCannotBeMade() async throws {
+        let (model, root, urls) = try await TestSupport.startedModel(self, photos: 1)
+        let exports = root.appendingPathComponent("blog", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        let trash = root.appendingPathComponent("trash", isDirectory: true)
+        try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+        model.moveToTrash = { url in
+            try FileManager.default.moveItem(at: url, to: trash.appendingPathComponent(url.lastPathComponent))
+        }
+        model.export(scope: .current, options: ExportOptions(maxPixel: 40, quality: 0.8), directory: exports)
+        try await TestSupport.wait("export") { !model.isExporting }
+        let photo = try XCTUnwrap(model.photos.first)
+        let previous = try XCTUnwrap(photo.lastExport)
+        var edits = photo.edits
+        edits.exposure = 1
+        model.updateEdits(edits)
+        XCTAssertEqual(model.changedSinceExport.map(\.id), [photo.id])
+
+        // 원본을 옮겨 현상할 수 없게 한다. 이전 파일은 휴지통으로 가지 않고 기록도 그대로다.
+        try FileManager.default.moveItem(at: urls[0], to: root.appendingPathComponent("moved.jpg"))
+        model.reexport([try XCTUnwrap(model.photos.first)], trashPrevious: true)
+        try await TestSupport.wait("re-export") { !model.isExporting }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: trash.path), [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: previous.path))
+        XCTAssertEqual(model.photos.first?.lastExport, previous)
+        XCTAssertTrue(model.exportReport?.contains("실패 1장") == true, model.exportReport ?? "")
+
+        model.refreshMissingOriginals()
+        try await TestSupport.wait("missing") { model.isMissing(photo) }
+        XCTAssertTrue(model.changedSinceExport.isEmpty, "원본이 없는 사진은 다시 내보낼 목록에서 빠진다")
+    }
 }

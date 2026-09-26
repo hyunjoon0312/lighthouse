@@ -57,9 +57,9 @@ extension LibraryModel {
         }
     }
 
-    /// 마지막으로 내보낸 뒤 보정·키워드·설명이 바뀐 사진.
+    /// 마지막으로 내보낸 뒤 보정·키워드·설명이 바뀐 사진. 원본이 없는 사진은 다시 내보낼 수 없어 뺀다.
     var changedSinceExport: [PhotoAsset] {
-        photos.filter { $0.lastExport?.isChanged($0) == true }
+        photos.filter { $0.lastExport?.isChanged($0) == true && !isMissing($0) }
     }
 
     /// 바뀐 사진을 마지막 내보내기와 같은 설정·폴더·이름으로 다시 내보낸다. `trashPrevious`이면 이전 파일이
@@ -81,11 +81,12 @@ extension LibraryModel {
                 }
                 let previousFile = URL(fileURLWithPath: previous.path)
                 do {
+                    // 새 파일을 만들 수 있을 때만 이전 파일을 옮긴다. 원본이 없거나 현상에 실패하면 이전 파일은 그대로다.
+                    let data = try pipeline.prepareExport(url: photo.url, edits: photo.edits, options: previous.options,
+                                                          keywords: photo.keywords, caption: photo.caption).data
                     if trashPrevious, FileManager.default.fileExists(atPath: previous.path) {
                         if previous.fileIsUntouched { try moveToTrash(previousFile); trashed += 1 } else { kept += 1 }
                     }
-                    let data = try pipeline.prepareExport(url: photo.url, edits: photo.edits, options: previous.options,
-                                                          keywords: photo.keywords, caption: photo.caption).data
                     let file = try pipeline.writeExport(data, format: previous.options.format, baseName: previous.baseName,
                                                         to: previousFile.deletingLastPathComponent())
                     records[photo.id] = ExportRecord.make(photo: photo, file: file, baseName: previous.baseName,
