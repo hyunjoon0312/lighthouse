@@ -103,6 +103,7 @@ public final class ImagePipeline: @unchecked Sendable {
         formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"
         let make = tiff[kCGImagePropertyTIFFMake as String] as? String
         let model = tiff[kCGImagePropertyTIFFModel as String] as? String
+        let focalLength = (exif[kCGImagePropertyExifFocalLength as String] as? NSNumber)?.doubleValue.nilIfNotPositive
         return PhotoMetadata(
             width: rotated ? rawHeight : rawWidth, height: rotated ? rawWidth : rawHeight,
             camera: [make, model].compactMap { $0 }.joined(separator: " ").nilIfEmpty,
@@ -118,7 +119,8 @@ public final class ImagePipeline: @unchecked Sendable {
                       digits.allSatisfy(\.isNumber), let fraction = Double("0." + digits) else { return date }
                 return date.addingTimeInterval(fraction)
             },
-            focalLength: (exif[kCGImagePropertyExifFocalLength as String] as? NSNumber)?.doubleValue.nilIfNotPositive
+            focalLength: focalLength,
+            focalLengthUnavailable: focalLength == nil ? true : nil
         )
     }
 

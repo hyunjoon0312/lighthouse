@@ -70,29 +70,45 @@ extension LibraryModel {
         }
     }
 
-    /// 초점거리를 기록하기 전에 가져온 사진은 원본에서 다시 읽어 채운다. 실행마다 한 번, 찾은 값만 바꾼다.
-    func backfillFocalLengths() {
+    /// 초점거리를 아직 확인하지 않은 사진(초점거리를 기록하기 전에 가져온 사진)의 원본 경로. 원본이 없는 사진은 돌아온 뒤에 읽는다.
+    var focalLengthBackfillPaths: Set<String> {
         let exifExtensions: Set<String> = ["jpg", "jpeg", "heic", "heif", "tif", "tiff"]
-        let paths = Set(photos.filter { photo in
-            photo.metadata.focalLength == nil && !isMissing(photo) &&
+        return Set(photos.filter { photo in
+            photo.metadata.focalLength == nil && photo.metadata.focalLengthUnavailable != true && !isMissing(photo) &&
                 (photo.isRAW || exifExtensions.contains(photo.url.pathExtension.lowercased()))
         }.map(\.path))
+    }
+
+    /// 초점거리를 아직 확인하지 않은 사진을 원본에서 다시 읽어 채운다. 원본에 초점거리가 없으면(수동 렌즈 등) 그렇다고 남겨
+    /// 다음 실행부터 다시 읽지 않는다. 읽지 못한 사진은 다음 실행 때 다시 시도한다.
+    func backfillFocalLengths() {
+        let paths = focalLengthBackfillPaths
         guard !paths.isEmpty else { return }
         batchQueue.async { [pipeline] in
             var found: [String: Double] = [:]
+            var absent = Set<String>()
             for path in paths {
-                if let focal = try? pipeline.metadata(for: URL(fileURLWithPath: path)).focalLength { found[path] = focal }
+                guard let metadata = try? pipeline.metadata(for: URL(fileURLWithPath: path)) else { continue }
+                if let focal = metadata.focalLength { found[path] = focal } else { absent.insert(path) }
             }
             DispatchQueue.main.async {
                 var updated = self.photos
                 var changed = 0
-                for index in updated.indices where updated[index].metadata.focalLength == nil {
-                    guard let focal = found[updated[index].path] else { continue }
-                    updated[index].metadata.focalLength = focal
+                for index in updated.indices where updated[index].metadata.focalLength == nil &&
+                    updated[index].metadata.focalLengthUnavailable != true {
+                    let path = updated[index].path
+                    if let focal = found[path] {
+                        updated[index].metadata.focalLength = focal
+                    } else if absent.contains(path) {
+                        updated[index].metadata.focalLengthUnavailable = true
+                    } else {
+                        continue
+                    }
                     changed += 1
                 }
                 guard changed > 0 else { return }
-                AppLog.catalog.info("filled focal length for \(changed, privacy: .public) photos")
+                let filled = found.count
+                AppLog.catalog.info("checked focal length of \(changed, privacy: .public) photos, found \(filled, privacy: .public)")
                 self.photos = updated
                 self.scheduleSave()
             }
