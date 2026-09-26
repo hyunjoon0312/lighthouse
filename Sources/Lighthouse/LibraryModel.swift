@@ -547,14 +547,46 @@ final class LibraryModel: ObservableObject {
     }
 
     func addSelectedPhotos(to folderID: UUID) {
+        addPhotos(selectedPhotos.map(\.id), to: folderID)
+    }
+
+    /// 카탈로그에 있는 사진만 폴더에 넣는다. 넣을 수 있는 상태였으면 true.
+    @discardableResult
+    func addPhotos(_ ids: [UUID], to folderID: UUID) -> Bool {
         guard foldersLoaded, folderLoadError == nil,
-              let index = photoFolders.firstIndex(where: { $0.id == folderID }) else { return }
-        let ids = Set(selectedPhotos.map(\.id))
+              let index = photoFolders.firstIndex(where: { $0.id == folderID }) else { return false }
+        let known = Set(ids).filter { photo(withID: $0) != nil }
         let before = photoFolders[index].photoIDs.count
-        photoFolders[index].add(ids)
+        photoFolders[index].add(known)
         let added = photoFolders[index].photoIDs.count - before
         if added > 0 { scheduleSave() }
         operationMessage = "\(photoFolders[index].name)에 \(added)장 추가했습니다."
+        return true
+    }
+
+    // MARK: 끌어 놓기
+
+    static let photoDragPrefix = "lighthouse-photos:"
+
+    /// 사진을 끌 때 넘기는 글자. 선택한 사진 중 하나를 끌면 선택한 사진 전체를 넘긴다.
+    func dragPayload(for photo: PhotoAsset) -> String {
+        let ids = selectedPhotoIDs.contains(photo.id) ? selectedPhotos.map(\.id) : [photo.id]
+        return Self.photoDragPrefix + ids.map(\.uuidString).joined(separator: ",")
+    }
+
+    /// 앱 안에서 끈 사진의 ID. 다른 앱에서 끌어온 글자는 무시한다.
+    static func draggedPhotoIDs(_ items: [String]) -> [UUID] {
+        items.filter { $0.hasPrefix(photoDragPrefix) }
+            .flatMap { $0.dropFirst(photoDragPrefix.count).split(separator: ",") }
+            .compactMap { UUID(uuidString: String($0)) }
+    }
+
+    /// Finder에서 끌어 놓은 파일·폴더를 가져온다. 지금 가져올 수 없으면 false.
+    func importDropped(_ urls: [URL]) -> Bool {
+        let files = urls.filter(\.isFileURL)
+        guard catalogLoaded, loadError == nil, !isImporting, !hasModalPresentation, !files.isEmpty else { return false }
+        importURLs(files)
+        return true
     }
 
     func removeSelectedPhotosFromCurrentFolder() {

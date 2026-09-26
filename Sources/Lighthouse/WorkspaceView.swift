@@ -19,6 +19,8 @@ struct WorkspaceView: View {
     @AppStorage("gridTileWidth") private var tileWidth = 180.0
     @State private var gridWidth: CGFloat = 0
     @State private var fullScreen = FocusFullScreen()
+    @State private var fileDropTargeted = false
+    @State private var dropFolderID: UUID?
 
     var body: some View {
         Group {
@@ -133,6 +135,15 @@ struct WorkspaceView: View {
             Rectangle().fill(.white.opacity(0.08)).frame(width: 1)
             inspector.frame(width: 300)
         }
+        .dropDestination(for: URL.self) { urls, _ in model.importDropped(urls) } isTargeted: { fileDropTargeted = $0 }
+        .overlay {
+            if fileDropTargeted {
+                RoundedRectangle(cornerRadius: 12).stroke(Palette.accent, lineWidth: 3).padding(6)
+                    .overlay(Text("놓으면 가져옵니다 · 원본은 그 자리에 둡니다").font(.headline).padding(12)
+                        .background(.black.opacity(0.7), in: Capsule()))
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     private var sidebar: some View {
@@ -171,9 +182,13 @@ struct WorkspaceView: View {
                         HStack(spacing: 0) {
                             sidebarRow(folder.name, icon: "folder.fill",
                                        count: model.counts.folders[folder.id] ?? 0,
-                                       selected: model.filter == .collection(folder.id)) {
+                                       selected: model.filter == .collection(folder.id) || dropFolderID == folder.id) {
                                 model.filter = .collection(folder.id)
                             }
+                            .dropDestination(for: String.self) { items, _ in
+                                let ids = LibraryModel.draggedPhotoIDs(items)
+                                return !ids.isEmpty && model.addPhotos(ids, to: folder.id)
+                            } isTargeted: { dropFolderID = $0 ? folder.id : (dropFolderID == folder.id ? nil : dropFolderID) }
                             Menu {
                                 Button("이름 변경…") { model.presentRenameFolder(folder) }
                                 Button("폴더 삭제…", role: .destructive) { folderToDelete = folder }
@@ -708,6 +723,7 @@ private struct PhotoTile: View {
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(active ? Palette.accent : selected ? Palette.accent.opacity(0.48) : .clear, lineWidth: active ? 2 : 1.5))
             .contentShape(RoundedRectangle(cornerRadius: 10))
             .onTapGesture { tileClicked(model, photo) }
+            .draggable(model.dragPayload(for: photo)) { dragPreview }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(photo.displayName), 별점 \(photo.rating), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")" + burstAccessibility)
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
@@ -725,6 +741,22 @@ private struct PhotoTile: View {
         }
         .onAppear { model.requestThumbnail(for: photo) }
         .onChange(of: photo.edits) { _, _ in model.requestThumbnail(for: photo) }
+    }
+
+    /// 끄는 동안 보이는 썸네일. 선택한 여러 장을 끌면 장수를 붙인다.
+    private var dragPreview: some View {
+        let count = selected ? model.selectedPhotoIDs.count : 1
+        return ZStack(alignment: .topTrailing) {
+            if let image = model.thumbnail(for: photo) {
+                Image(nsImage: image).resizable().scaledToFit().frame(width: 96, height: 72)
+            } else {
+                Image(systemName: "photo").font(.title).frame(width: 96, height: 72)
+            }
+            if count > 1 {
+                Text("\(count)").font(.caption.weight(.bold)).padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Palette.accent, in: Capsule()).foregroundStyle(.black)
+            }
+        }
     }
 
     private var burstAccessibility: String {
