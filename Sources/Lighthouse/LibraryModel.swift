@@ -887,6 +887,8 @@ final class LibraryModel: ObservableObject {
         NSApp.keyWindow?.makeFirstResponder(nil)
         isPickingWhiteBalance = false
         if newMode != .edit { cancelDraft(); cancelRetouchDraft(); isLocalEditing = false }
+        // 아무것도 고르지 않고 사진·비교 보기로 가면 빈 화면 대신 첫 사진을 보여 준다.
+        if newMode == .edit || newMode == .compare, selection == nil, let first = visiblePhotos.first { focusPhoto(first) }
         if newMode == .compare && mode != .compare { pin(selectedID) }
         mode = newMode
         if newMode == .grid { isFocusView = false }

@@ -55,6 +55,10 @@ final class SelectionMarkTests: XCTestCase {
         model.filter = .rejects
         model.ensureSelectionVisible()
         XCTAssertNil(model.selectedID)
+        model.filter = .all
+        model.clearPhotoSelection()
+        model.setMode(.edit)
+        XCTAssertEqual(model.selectedID, photos[0].id, "아무것도 고르지 않고 사진 보기로 가면 첫 사진")
     }
 
     /// ⇧+화살표로 처음 고른 사진부터 선택을 넓히고 줄인다.
