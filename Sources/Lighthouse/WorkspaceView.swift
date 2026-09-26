@@ -600,6 +600,7 @@ struct WorkspaceView: View {
                 Button { model.move(-1) } label: { Image(systemName: "chevron.left") }.accessibilityLabel("이전 사진").disabled(model.visiblePhotos.first?.id == model.selectedID)
                 Button { model.move(1) } label: { Image(systemName: "chevron.right") }.accessibilityLabel("다음 사진").disabled(model.visiblePhotos.last?.id == model.selectedID)
                 Text(model.selection?.displayName ?? "").lineLimit(1).font(.subheadline.weight(.medium))
+                    .truncationMode(.middle)
                 if let summary = model.selection?.metadata.shootingSummary, !summary.isEmpty {
                     Text(summary).font(.caption.monospacedDigit()).foregroundStyle(Palette.muted).lineLimit(1)
                         .layoutPriority(-1)
@@ -607,6 +608,7 @@ struct WorkspaceView: View {
                 Spacer()
                 if model.mode == .compare, let pinned = model.pinned {
                     Text("기준: \(pinned.displayName)").font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
+                        .truncationMode(.middle).layoutPriority(-1)
                     Button(model.compareShowsPinnedEdits ? "기준 원본 보기" : "기준 보정 보기") {
                         model.compareShowsPinnedEdits.toggle()
                     }
@@ -623,6 +625,8 @@ struct WorkspaceView: View {
                 Button(model.actualSize ? "화면 맞춤" : "100%") { model.toggleActualSize() }
                 Button(model.isOriginal ? "보정 보기" : "원본 보기") { model.toggleOriginal() }
             }
+            // 단추 글자는 줄바꿈하지 않고, 좁으면 파일 이름·기준 이름·촬영 정보가 먼저 줄어든다.
+            .lineLimit(1)
             .buttonStyle(.borderless).padding(.horizontal, 20).frame(height: 44)
             canvasPanes
         }
