@@ -230,6 +230,13 @@ public final class ImagePipeline: @unchecked Sendable {
         return scale
     }
 
+    /// 원본 크기로 그린 결과의 픽셀 크기(회전·크롭 반영). 현상하지 않고 파일 속성으로 계산한다.
+    public func outputSize(url: URL, edits: EditSettings) -> CGSize? {
+        guard let size = sourceSize(url: url) else { return nil }
+        let geometry = PhotoGeometry(sourceWidth: size.width, sourceHeight: size.height, edits: edits)
+        return CGSize(width: floor(geometry.outputSize.width), height: floor(geometry.outputSize.height))
+    }
+
     /// 현상하지 않고 읽은 RAW 원본(방향 적용) 크기. 파일·수정 시각별로 기억한다.
     /// 파일 속성만 읽어 RAW 디코더를 만들지 않는다(S9 한 장 약 2ms, CIRAWFilter는 약 28ms). 읽지 못하면 디코더로 읽는다.
     func sourceSize(url: URL) -> CGSize? {

@@ -45,4 +45,15 @@ final class RAWSourceSizeTests: XCTestCase {
         XCTAssertEqual(pipeline.sourceSize(url: rotated), CGSize(width: 4000, height: 6000))
         XCTAssertEqual(pipeline.decodeScale(url: sample, edits: .neutral, maxPixel: 2200), pow(2, -0.75), accuracy: 1e-9)
     }
+
+    /// 100%로 바꿀 때 먼저 늘려 보이는 크기가 원본 크기 렌더와 같아야 선명한 그림으로 바뀔 때 화면이 튀지 않는다.
+    func testOutputSizeMatchesFullRAWRender() throws {
+        guard let sample = rawSample else {
+            throw XCTSkip("RAW 표본이 없습니다. LIGHTHOUSE_SAMPLE_RW2에 S9 RW2 경로를 지정하세요.")
+        }
+        let pipeline = ImagePipeline()
+        let edits = EditSettings(rotationQuarterTurns: 3, cropRect: NormalizedCrop(x: 0.1, y: 0.2, width: 0.6, height: 0.5))
+        let image = try pipeline.render(url: sample, edits: edits, maxPixel: nil)
+        XCTAssertEqual(pipeline.outputSize(url: sample, edits: edits), CGSize(width: image.width, height: image.height))
+    }
 }

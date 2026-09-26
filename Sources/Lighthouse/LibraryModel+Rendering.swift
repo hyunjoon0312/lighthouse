@@ -95,7 +95,7 @@ extension LibraryModel {
         let token = generation
         let source = "\(selectedID?.uuidString ?? "none"):\(isOriginal):\(actualSize)"
         if renderedSource != source {
-            rendered = nil
+            rendered = enlargedForActualSize(previousSource: renderedSource)
             imageError = nil
             renderedSource = source
             displayedToken = 0
@@ -309,6 +309,16 @@ extension LibraryModel {
                 self.clippingOverlay = overlay.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
             }
         }
+    }
+
+    /// 화면 맞춤에서 100%로 바꾸면 원본 크기 렌더가 올 때까지 지금 그림을 원본 크기로 늘려 먼저 보여 준다.
+    /// 그 사이 사진이 사라지지 않고 누른 곳이 바로 100% 자리에 온다(S9는 0.3–0.8초).
+    private func enlargedForActualSize(previousSource: String?) -> NSImage? {
+        guard actualSize, let photo = selection, previousSource == "\(photo.id.uuidString):\(isOriginal):false",
+              let cg = rendered?.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let size = previewPipeline.outputSize(url: photo.url, edits: isOriginal ? .neutral : photo.edits),
+              size.width > CGFloat(cg.width) else { return nil }
+        return NSImage(cgImage: cg, size: size)
     }
 
     /// RAW 안의 카메라 미리보기를 현상이 끝날 때까지 먼저 보여 준다. 보정하지 않은 사진에만 쓴다.

@@ -675,6 +675,18 @@ final class AdvancedImagingTests: XCTestCase {
         XCTAssertTrue(written.lastPathComponent.hasSuffix("-edited-2.jpg"))
     }
 
+    func testOutputSizeMatchesTheFullRender() throws {
+        let input = try temporaryPNG(width: 90, height: 60) { x, y in (UInt8(x * 2), UInt8(y * 3), 90, 255) }
+        defer { try? FileManager.default.removeItem(at: input) }
+        let pipeline = ImagePipeline()
+        for edits in [EditSettings.neutral, EditSettings(rotationQuarterTurns: 1),
+                      EditSettings(rotationQuarterTurns: 1, cropAspect: 1),
+                      EditSettings(straightenDegrees: 7, cropRect: NormalizedCrop(x: 0.1, y: 0.2, width: 0.6, height: 0.5))] {
+            let image = try pipeline.render(url: input, edits: edits, maxPixel: nil)
+            XCTAssertEqual(pipeline.outputSize(url: input, edits: edits), CGSize(width: image.width, height: image.height))
+        }
+    }
+
     /// 예전에는 선형 값 0.5를 기준으로 늘려 대비 1.2에서 sRGB 40/255가 0이 되고, 0.8에서 검정이 89/255로 떴다.
     func testContrastBendsAroundMiddleGrayAndKeepsBlackAndWhite() throws {
         let input = try temporaryPNG(width: 256, height: 2) { x, _ in (UInt8(x), UInt8(x), UInt8(x), 255) }
