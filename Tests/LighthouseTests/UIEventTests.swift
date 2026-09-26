@@ -43,12 +43,12 @@ final class UIEventTests: XCTestCase {
     /// 트랙패드 벌리기·오므리기. 공개 생성자가 없어 CGEvent 제스처(29)·확대 HID 형식(8)·배율(113)·단계(132)·창 번호(51)
     /// 필드로 만들고, 창 안 위치는 CoreGraphics의 `CGEventSetWindowLocation`으로 넣는다. 실제 트랙패드 이벤트처럼
     /// 앱 이벤트 흐름(`NSApp.sendEvent`)으로 보낸다.
-    private func magnify(_ window: NSWindow, at point: CGPoint, by steps: [Double]) async throws {
+    private func magnify(_ window: NSWindow, at point: CGPoint, by steps: [Double], end: Bool = true) async throws {
         typealias SetWindowLocation = @convention(c) (CGEvent, CGPoint) -> Void
         let symbol = try XCTUnwrap(dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGEventSetWindowLocation"))
         let setWindowLocation = unsafeBitCast(symbol, to: SetWindowLocation.self)
         let inWindow = windowPoint(window, point)
-        let phases = [(Int64(1), 0.0)] + steps.map { (Int64(2), $0) } + [(Int64(4), 0.0)]
+        let phases = (steps.isEmpty ? [] : [(Int64(1), 0.0)]) + steps.map { (Int64(2), $0) } + (end ? [(Int64(4), 0.0)] : [])
         for (phase, amount) in phases {
             let event = try XCTUnwrap(CGEvent(source: nil))
             event.type = unsafeBitCast(UInt32(29), to: CGEventType.self)
@@ -128,9 +128,11 @@ final class UIEventTests: XCTestCase {
         XCTAssertGreaterThan(perPointY, 0, "아래를 누르면 사진의 아래쪽을 연다(위아래가 뒤집히지 않는다)")
         XCTAssertEqual(perPointX / perPointY, 80.0 / 120.0, accuracy: 0.03, "가로세로가 같은 배율로 맞춰진다")
 
-        // 벌리면 벌린 곳을 100%로 열고, 100%에서 오므리면 화면 맞춤으로 돌아간다. 조금만 벌리면 그대로다.
-        try await magnify(window, at: first, by: [0.1, 0.1])
+        // 벌리면 손을 떼기 전에 벌린 곳을 100%로 열고, 100%에서 오므리면 화면 맞춤으로 돌아간다. 조금만 벌리면 그대로다.
+        try await magnify(window, at: first, by: [0.1, 0.1], end: false)
         try await TestSupport.wait("pinch out", timeout: 5) { model.actualSize }
+        try await magnify(window, at: first, by: [0.1])
+        XCTAssertTrue(model.actualSize, "같은 핀치를 계속 벌려도 한 번만 바뀐다")
         XCTAssertEqual(model.zoomAnchor.x, anchors[0].x, accuracy: 0.01, "클릭 확대와 같은 곳을 연다")
         XCTAssertEqual(model.zoomAnchor.y, anchors[0].y, accuracy: 0.01)
         try await Task.sleep(nanoseconds: 400_000_000)

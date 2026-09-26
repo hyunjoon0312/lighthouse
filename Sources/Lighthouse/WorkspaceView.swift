@@ -836,7 +836,7 @@ struct WorkspaceView: View {
     }
 
     /// 트랙패드로 사진의 한 곳을 벌리면(1.15배 넘게) 그곳을 100%로 열고, 100%에서 오므리면(0.87배 아래) 화면 맞춤으로
-    /// 돌아간다. SwiftUI 확대 제스처 대신 앱에 오는 확대 이벤트를 받아, 합성한 이벤트로도 같은 경로를 확인할 수 있다.
+    /// 돌아간다. 손을 떼기 전에 기준을 넘는 순간 바꾼다. SwiftUI 확대 제스처 대신 앱에 오는 확대 이벤트를 받아, 합성한 이벤트로도 같은 경로를 확인할 수 있다.
     private func installPinch() {
         guard pinchMonitor == nil else { return }
         pinchMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { event in
@@ -858,14 +858,19 @@ struct WorkspaceView: View {
         case .began:
             pinch = (point, 0)
         case .changed:
-            pinch?.total += event.magnification
-        case .ended:
-            guard let (start, total) = pinch else { return }
-            pinch = nil
+            // 손을 떼기 전에 기준을 넘는 순간 바꾼다. 한 번 핀치에 한 번만 바꾼다.
+            guard var current = pinch else { return }
+            current.total += event.magnification
+            pinch = current
+            let start = current.start
             if model.actualSize {
-                if total < -0.13, paneFrames.values.contains(where: { $0.contains(start) }) { model.toggleActualSize() }
-            } else if total > 0.15, !model.isSplitActive, let frame = paneFrames[true], frame.contains(start),
+                if current.total < -0.13, paneFrames.values.contains(where: { $0.contains(start) }) {
+                    pinch = nil
+                    model.toggleActualSize()
+                }
+            } else if current.total > 0.15, !model.isSplitActive, let frame = paneFrames[true], frame.contains(start),
                       let image = model.rendered {
+                pinch = nil
                 zoomIn(at: CGPoint(x: start.x - frame.minX, y: start.y - frame.minY), imageSize: image.size,
                        available: frame.size)
             }
