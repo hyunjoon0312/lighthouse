@@ -670,6 +670,12 @@ struct WorkspaceView: View {
                                 .onTapGesture(coordinateSpace: .local) { location in
                                     zoomIn(at: location, imageSize: image.size, available: geometry.size)
                                 }
+                                // 트랙패드로 벌리면 벌린 곳을 100%로 확대한다.
+                                .simultaneousGesture(MagnifyGesture().onEnded { value in
+                                    if value.magnification > 1.15 {
+                                        zoomIn(at: value.startLocation, imageSize: image.size, available: geometry.size)
+                                    }
+                                })
                                 .accessibilityLabel("클릭한 위치를 100%로 확대")
                         }
                         if let overlay {
@@ -725,6 +731,10 @@ struct WorkspaceView: View {
             .frame(minWidth: viewport.width, minHeight: viewport.height)
             .contentShape(Rectangle())
             .onTapGesture { model.toggleActualSize() }
+            // 트랙패드로 오므리면 화면 맞춤으로 돌아간다.
+            .simultaneousGesture(MagnifyGesture().onEnded { value in
+                if value.magnification < 0.87 { model.toggleActualSize() }
+            })
         }
     }
 
