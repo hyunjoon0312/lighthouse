@@ -43,13 +43,15 @@ struct AdvancedColorControls: View {
                 ForEach(ColorBand.allCases, id: \.self) { Text($0.koreanName).tag($0) }
             }
             .accessibilityLabel("HSL 색상 범위")
-            advancedSlider("색조", value: rangeAdjustment.hue, range: -30...30, format: "%+.0f°") {
+            advancedSlider("색조", value: rangeAdjustment.hue, range: -30...30, format: "%+.0f°", defaultValue: 0) {
                 updateRange(\.hue, value: $0, continuous: true)
             }
-            advancedSlider("채도", value: rangeAdjustment.saturation * 100, range: -100...100, format: "%+.0f%%") {
+            advancedSlider("채도", value: rangeAdjustment.saturation * 100, range: -100...100, format: "%+.0f%%",
+                           defaultValue: 0) {
                 updateRange(\.saturation, value: $0 / 100, continuous: true)
             }
-            advancedSlider("명도", value: rangeAdjustment.lightness * 100, range: -100...100, format: "%+.0f%%") {
+            advancedSlider("명도", value: rangeAdjustment.lightness * 100, range: -100...100, format: "%+.0f%%",
+                           defaultValue: 0) {
                 updateRange(\.lightness, value: $0 / 100, continuous: true)
             }
             Button("이 색상 초기화") { resetRange() }
@@ -58,11 +60,13 @@ struct AdvancedColorControls: View {
 
             Divider()
             Text("필름 입자").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-            advancedSlider("양", value: edits.grain.amount * 100, range: 0...100, format: "%.0f%%") {
+            advancedSlider("양", value: edits.grain.amount * 100, range: 0...100, format: "%.0f%%",
+                           defaultValue: GrainSettings().amount * 100) {
                 let value = $0 / 100
                 updateGrain(continuous: true) { $0.amount = value.isFinite ? min(1, max(0, value)) : 0 }
             }
-            advancedSlider("크기", value: edits.grain.size, range: 0.5...8, format: "%.1f px") {
+            advancedSlider("크기", value: edits.grain.size, range: 0.5...8, format: "%.1f px",
+                           defaultValue: GrainSettings().size) {
                 let value = $0
                 updateGrain(continuous: true) { $0.size = value.isFinite ? min(8, max(0.5, value)) : 1.5 }
             }
@@ -141,19 +145,12 @@ struct AdvancedColorControls: View {
         model.updateEdits(next, continuous: continuous)
     }
 
+    /// 두 번 누르면 `defaultValue`로 돌아간다.
     private func advancedSlider(_ title: String, value: Double, range: ClosedRange<Double>, format: String,
-                                set: @escaping @MainActor (Double) -> Void) -> some View {
-        VStack(spacing: 3) {
-            HStack {
-                Text(title).font(.caption)
-                Spacer()
-                Text(String(format: format, value)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-            }
-            Slider(value: Binding(get: { value }, set: { set($0) }), in: range) { editing in
-                if !editing { model.endContinuousEdit() }
-            }
-            .accessibilityLabel(title)
-        }
+                                defaultValue: Double, set: @escaping @MainActor (Double) -> Void) -> some View {
+        SliderRow(title: title, value: value, range: range, valueText: String(format: format, value),
+                  set: { set($0) }, end: { model.endContinuousEdit() },
+                  reset: { set(defaultValue); model.endContinuousEdit() })
     }
 }
 

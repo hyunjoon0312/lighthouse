@@ -130,7 +130,7 @@ struct InspectorView: View {
                     get: { lut.isEnabled },
                     set: { enabled in model.updateLUT { $0.isEnabled = enabled } }
                 )).font(.caption).accessibilityLabel("LUT 켜기 또는 끄기")
-                localSlider("LUT 강도", value: lut.intensity * 100, range: 0...100, format: "%.0f%%") { percent in
+                localSlider("LUT 강도", value: lut.intensity * 100, range: 0...100, format: "%.0f%%", defaultValue: 100) { percent in
                     model.updateLUT(continuous: true) { $0.intensity = percent / 100 }
                 }
                 Button("LUT 제거") { model.removeLUT() }
@@ -152,22 +152,22 @@ struct InspectorView: View {
                 .accessibilityLabel("참조 사진 색감 맞추기")
             if photo.isRAW { rawDevelopControls; Divider() } else { Divider() }
             section("빛")
-            adjustment("노출", value: edits.exposure, range: -4...4, format: "%.2f EV") { $0.exposure = $1 }
-            adjustment("대비", value: edits.contrast, range: 0.5...1.5, format: "%.2f") { $0.contrast = $1 }
-            adjustment("하이라이트", value: edits.highlights, range: 0...1, format: "%.2f") { $0.highlights = $1 }
-            adjustment("섀도", value: edits.shadows, range: 0...1, format: "%.2f") { $0.shadows = $1 }
-            adjustment("명료도", value: edits.clarity, range: -1...1, format: "%+.2f") { $0.clarity = $1 }
+            adjustment("노출", \.exposure, range: -4...4, format: "%.2f EV")
+            adjustment("대비", \.contrast, range: 0.5...1.5, format: "%.2f")
+            adjustment("하이라이트", \.highlights, range: 0...1, format: "%.2f")
+            adjustment("섀도", \.shadows, range: 0...1, format: "%.2f")
+            adjustment("명료도", \.clarity, range: -1...1, format: "%+.2f")
             Divider()
             section("색상")
-            adjustment("색온도 이동", value: edits.temperatureShift, range: -2500...2500, format: "%.0f K") { $0.temperatureShift = $1 }
-            adjustment("틴트", value: edits.tintShift, range: -100...100, format: "%.0f") { $0.tintShift = $1 }
-            adjustment("생동감", value: edits.vibrance, range: -1...1, format: "%+.2f") { $0.vibrance = $1 }
-            adjustment("채도", value: edits.saturation, range: 0...2, format: "%.2f") { $0.saturation = $1 }
+            adjustment("색온도 이동", \.temperatureShift, range: -2500...2500, format: "%.0f K")
+            adjustment("틴트", \.tintShift, range: -100...100, format: "%.0f")
+            adjustment("생동감", \.vibrance, range: -1...1, format: "%+.2f")
+            adjustment("채도", \.saturation, range: 0...2, format: "%.2f")
             AdvancedColorControls(edits: edits)
             Divider()
             section("디테일 및 구도")
-            adjustment("선명도", value: edits.sharpness, range: 0...2, format: "%.2f") { $0.sharpness = $1 }
-            adjustment("비네팅", value: edits.vignette, range: -1...1, format: "%+.2f") { $0.vignette = $1 }
+            adjustment("선명도", \.sharpness, range: 0...2, format: "%.2f")
+            adjustment("비네팅", \.vignette, range: -1...1, format: "%+.2f")
             HStack {
                 Button {
                     change {
@@ -253,12 +253,10 @@ struct InspectorView: View {
         }
         if let capabilities = model.rawCapabilities {
             if let automatic = capabilities.luminanceNoiseReduction {
-                rawSlider("노이즈 감소", value: edits.rawDevelop.luminanceNoiseReduction,
-                          automatic: automatic) { $0.rawDevelop.luminanceNoiseReduction = $1 }
+                rawSlider("노이즈 감소", \.rawDevelop.luminanceNoiseReduction, automatic: automatic)
             }
             if let automatic = capabilities.colorNoiseReduction {
-                rawSlider("색 노이즈 감소", value: edits.rawDevelop.colorNoiseReduction,
-                          automatic: automatic) { $0.rawDevelop.colorNoiseReduction = $1 }
+                rawSlider("색 노이즈 감소", \.rawDevelop.colorNoiseReduction, automatic: automatic)
             }
             if let automatic = capabilities.lensCorrection {
                 Toggle("렌즈 보정 (왜곡·주변부)", isOn: Binding(
@@ -282,24 +280,16 @@ struct InspectorView: View {
         }
     }
 
-    private func rawSlider(_ title: String, value: Double?, automatic: Double,
-                           set: @escaping (inout EditSettings, Double) -> Void) -> some View {
+    /// 두 번 누르면 카메라 기본값(자동)으로 돌아간다.
+    private func rawSlider(_ title: String, _ keyPath: WritableKeyPath<EditSettings, Double?>,
+                           automatic: Double) -> some View {
+        let value = edits[keyPath: keyPath]
         let shown = value ?? automatic
-        return VStack(spacing: 3) {
-            HStack {
-                Text(title).font(.caption)
-                Spacer()
-                Text(value == nil ? "자동 \(Int((shown * 100).rounded()))%" : "\(Int((shown * 100).rounded()))%")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-            }
-            Slider(value: Binding(
-                get: { shown },
-                set: { newValue in self.change(continuous: true) { set(&$0, newValue) } }
-            ), in: 0...1) { editing in
-                if !editing { model.endContinuousEdit() }
-            }
-            .accessibilityLabel(title)
-        }
+        return SliderRow(title: title, value: shown, range: 0...1,
+                         valueText: value == nil ? "자동 \(Int((shown * 100).rounded()))%" : "\(Int((shown * 100).rounded()))%",
+                         set: { newValue in change(continuous: true) { $0[keyPath: keyPath] = newValue } },
+                         end: { model.endContinuousEdit() },
+                         reset: { change { $0[keyPath: keyPath] = nil } })
     }
 
     private func lutLabel(_ item: LUTLibraryItem) -> String {
@@ -387,27 +377,33 @@ struct InspectorView: View {
                         toolButton(.brush, icon: "paintbrush.pointed")
                         toolButton(.eraser, icon: "eraser")
                     }
-                    localSlider("브러시 크기", value: model.brushRadius * 200, range: 1...40, format: "%.0f%%") { model.brushRadius = $0 / 200 }
-                    localSlider("경계 부드럽게", value: area.feather * 2000, range: 0...100, format: "%.0f") { percent in
+                    localSlider("브러시 크기", value: model.brushRadius * 200, range: 1...40, format: "%.0f%%",
+                                defaultValue: 8) { model.brushRadius = $0 / 200 }
+                    localSlider("경계 부드럽게", value: area.feather * 2000, range: 0...100, format: "%.0f",
+                                defaultValue: 20) { percent in
                         model.updateLocal(continuous: true) { $0.feather = percent / 2000 }
                     }
-                    localSlider("영역 노출", value: area.exposure, range: -4...4, format: "%.2f EV") { exposure in
+                    localSlider("영역 노출", value: area.exposure, range: -4...4, format: "%.2f EV", defaultValue: 0) { exposure in
                         model.updateLocal(continuous: true) { $0.exposure = exposure }
                     }
-                    localSlider("영역 대비", value: area.contrast, range: 0.5...1.5, format: "%.2f") { contrast in
+                    localSlider("영역 대비", value: area.contrast, range: 0.5...1.5, format: "%.2f", defaultValue: 1) { contrast in
                         model.updateLocal(continuous: true) { $0.contrast = contrast }
                     }
-                    localSlider("영역 색온도", value: area.temperature * 100, range: -100...100, format: "%.0f") { value in
+                    localSlider("영역 색온도", value: area.temperature * 100, range: -100...100, format: "%.0f",
+                                defaultValue: 0) { value in
                         model.updateLocal(continuous: true) { $0.temperature = value / 100 }
                     }
-                    localSlider("영역 채도", value: area.saturation * 100, range: -100...100, format: "%.0f") { value in
+                    localSlider("영역 채도", value: area.saturation * 100, range: -100...100, format: "%.0f",
+                                defaultValue: 0) { value in
                         model.updateLocal(continuous: true) { $0.saturation = value / 100 }
                     }
-                    localSlider("영역 명료도", value: area.clarity * 100, range: -100...100, format: "%.0f") { value in
+                    localSlider("영역 명료도", value: area.clarity * 100, range: -100...100, format: "%.0f",
+                                defaultValue: 0) { value in
                         model.updateLocal(continuous: true) { $0.clarity = value / 100 }
                     }
                     if let softness = area.gradient?.softness {
-                        localSlider("원형 가장자리 부드럽게", value: softness * 100, range: 0...100, format: "%.0f") { value in
+                        localSlider("원형 가장자리 부드럽게", value: softness * 100, range: 0...100, format: "%.0f",
+                                    defaultValue: 50) { value in
                             model.updateLocal(continuous: true) { $0.gradient = $0.gradient?.withSoftness(value / 100) }
                         }
                     }
@@ -448,19 +444,13 @@ struct InspectorView: View {
         .accessibilityLabel(tool.rawValue)
     }
 
+    /// `defaultValue`가 있으면 두 번 눌러 그 값으로 돌린다.
     private func localSlider(_ title: String, value: Double, range: ClosedRange<Double>, format: String,
-                             set: @escaping @MainActor (Double) -> Void) -> some View {
-        VStack(spacing: 3) {
-            HStack {
-                Text(title).font(.caption)
-                Spacer()
-                Text(String(format: format, value)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-            }
-            Slider(value: Binding(get: { value }, set: { set($0) }), in: range) { editing in
-                if !editing { model.endContinuousEdit() }
-            }
-            .accessibilityLabel(title)
-        }
+                             defaultValue: Double? = nil, set: @escaping @MainActor (Double) -> Void) -> some View {
+        var reset: (@MainActor () -> Void)?
+        if let defaultValue { reset = { set(defaultValue); model.endContinuousEdit() } }
+        return SliderRow(title: title, value: value, range: range, valueText: String(format: format, value),
+                         set: { set($0) }, end: { model.endContinuousEdit() }, reset: reset)
     }
 
     private var ratingRow: some View {
@@ -486,21 +476,14 @@ struct InspectorView: View {
         Text(title).font(.caption.weight(.bold)).foregroundStyle(.secondary)
     }
 
-    private func adjustment(_ title: String, value: Double, range: ClosedRange<Double>, format: String, change: @escaping (inout EditSettings, Double) -> Void) -> some View {
-        VStack(spacing: 3) {
-            HStack {
-                Text(title).font(.caption)
-                Spacer()
-                Text(String(format: format, value)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-            }
-            Slider(value: Binding(
-                get: { value },
-                set: { newValue in self.change(continuous: true) { change(&$0, newValue) } }
-            ), in: range) { editing in
-                if !editing { model.endContinuousEdit() }
-            }
-            .accessibilityLabel(title)
-        }
+    /// 두 번 누르면 보정하지 않은 값으로 돌아간다.
+    private func adjustment(_ title: String, _ keyPath: WritableKeyPath<EditSettings, Double>,
+                            range: ClosedRange<Double>, format: String) -> some View {
+        let value = edits[keyPath: keyPath]
+        return SliderRow(title: title, value: value, range: range, valueText: String(format: format, value),
+                         set: { newValue in change(continuous: true) { $0[keyPath: keyPath] = newValue } },
+                         end: { model.endContinuousEdit() },
+                         reset: { change { $0[keyPath: keyPath] = EditSettings.neutral[keyPath: keyPath] } })
     }
 
     private func change(continuous: Bool = false, _ body: (inout EditSettings) -> Void) {
