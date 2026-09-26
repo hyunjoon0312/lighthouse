@@ -275,6 +275,16 @@ public struct EditHistory: Sendable {
         }
     }
 
+    /// 실행 취소로 되돌릴 수 있는 이 사진의 보정 변경(오래된 것부터). 여러 장을 한 번에 바꾼 단계는 이 사진 몫만 담는다.
+    public func editChanges(for id: UUID) -> [PhotoEditChange] {
+        let recorded = undoStack.flatMap { step -> [PhotoEditChange] in
+            guard case .edits(let changes) = step else { return [] }
+            return changes.filter { $0.id == id }
+        }
+        guard let pending = pendingContinuous, pending.id == id, pending.before != pending.after else { return recorded }
+        return recorded + [pending]
+    }
+
     public mutating func undo() -> HistoryStep? {
         commitContinuous()
         guard let step = undoStack.popLast() else { return nil }

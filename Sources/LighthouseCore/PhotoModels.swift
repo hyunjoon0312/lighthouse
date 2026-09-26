@@ -285,6 +285,8 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
     public var keywords: [String] = []
     public var caption: String = ""
     public var colorLabel: PhotoColorLabel?
+    /// 이름 붙여 저장한 보정 상태. 비어 있으면 카탈로그에 쓰지 않는다.
+    public var snapshots: [EditSnapshot] = []
 
     public init(id: UUID = UUID(), url: URL, metadata: PhotoMetadata = PhotoMetadata(),
                 importedAt: Date = Date()) {
@@ -298,7 +300,7 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, path, importedAt, metadata, rating, flag, edits, copyName, keywords, caption, colorLabel
+        case id, path, importedAt, metadata, rating, flag, edits, copyName, keywords, caption, colorLabel, snapshots
     }
 
     public init(from decoder: Decoder) throws {
@@ -314,6 +316,7 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
         keywords = try container.decodeIfPresent([String].self, forKey: .keywords) ?? []
         caption = try container.decodeIfPresent(String.self, forKey: .caption) ?? ""
         colorLabel = try container.decodeIfPresent(PhotoColorLabel.self, forKey: .colorLabel)
+        snapshots = try container.decodeIfPresent([EditSnapshot].self, forKey: .snapshots) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -329,6 +332,7 @@ public struct PhotoAsset: Identifiable, Codable, Equatable, Sendable {
         if !keywords.isEmpty { try container.encode(keywords, forKey: .keywords) }
         if !caption.isEmpty { try container.encode(caption, forKey: .caption) }
         try container.encodeIfPresent(colorLabel, forKey: .colorLabel)
+        if !snapshots.isEmpty { try container.encode(snapshots, forKey: .snapshots) }
     }
 
     /// 실행 취소 단위로 함께 바뀌는 별점·표시·키워드·설명·색상 라벨.

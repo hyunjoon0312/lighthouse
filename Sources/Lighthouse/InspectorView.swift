@@ -66,6 +66,8 @@ struct InspectorView: View {
                 else if model.adjustmentPanel == .local { localControls }
                 else { RetouchControls(photo: photo) }
                 Divider()
+                EditHistoryPanel(photo: photo)
+                Divider()
                 section("파일 정보")
                 metadataRow("크기", "\(photo.metadata.width) × \(photo.metadata.height)")
                 metadataRow("카메라", photo.metadata.camera)

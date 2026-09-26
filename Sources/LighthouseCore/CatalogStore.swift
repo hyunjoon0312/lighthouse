@@ -40,8 +40,11 @@ public struct CatalogStore: Sendable {
         masks.removeFiles(notIn: referenced)
     }
 
+    /// 카탈로그가 참조하는 자동 마스크. 스냅숏에 남은 마스크도 지우지 않도록 함께 센다.
     static func masks(in photos: [PhotoAsset]) -> [RasterMask] {
-        photos.flatMap { $0.edits.localAdjustments.compactMap(\.baseMask) }
+        photos.flatMap { photo in
+            ([photo.edits] + photo.snapshots.map(\.edits)).flatMap { $0.localAdjustments.compactMap(\.baseMask) }
+        }
     }
 
     /// 마스크는 내용 해시만 쓰고 PNG는 `maskDirectory`에 둔 카탈로그.
