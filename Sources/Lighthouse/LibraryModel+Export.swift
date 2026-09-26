@@ -114,6 +114,7 @@ extension LibraryModel {
         isCancellingExport = false
         operationProgress = 0
         exportReport = nil
+        lastExportedFiles = []
         let cancellation = CancellationFlag()
         exportCancellation = cancellation
         return cancellation
@@ -124,6 +125,7 @@ extension LibraryModel {
         isExporting = false
         isCancellingExport = false
         exportCancellation = nil
+        lastExportedFiles = records.values.map { URL(fileURLWithPath: $0.path) }.sorted { $0.path < $1.path }
         guard !records.isEmpty else { return }
         var updated = photos
         for index in updated.indices {

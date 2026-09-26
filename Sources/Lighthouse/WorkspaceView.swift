@@ -115,6 +115,9 @@ struct WorkspaceView: View {
             .overlay(alignment: .bottom) {
                 HStack(spacing: 10) {
                     Text(model.selection?.displayName ?? "").lineLimit(1)
+                    if let summary = model.selection?.metadata.shootingSummary, !summary.isEmpty {
+                        Text(summary).foregroundStyle(Palette.muted)
+                    }
                     if let rating = model.selection?.rating, rating > 0 {
                         Text(String(repeating: "★", count: rating)).foregroundStyle(Palette.accent)
                     }
@@ -597,6 +600,10 @@ struct WorkspaceView: View {
                 Button { model.move(-1) } label: { Image(systemName: "chevron.left") }.accessibilityLabel("이전 사진").disabled(model.visiblePhotos.first?.id == model.selectedID)
                 Button { model.move(1) } label: { Image(systemName: "chevron.right") }.accessibilityLabel("다음 사진").disabled(model.visiblePhotos.last?.id == model.selectedID)
                 Text(model.selection?.displayName ?? "").lineLimit(1).font(.subheadline.weight(.medium))
+                if let summary = model.selection?.metadata.shootingSummary, !summary.isEmpty {
+                    Text(summary).font(.caption.monospacedDigit()).foregroundStyle(Palette.muted).lineLimit(1)
+                        .layoutPriority(-1)
+                }
                 Spacer()
                 if model.mode == .compare, let pinned = model.pinned {
                     Text("기준: \(pinned.displayName)").font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
@@ -604,6 +611,10 @@ struct WorkspaceView: View {
                         model.compareShowsPinnedEdits.toggle()
                     }
                     .accessibilityLabel(model.compareShowsPinnedEdits ? "기준 사진을 보정 전 원본으로 보기" : "기준 사진을 보정한 모습으로 보기")
+                    Button("이 사진을 기준으로") { model.makeCurrentPinned() }
+                        .disabled(model.selectedID == pinned.id)
+                        .help("지금 사진을 왼쪽 기준으로 옮기고 다음 사진과 비교합니다")
+                        .accessibilityLabel("지금 사진을 비교 기준으로 삼기")
                 }
                 if model.mode == .edit {
                     Button(model.showsSplit ? "나눠 보기 끄기" : "전·후 나눠 보기") { model.toggleSplit() }

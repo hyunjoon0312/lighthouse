@@ -208,6 +208,8 @@ final class LibraryModel: ObservableObject {
     @Published var referenceMatchSource: PhotoAsset?
     @Published var cropSource: PhotoAsset?
     @Published var exportReport: String?
+    /// 마지막 내보내기에서 쓴 파일. 결과 안내 옆의 Finder에서 보기에 쓴다.
+    @Published var lastExportedFiles: [URL] = []
     @Published var clipboard: EditSettings?
     @Published var isLUTImporting = false
     @Published var lutError: String?
@@ -874,15 +876,29 @@ final class LibraryModel: ObservableObject {
         NSApp.keyWindow?.makeFirstResponder(nil)
         isPickingWhiteBalance = false
         if newMode != .edit { cancelDraft(); cancelRetouchDraft(); isLocalEditing = false }
-        if newMode == .compare && mode != .compare {
-            pinnedID = selectedID
-            pinnedImage = nil
-            pinnedError = nil
-            pinnedSource = nil
-            pinnedRenderedEdits = nil
-        }
+        if newMode == .compare && mode != .compare { pin(selectedID) }
         mode = newMode
         if newMode == .grid { isFocusView = false }
+        requestRender()
+    }
+
+    private func pin(_ id: UUID?) {
+        pinnedID = id
+        pinnedImage = nil
+        pinnedError = nil
+        pinnedSource = nil
+        pinnedRenderedEdits = nil
+    }
+
+    /// 비교 보기에서 보고 있는 사진을 새 기준으로 삼고 다음 사진으로 넘어간다. 두 장 중 나은 쪽을 남기며 차례로 고를 때 쓴다.
+    func makeCurrentPinned() {
+        guard mode == .compare, let id = selectedID, id != pinnedID else { return }
+        pin(id)
+        let visible = visiblePhotos
+        if let index = visible.firstIndex(where: { $0.id == id }), visible.indices.contains(index + 1) {
+            moveDirection = 1
+            focusPhoto(visible[index + 1])
+        }
         requestRender()
     }
 

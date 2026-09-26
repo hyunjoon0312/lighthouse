@@ -21,6 +21,8 @@ final class ReexportTests: XCTestCase {
         try await TestSupport.wait("export") { !model.isExporting }
         XCTAssertTrue(model.photos.allSatisfy { $0.lastExport != nil })
         XCTAssertTrue(model.changedSinceExport.isEmpty)
+        XCTAssertEqual(Set(model.lastExportedFiles.map(\.path)), Set(model.photos.compactMap(\.lastExport?.path)),
+                       "결과 안내의 Finder에서 보기는 방금 쓴 파일을 연다")
 
         model.focusPhoto(photos[0])
         var edits = photos[0].edits

@@ -100,7 +100,16 @@ struct ExportSheet: View {
                         .accessibilityLabel("내보내기 중지")
                 }
             }
-            if let report = model.exportReport { Text(report).font(.caption).textSelection(.enabled) }
+            if let report = model.exportReport {
+                HStack(alignment: .top) {
+                    Text(report).font(.caption).textSelection(.enabled)
+                    Spacer()
+                    if !model.lastExportedFiles.isEmpty {
+                        Button("Finder에서 보기") { model.revealInFinder(model.lastExportedFiles) }
+                            .accessibilityLabel("내보낸 파일을 Finder에서 보기")
+                    }
+                }
+            }
             HStack {
                 Spacer()
                 Button(model.exportReport == nil ? "취소" : "닫기") { dismiss() }

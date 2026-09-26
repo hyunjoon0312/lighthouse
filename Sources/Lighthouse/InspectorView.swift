@@ -75,7 +75,7 @@ struct InspectorView: View {
                 metadataRow("초점거리", photo.metadata.focalLength.map { $0.rounded() == $0 ? "\(Int($0)) mm" : String(format: "%.1f mm", $0) })
                 metadataRow("ISO", photo.metadata.iso.map(String.init))
                 metadataRow("조리개", photo.metadata.aperture.map { String(format: "f/%.1f", $0) })
-                metadataRow("셔터", photo.metadata.shutter.map(shutterText))
+                metadataRow("셔터", photo.metadata.shutter.map(PhotoMetadata.shutterText))
                 metadataRow("촬영", photo.metadata.capturedAt?.formatted(date: .abbreviated, time: .shortened))
                 if let record = photo.lastExport {
                     metadataRow("내보냄", record.exportedAt.formatted(date: .abbreviated, time: .shortened) +
@@ -545,11 +545,6 @@ struct InspectorView: View {
         }.font(.caption)
     }
 
-    private func shutterText(_ seconds: Double) -> String {
-        guard seconds > 0 else { return "—" }
-        if seconds < 1 { return "1/\(Int((1 / seconds).rounded()))초" }
-        return String(format: "%.1f초", seconds)
-    }
 }
 
 /// 키워드와 설명. 입력을 시작한 사진에 적용하므로 입력 중 다른 사진을 골라도 섞이지 않는다.
