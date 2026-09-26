@@ -4,25 +4,40 @@ import LighthouseCore
 /// 별점·표시·키워드·설명. 한 번에 바꾼 것은 한 단계로 실행 취소된다.
 @MainActor
 extension LibraryModel {
+    /// 별점·표시·라벨을 붙일 사진. 그리드에서 두 장 이상 골랐으면 고른 사진 모두, 아니면 기준 사진 한 장이다.
+    /// 사진·비교·여러 장 보기에서는 보고 있는 한 장에만 붙인다.
+    var markTargetIDs: [UUID] {
+        if mode == .grid, selectedPhotos.count >= 2 { return selectedPhotos.map(\.id) }
+        return selectedID.map { [$0] } ?? []
+    }
+
     func setRating(_ rating: Int) {
-        guard let id = selectedID else { return }
-        changeMarks(of: id) { $0.rating = rating }
+        changeMarks(of: markTargetIDs) { $0.rating = rating }
     }
 
     func setFlag(_ flag: PhotoFlag) {
-        guard let id = selectedID else { return }
-        changeMarks(of: id) { $0.flag = flag }
+        changeMarks(of: markTargetIDs) { $0.flag = flag }
     }
 
     func setColorLabel(_ label: PhotoColorLabel?) {
-        guard let id = selectedID else { return }
-        changeMarks(of: id) { $0.colorLabel = label }
+        changeMarks(of: markTargetIDs) { $0.colorLabel = label }
     }
 
     /// 키보드로 별점·표시·라벨을 바꾼다. 자동 다음 사진이 켜져 있으면 바꾸기 전에 정한 다음 사진으로 넘어가므로
     /// 필터 때문에 방금 표시한 사진이 목록에서 빠져도 한 장을 건너뛰지 않는다.
-    /// `toggleLabel`은 이미 그 라벨이면 떼고, 아니면 붙인다.
+    /// `toggleLabel`은 이미 그 라벨이면 떼고, 아니면 붙인다. 그리드에서 여러 장을 골랐으면 모두에 붙이고
+    /// (모두 그 라벨이면 떼고) 다음 사진으로 넘어가지 않는다.
     func markFromKeyboard(rating: Int? = nil, flag: PhotoFlag? = nil, toggleLabel: PhotoColorLabel? = nil) {
+        let targets = markTargetIDs
+        if targets.count > 1 {
+            let removesLabel = toggleLabel != nil && targets.allSatisfy { photo(withID: $0)?.colorLabel == toggleLabel }
+            changeMarks(of: targets) { marks in
+                if let rating { marks.rating = rating }
+                if let flag { marks.flag = flag }
+                if toggleLabel != nil { marks.colorLabel = removesLabel ? nil : toggleLabel }
+            }
+            return
+        }
         guard let id = selectedID else { return }
         // 여러 장 보기에서는 비교 중인 사진 안에서만 넘어가 선택이 풀리지 않게 한다.
         let visible = mode == .survey ? surveyPhotos : visiblePhotos
