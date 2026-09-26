@@ -2,6 +2,16 @@
 
 자동 검사(`swift test`의 `LighthouseCoreTests`·`LighthouseTests`)는 코어와 `LibraryModel`의 동작을 확인하지만, 실제 화면의 모습과 클릭·키 입력은 확인하지 못한다. 2026-09-26 다시 시도했을 때도 이 개발 Mac에서는 화면 접근이 막혀 있었다(`screencapture` 결과가 검은 화면이고 Orca의 접근성 읽기가 막힘. Orca는 시스템 설정 › 개인정보 보호 및 보안 › 손쉬운 사용에서 Orca Computer Use를 껐다 켜라고 안내한다). 아래 항목은 사람이 직접 확인해야 한다.
 
+화면 권한 없이 주요 화면의 **모습**만 먼저 보려면 창을 화면에 띄우지 않고 SwiftUI 화면을 PNG로 그리는 점검 테스트를 쓴다(2026-09-27부터). 클릭·키 입력·애니메이션·HDR 밝기는 확인하지 못하고, 날짜 칸 같은 일부 AppKit 컨트롤은 실제 화면과 다르게 그려질 수 있다.
+
+```sh
+LIGHTHOUSE_SNAPSHOT_DIR=/tmp/lh-shots LIGHTHOUSE_SNAPSHOT_PHOTOS=/tmp/lh-qa/photos \
+  swift test --filter UISnapshotTests
+# 장면만 고르기: LIGHTHOUSE_SNAPSHOT_SCENES=grid,edit,inspector,missing
+```
+
+그리드·사진 보기(1440·1100 폭), 오른쪽 패널 전체, 나눠 보기, 회색 찍기, 비교, 여러 장 보기, 원본 없음, 일괄 적용·내보내기·조건·단축키·카드 가져오기·프리셋 창을 그린다. 사진 폴더를 주지 않으면 만든 사진과 S9 RW2 표본(있으면)을 쓴다.
+
 ## 준비
 
 원래 카탈로그를 건드리지 않도록 빈 폴더를 카탈로그로 쓴다. 표본 사진은 복사본을 쓴다.
