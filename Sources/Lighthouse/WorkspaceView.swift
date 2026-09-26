@@ -112,6 +112,8 @@ struct WorkspaceView: View {
         .onChange(of: model.filter) { _, _ in model.ensureSelectionVisible() }
         .onChange(of: model.search) { _, _ in model.ensureSelectionVisible() }
         .onChange(of: model.minimumRating) { _, _ in model.ensureSelectionVisible() }
+        // 회색 찍기 칸이 사라져도 SwiftUI가 십자 커서를 되돌리지 않아, 찍기가 끝나면 보통 커서로 돌린다.
+        .onChange(of: model.isPickingWhiteBalance) { _, picking in if !picking { NSCursor.arrow.set() } }
         .onChange(of: model.criteria) { _, _ in model.ensureSelectionVisible() }
         .onChange(of: model.hasModalPresentation) { _, presented in
             if presented { model.cancelDraft(); model.cancelRetouchDraft() }

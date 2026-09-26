@@ -2,18 +2,23 @@ import AppKit
 import SwiftUI
 @testable import Lighthouse
 import LighthouseCore
+import ObjectiveC
 import XCTest
 
 /// 합성한 클릭·트랙패드 핀치·끌기가 실제 창의 SwiftUI 화면에서 누른 위치에 작동하는지 본다.
 /// 창을 화면 순서에 올려야 클릭이 전달되고 끌기 중에는 마우스 포인터를 창 위로 옮기므로 `LIGHTHOUSE_UI_EVENTS`를 줄 때만
 /// 돈다. 앱이 활성화되지 않아도(화면 잠금 중 등) 첫 클릭이 뷰에 가도록 테스트용 호스팅 뷰가 첫 클릭을 받는다.
-/// 커서 모양은 앱이 활성화되어야 바뀌어 확인하지 않는다.
+/// 커서는 macOS가 활성 앱에만 바꾸므로, 커서 테스트에서는 이 테스트 안에서만 앱이 활성이고 창이 키 창인 것처럼 보이게 한다.
 @MainActor
 final class UIEventTests: XCTestCase {
     private let size = CGSize(width: 1440, height: 900)
 
     private final class FirstMouseHost: NSHostingView<AnyView> {
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    }
+
+    private final class KeyWindow: NSWindow {
+        override var isKeyWindow: Bool { true }
     }
 
     /// 창 내용 왼쪽 위 기준 좌표를 창 좌표(아래가 0)로 바꾼다. 창은 화면에 맞춰 줄어들 수 있다.
@@ -201,5 +206,59 @@ final class UIEventTests: XCTestCase {
         try await click(window, CGPoint(x: 350 + 2 * 221, y: 230))
         try await TestSupport.wait("click after drag", timeout: 5) { model.selectedID == photos[2].id }
         XCTAssertEqual(model.photos.count, 4)
+    }
+
+    /// 회색 찍기 중에는 사진 칸 위에서 십자 커서가 되고, 칸 밖이나 찍기를 끝낸 뒤에는 돌아온다.
+    /// 실제로는 창 서버가 활성 앱의 추적 영역에 마우스 이동을 보내므로, 여기서는 추적 영역 소유자에게 직접 넘긴다.
+    func testGrayPickShowsCrosshairOverThePhoto() async throws {
+        guard ProcessInfo.processInfo.environment["LIGHTHOUSE_UI_EVENTS"] != nil else {
+            throw XCTSkip("LIGHTHOUSE_UI_EVENTS를 주면 창을 띄워 회색 찍기 커서를 확인한다.")
+        }
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 1)
+        let isActive = try XCTUnwrap(class_getInstanceMethod(NSApplication.self, #selector(getter: NSApplication.isActive)))
+        let alwaysActive: @convention(block) (AnyObject) -> Bool = { _ in true }
+        let original = method_setImplementation(isActive, imp_implementationWithBlock(alwaysActive))
+        defer { method_setImplementation(isActive, original) }
+        let window = KeyWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
+                               backing: .buffered, defer: false)
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil); window.contentView = nil }
+        model.select(model.visiblePhotos[0])
+        model.setMode(.edit)
+        try await TestSupport.wait("render") { model.rendered != nil }
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+
+        func cursor(at point: CGPoint) async throws -> NSCursor {
+            let event = try XCTUnwrap(NSEvent.mouseEvent(
+                with: .mouseMoved, location: windowPoint(window, point), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 0, pressure: 0))
+            for area in host.trackingAreas where area.options.contains(.mouseMoved) {
+                // SwiftUI의 커서 담당(PointerBridge)은 NSResponder가 아니어서 셀렉터로 보낸다.
+                if let owner = area.owner as? NSObject, owner.responds(to: #selector(NSResponder.mouseMoved(with:))) {
+                    owner.perform(#selector(NSResponder.mouseMoved(with:)), with: event)
+                }
+            }
+            try await Task.sleep(nanoseconds: 250_000_000)
+            return NSCursor.current
+        }
+        let photo = CGPoint(x: 680, y: 470), sidebar = CGPoint(x: 100, y: 600)
+        let before = try await cursor(at: photo)
+        XCTAssertNotEqual(before, .crosshair, "찍기 전에는 보통 커서")
+        model.beginWhiteBalancePick()
+        try await Task.sleep(nanoseconds: 500_000_000)
+        let picking = try await cursor(at: photo)
+        XCTAssertEqual(picking, .crosshair, "찍는 중 사진 칸 위는 십자 커서")
+        let outside = try await cursor(at: sidebar)
+        XCTAssertNotEqual(outside, .crosshair, "사진 칸 밖은 보통 커서")
+        let back = try await cursor(at: photo)
+        XCTAssertEqual(back, .crosshair)
+        model.isPickingWhiteBalance = false
+        try await Task.sleep(nanoseconds: 500_000_000)
+        let after = try await cursor(at: photo)
+        XCTAssertNotEqual(after, .crosshair, "찍기를 끝내면 돌아온다")
     }
 }
