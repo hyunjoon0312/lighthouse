@@ -56,4 +56,19 @@ final class SelectionMarkTests: XCTestCase {
         model.ensureSelectionVisible()
         XCTAssertNil(model.selectedID)
     }
+
+    /// ⇧+화살표로 처음 고른 사진부터 선택을 넓히고 줄인다.
+    func testShiftArrowExtendsTheSelection() async throws {
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 4)
+        let ids = model.visiblePhotos.map(\.id)
+        model.select(model.visiblePhotos[1])
+        model.extendSelection(1)
+        model.extendSelection(1)
+        XCTAssertEqual(model.selectedPhotoIDs, Set(ids[1...3]))
+        XCTAssertEqual(model.selectedID, ids[3])
+        model.extendSelection(-3)
+        XCTAssertEqual(model.selectedPhotoIDs, Set(ids[0...1]), "처음 고른 사진을 넘어가면 반대쪽으로 넓힌다")
+        model.extendSelection(-5)
+        XCTAssertEqual(model.selectedID, ids[0], "목록 끝에서 멈춘다")
+    }
 }

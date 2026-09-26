@@ -873,6 +873,11 @@ struct WorkspaceView: View {
                     if case .collection = model.filter { model.removeSelectedPhotosFromCurrentFolder() } else { model.requestRemoveFromCatalog() }
                     return nil
                 }
+                if model.mode == .grid, event.modifierFlags.contains(.shift),
+                   let offset = [123: -1, 124: 1, 125: model.gridColumnCount, 126: -model.gridColumnCount][event.keyCode] {
+                    model.extendSelection(offset)
+                    return nil
+                }
                 if model.mode == .survey, event.keyCode == 123 { model.moveInSurvey(-1); return nil }
                 if model.mode == .survey, event.keyCode == 124 { model.moveInSurvey(1); return nil }
                 if event.keyCode == 123 { model.move(-1); return nil }

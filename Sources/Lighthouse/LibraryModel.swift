@@ -872,6 +872,17 @@ final class LibraryModel: ObservableObject {
         focusPhoto(visible[next])
     }
 
+    /// ⇧+화살표(그리드): 기준 사진을 `offset`만큼 옮기고, 처음 고른 사진부터 그곳까지 고른다(⇧클릭과 같다).
+    func extendSelection(_ offset: Int) {
+        let ids = visiblePhotos.map(\.id)
+        guard !ids.isEmpty else { return }
+        let index = ids.firstIndex(where: { $0 == selectedID }) ?? 0
+        let next = min(max(index + offset, 0), ids.count - 1)
+        let previous = selectedID
+        photoSelection.select(ids[next], in: ids, mode: .range)
+        selectionDidChange(previousActive: previous)
+    }
+
     func setMode(_ newMode: WorkspaceMode) {
         NSApp.keyWindow?.makeFirstResponder(nil)
         isPickingWhiteBalance = false

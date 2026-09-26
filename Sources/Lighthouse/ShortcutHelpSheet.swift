@@ -20,6 +20,7 @@ enum ShortcutGuide {
             Entry(keys: "⇧⌘O", action: "카드에서 복사해 가져오기"),
             Entry(keys: "⌘A", action: "보이는 사진 전체 선택"),
             Entry(keys: "⌘클릭 / ⇧클릭", action: "개별 선택 추가·해제 / 범위 선택"),
+            Entry(keys: "⇧+화살표", action: "그리드에서 선택 넓히기"),
         ]),
         Section(title: "이동·보기", entries: [
             Entry(keys: "← / →", action: "이전 / 다음 사진"),
