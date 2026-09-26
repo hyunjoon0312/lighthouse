@@ -26,20 +26,32 @@ public enum RetouchProcessingError: LocalizedError, Equatable, Sendable {
 enum RetouchProcessor {
     static func apply(to source: CIImage, strokes: [RetouchStroke],
                       context: CIContext, colorSpace: CGColorSpace) throws -> CIImage {
-        guard !strokes.isEmpty else { return source }
+        try applyResolvingOffsets(to: source, strokes: strokes, context: context, colorSpace: colorSpace).image
+    }
+
+    /// 결과와 함께, 실제로 적용한 stroke를 원본 위치(스팟 복구가 찾은 위치 포함)를 채워 돌려준다.
+    /// HDR 배율을 같은 자리에서 옮겨 올 때 쓴다.
+    static func applyResolvingOffsets(to source: CIImage, strokes: [RetouchStroke], context: CIContext,
+                                      colorSpace: CGColorSpace) throws -> (image: CIImage, strokes: [RetouchStroke]) {
+        guard !strokes.isEmpty else { return (source, []) }
         let bounds = source.extent
         guard bounds.width.isFinite, bounds.height.isFinite,
               bounds.width > 0, bounds.height > 0 else {
             throw RetouchProcessingError.processingFailed
         }
         var image = source
+        var applied: [RetouchStroke] = []
         for stroke in strokes where stroke.isEnabled && !stroke.points.isEmpty {
-            guard let (output, region) = try apply(stroke, to: image, context: context, colorSpace: colorSpace) else {
+            guard let (output, region, offset) = try apply(stroke, to: image, context: context,
+                                                           colorSpace: colorSpace) else {
                 continue
             }
             image = try materialized(output, in: region, context: context).composited(over: image).cropped(to: bounds)
+            var resolved = stroke
+            resolved.sourceOffset = offset
+            applied.append(resolved)
         }
-        return image
+        return (image, applied)
     }
 
     /// stroke 결과를 영역 크기의 float 비트맵으로 굳힌다. 그러지 않으면 여러 곳에서 참조되는 앞선 결과를
@@ -74,9 +86,9 @@ enum RetouchProcessor {
         return radiusFraction * min(image.extent.width, image.extent.height)
     }
 
-    /// stroke가 바꾸는 영역과 그 영역의 결과를 돌려준다. 바꿀 영역이 없으면 nil.
+    /// stroke가 바꾸는 영역과 그 영역의 결과, 가져온 원본 위치를 돌려준다. 바꿀 영역이 없으면 nil.
     private static func apply(_ stroke: RetouchStroke, to image: CIImage,
-                              context: CIContext, colorSpace: CGColorSpace) throws -> (CIImage, CGRect)? {
+                              context: CIContext, colorSpace: CGColorSpace) throws -> (CIImage, CGRect, MaskPoint)? {
         let radius = try validatedRadius(of: stroke, in: image)
         let offset: MaskPoint
         switch stroke.mode {
@@ -151,7 +163,7 @@ enum RetouchProcessor {
         guard let output = blend.outputImage?.cropped(to: region) else {
             throw RetouchProcessingError.processingFailed
         }
-        return (output, region)
+        return (output, region, offset)
     }
 
     private static func destinationRegion(of stroke: RetouchStroke, margin: CGFloat,

@@ -306,14 +306,16 @@ public final class ImagePipeline: @unchecked Sendable {
         let offset: CGPoint
         /// 구도(회전·크롭·크기)를 적용하기 전의 범위.
         let baseExtent: CGRect
+        /// 적용한 복제·스팟 복구. 원본 위치가 모두 채워져 있다.
+        let retouchStrokes: [RetouchStroke]
     }
 
     func composed(url: URL, edits: EditSettings, maxPixel: Int?, scale: Double,
                           allowApproximation: Bool) throws -> Composition {
         let development = try developed(url: url, edits: edits, scale: scale, allowApproximation: allowApproximation)
-        var image = development.image
-        image = try RetouchProcessor.apply(to: image, strokes: edits.retouchStrokes,
-                                           context: context, colorSpace: colorSpace)
+        let retouch = try RetouchProcessor.applyResolvingOffsets(to: development.image, strokes: edits.retouchStrokes,
+                                                                 context: context, colorSpace: colorSpace)
+        var image = retouch.image
         image = try AdvancedColorProcessor.applyColor(to: image, curves: edits.curves,
                                                       ranges: edits.colorRanges)
         let maskScale = Self.maskScale(sourceWidth: image.extent.width, sourceHeight: image.extent.height,
@@ -363,7 +365,7 @@ public final class ImagePipeline: @unchecked Sendable {
         image = transformedForDisplay(image, edits: edits, maxPixel: maxPixel)
         image = applyVignette(edits.vignette, to: image)
         return Composition(image: image, isApproximate: development.isApproximate, source: development.source,
-                           offset: development.offset, baseExtent: baseExtent)
+                           offset: development.offset, baseExtent: baseExtent, retouchStrokes: retouch.strokes)
     }
 
     /// HDR 하이라이트의 밝기 배율(1 이상). RAW를 확장 범위로 한 번 더 현상해 보통 현상과의 밝기 비율을 구하고
@@ -374,9 +376,17 @@ public final class ImagePipeline: @unchecked Sendable {
         guard edits.hdrAmount > 0, edits.hdrAmount.isFinite, Self.isRAW(url), !composition.isApproximate else { return nil }
         let extended = try developedSource(url: url, edits: edits, scale: scale, allowApproximation: false,
                                            extendedRange: min(2, edits.hdrAmount)).image
-        let gain = Self.brightnessRatio(standard: composition.source, extended: extended)
+        var gain = Self.brightnessRatio(standard: composition.source, extended: extended)
             .transformed(by: CGAffineTransform(translationX: composition.offset.x, y: composition.offset.y))
             .cropped(to: composition.baseExtent)
+        // 복제·복구한 자리는 가져온 곳의 배율을 쓴다. 그러지 않으면 지운 밝은 물체의 배율이 남아 모양대로 빛난다.
+        // 스팟 복구의 밝기 맞춤은 0…1로 잘라 배율에 쓸 수 없으므로 배율은 복제처럼 그대로 옮긴다.
+        let copied = composition.retouchStrokes.map { stroke in
+            var copy = stroke
+            copy.mode = .clone
+            return copy
+        }
+        gain = try RetouchProcessor.apply(to: gain, strokes: copied, context: context, colorSpace: colorSpace)
         return transformedForDisplay(gain, edits: edits, maxPixel: maxPixel).cropped(to: composition.image.extent)
     }
 

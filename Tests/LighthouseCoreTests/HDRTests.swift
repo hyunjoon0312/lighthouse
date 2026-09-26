@@ -42,6 +42,54 @@ final class HDRTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(EditSettings.self, from: encoder.encode(edits)), edits)
     }
 
+    /// 복제·스팟 복구한 자리는 가져온 곳의 HDR 배율을 쓴다. 지운 밝은 물체 모양으로 빛나거나 밝은 하늘에 어두운 점이 남지 않는다.
+    func testRetouchedAreasTakeTheGainOfTheirSource() throws {
+        guard let url = rawSample else { throw XCTSkip("RAW 표본이 없습니다.") }
+        let pipeline = ImagePipeline(cachesDevelopment: true)
+        var edits = EditSettings(exposure: 1.5)
+        edits.hdrAmount = 1
+        func render(_ edits: EditSettings, hdr: Bool) throws -> (values: [Float], width: Int, height: Int) {
+            let image = try pipeline.renderPreview(url: url, edits: edits, maxPixel: 600, hdr: hdr).image
+            return (luminance(CIImage(cgImage: image)), image.width, image.height)
+        }
+        let sdr = try render(edits, hdr: false), hdr = try render(edits, hdr: true)
+        let width = sdr.width, height = sdr.height
+        func mean(_ values: [Float], _ x: Int, _ y: Int) -> Float {
+            var total: Float = 0
+            for row in (y - 2)...(y + 2) { for column in (x - 2)...(x + 2) { total += values[row * width + column] } }
+            return total / 25
+        }
+        // 배율이 가장 큰 곳(밝은 곳)과, 배율이 1인 어두운 곳.
+        var bright = (x: 0, y: 0, ratio: Float(0)), dark = (x: 0, y: 0, value: Float(9))
+        for y in stride(from: 10, to: height - 10, by: 3) {
+            for x in stride(from: 10, to: width - 10, by: 3) {
+                let ratio = mean(hdr.values, x, y) / max(0.001, mean(sdr.values, x, y))
+                if ratio > bright.ratio { bright = (x, y, ratio) }
+                let value = mean(sdr.values, x, y)
+                if value > 0.02, value < dark.value { dark = (x, y, value) }
+            }
+        }
+        XCTAssertGreaterThan(bright.ratio, 1.5)
+        func point(_ x: Int, _ y: Int) -> MaskPoint { MaskPoint(x: Double(x) / Double(width), y: Double(y) / Double(height)) }
+        func ratio(at spot: (x: Int, y: Int), stroke: RetouchStroke) throws -> Float {
+            var retouched = edits
+            retouched.retouchStrokes = [stroke]
+            let sdr = try render(retouched, hdr: false), hdr = try render(retouched, hdr: true)
+            return mean(hdr.values, spot.x, spot.y) / max(0.001, mean(sdr.values, spot.x, spot.y))
+        }
+        let toDark = MaskPoint(x: point(dark.x, dark.y).x - point(bright.x, bright.y).x,
+                               y: point(dark.x, dark.y).y - point(bright.x, bright.y).y)
+        for mode in RetouchMode.allCases {
+            let covered = try ratio(at: (bright.x, bright.y),
+                                    stroke: RetouchStroke(mode: mode, points: [point(bright.x, bright.y)], sourceOffset: toDark))
+            XCTAssertLessThan(covered, 1.1, "\(mode): 어두운 곳으로 덮은 밝은 부분은 더 빛나지 않는다")
+        }
+        let fromBright = MaskPoint(x: -toDark.x, y: -toDark.y)
+        let copied = try ratio(at: (dark.x, dark.y),
+                               stroke: RetouchStroke(mode: .clone, points: [point(dark.x, dark.y)], sourceOffset: fromBright))
+        XCTAssertGreaterThan(copied, 1.4, "밝은 곳을 복제해 온 자리는 그곳의 배율을 쓴다")
+    }
+
     func testPreviewLiftsOnlyHighlightsAboveSDRWhite() throws {
         guard let url = rawSample else { throw XCTSkip("RAW 표본이 없습니다.") }
         let pipeline = ImagePipeline(cachesDevelopment: true)
