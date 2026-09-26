@@ -68,9 +68,14 @@ public struct ThumbnailStore: Sendable {
         }
     }
 
-    /// 카탈로그에서 뺀 항목의 썸네일을 지운다.
-    public func remove(photoID: UUID) {
-        try? FileManager.default.removeItem(at: directory.appendingPathComponent(photoID.uuidString, isDirectory: true))
+    /// 카탈로그에 없는 항목의 썸네일 폴더를 지운다. 사진 ID 이름이 아닌 폴더는 건드리지 않는다.
+    /// 카탈로그에서 뺀 사진은 실행 취소로 되돌릴 수 있어 그 자리에서 지우지 않고 다음 실행 때 여기서 정리한다.
+    public func prune(keeping ids: Set<UUID>) {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        for name in names {
+            guard let id = UUID(uuidString: name), !ids.contains(id) else { continue }
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name, isDirectory: true))
+        }
     }
 
     private func file(photoID: UUID, key: String) -> URL {

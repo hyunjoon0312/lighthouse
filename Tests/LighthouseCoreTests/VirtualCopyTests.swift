@@ -58,7 +58,7 @@ final class VirtualCopyTests: XCTestCase {
         XCTAssertNil(try store.load()[1].copyName)
     }
 
-    func testCopiesStayInOneBurstShotAndThumbnailFolderIsRemoved() throws {
+    func testCopiesStayInOneBurstShotAndPruneRemovesOnlyUnknownThumbnails() throws {
         let base = Date(timeIntervalSince1970: 1_800_000_000)
         let master = PhotoAsset(url: URL(fileURLWithPath: "/photos/P1.RW2"),
                                 metadata: PhotoMetadata(camera: "S9", capturedAt: base))
@@ -68,14 +68,18 @@ final class VirtualCopyTests: XCTestCase {
                               metadata: PhotoMetadata(camera: "S9", capturedAt: base.addingTimeInterval(0.2)))
         XCTAssertEqual(BurstGrouping.groups(for: [master, copy, next]).first?.shots, [[master.id, copy.id], [next.id]])
 
-        let store = ThumbnailStore(directory: try temporaryDirectory())
+        let directory = try temporaryDirectory()
+        let store = ThumbnailStore(directory: directory)
         let context = CGContext(data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 0,
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         store.store(context.makeImage()!, photoID: copy.id, key: "k")
         store.store(context.makeImage()!, photoID: master.id, key: "k")
-        store.remove(photoID: copy.id)
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("메모"), withIntermediateDirectories: true)
+        store.prune(keeping: [master.id])
         XCTAssertNil(store.load(photoID: copy.id, key: "k"))
         XCTAssertNotNil(store.load(photoID: master.id, key: "k"), "원래 항목의 썸네일은 남는다")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("메모").path),
+                      "사진 ID 이름이 아닌 폴더는 지우지 않는다")
     }
 }

@@ -193,21 +193,21 @@ final class BatchEditingTests: XCTestCase {
         XCTAssertNil(history.redo())
     }
 
-    func testRemovingPhotosDropsTheirHistorySteps() {
-        let kept = UUID(), removed = UUID()
+    func testRemovalIsOneStepAndKeepsTheRemovedPhotosEarlierSteps() {
+        let photo = PhotoAsset(url: URL(fileURLWithPath: "/photos/P1.RW2"))
         var history = EditHistory()
-        history.record([PhotoEditChange(id: removed, before: .neutral, after: EditSettings(exposure: 1))])
-        history.recordMarks([PhotoMarkChange(id: kept, before: PhotoMarks(rating: 0, flag: .none),
-                                             after: PhotoMarks(rating: 3, flag: .none)),
-                             PhotoMarkChange(id: removed, before: PhotoMarks(rating: 0, flag: .none),
-                                             after: PhotoMarks(rating: 1, flag: .none))])
-        history.record([PhotoEditChange(id: removed, before: .neutral, after: EditSettings(contrast: 1.2))])
+        history.record([PhotoEditChange(id: photo.id, before: .neutral, after: EditSettings(exposure: 1))])
+        history.recordContinuous(PhotoEditChange(id: photo.id, before: EditSettings(exposure: 1),
+                                                 after: EditSettings(exposure: 1, contrast: 1.2)))
+        let removed = [RemovedPhoto(index: 3, photo: photo, folderIDs: [UUID()])]
+        history.recordRemoval(removed)
+        history.recordRemoval([])
+        XCTAssertEqual(history.undo(), .removal(removed), "빼기가 먼저 되돌려진다")
+        XCTAssertEqual(history.redo(), .removal(removed))
         _ = history.undo()
-        history.recordContinuous(PhotoEditChange(id: removed, before: .neutral, after: EditSettings(saturation: 0)))
-        history.removeChanges(for: [removed])
-        XCTAssertFalse(history.canRedo)
-        guard case .marks(let changes)? = history.undo() else { return XCTFail("남은 사진의 표시 단계만 남아야 한다") }
-        XCTAssertEqual(changes.map(\.id), [kept])
+        guard case .edits(let changes)? = history.undo() else { return XCTFail("빼기 전에 이어 가던 보정 단계") }
+        XCTAssertEqual(changes.first?.after.contrast, 1.2)
+        guard case .edits? = history.undo() else { return XCTFail("그 앞의 보정 단계도 남는다") }
         XCTAssertNil(history.undo())
     }
 }

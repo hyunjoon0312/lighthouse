@@ -676,6 +676,9 @@ final class LibraryModel: ObservableObject {
                     }
                     // 오늘 처음 연 상태를 남긴다. 이날 작업을 되돌리고 싶을 때 쓸 수 있다.
                     self.saveQueue.async { self.backUpIfNeeded(photos) }
+                    // 지난 실행에서 카탈로그에서 뺀 사진의 썸네일은 이제 되돌릴 수 없으므로 지운다.
+                    let kept = Set(photos.map(\.id))
+                    self.thumbnailQueue.async { [thumbnailStore = self.thumbnailStore] in thumbnailStore.prune(keeping: kept) }
                     self.observeFileAvailability()
                     self.refreshMissingOriginals()
                     self.refreshLUTLibrary()
@@ -877,6 +880,8 @@ final class LibraryModel: ObservableObject {
         case .marks(let changes):
             for change in changes { applyMarks(useAfter ? change.after : change.before, to: change.id) }
             objectWillChange.send()
+        case .removal(let removed):
+            if useAfter { performRemoval(Set(removed.map(\.photo.id))) } else { restoreRemoved(removed) }
         }
     }
 

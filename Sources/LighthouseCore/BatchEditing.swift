@@ -190,10 +190,24 @@ public struct PhotoMarkChange: Equatable, Sendable {
     }
 }
 
-/// 실행 취소 한 단계. 보정값 변경과 별점·플래그 변경을 같은 순서로 되돌린다.
+/// 카탈로그에서 뺀 한 장. 되돌릴 때 빼기 전 순서(`index`)와 들어 있던 내 폴더를 되살린다.
+public struct RemovedPhoto: Equatable, Sendable {
+    public let index: Int
+    public let photo: PhotoAsset
+    public let folderIDs: [UUID]
+
+    public init(index: Int, photo: PhotoAsset, folderIDs: [UUID]) {
+        self.index = index
+        self.photo = photo
+        self.folderIDs = folderIDs
+    }
+}
+
+/// 실행 취소 한 단계. 보정값 변경, 별점·플래그 변경, 카탈로그에서 빼기를 같은 순서로 되돌린다.
 public enum HistoryStep: Equatable, Sendable {
     case edits([PhotoEditChange])
     case marks([PhotoMarkChange])
+    case removal([RemovedPhoto])
 }
 
 public struct EditHistory: Sendable {
@@ -238,10 +252,17 @@ public struct EditHistory: Sendable {
         append(.marks(changes.filter { $0.before != $0.after }))
     }
 
+    /// 카탈로그에서 뺀 사진. 그 사진의 앞선 보정·표시 단계는 남겨 두어, 빼기를 되돌린 뒤 이어서 되돌릴 수 있다.
+    public mutating func recordRemoval(_ photos: [RemovedPhoto]) {
+        commitContinuous()
+        append(.removal(photos))
+    }
+
     private mutating func append(_ step: HistoryStep) {
         switch step {
         case .edits(let changes): guard !changes.isEmpty else { return }
         case .marks(let changes): guard !changes.isEmpty else { return }
+        case .removal(let photos): guard !photos.isEmpty else { return }
         }
         redoStack.removeAll()
         guard limit > 0 else { return }
@@ -263,26 +284,5 @@ public struct EditHistory: Sendable {
         guard let step = redoStack.popLast() else { return nil }
         undoStack.append(step)
         return step
-    }
-
-    /// 카탈로그에서 뺀 사진의 변경을 기록에서 지운다. 그 사진만 바꾼 단계는 통째로 사라져
-    /// 실행 취소를 눌러도 아무 일도 없는 단계가 남지 않는다.
-    public mutating func removeChanges(for ids: Set<UUID>) {
-        guard !ids.isEmpty else { return }
-        if let pending = pendingContinuous, ids.contains(pending.id) { pendingContinuous = nil }
-        func filtered(_ steps: [HistoryStep]) -> [HistoryStep] {
-            steps.compactMap { step in
-                switch step {
-                case .edits(let changes):
-                    let kept = changes.filter { !ids.contains($0.id) }
-                    return kept.isEmpty ? nil : .edits(kept)
-                case .marks(let changes):
-                    let kept = changes.filter { !ids.contains($0.id) }
-                    return kept.isEmpty ? nil : .marks(kept)
-                }
-            }
-        }
-        undoStack = filtered(undoStack)
-        redoStack = filtered(redoStack)
     }
 }

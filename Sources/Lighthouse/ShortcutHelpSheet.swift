@@ -33,7 +33,7 @@ enum ShortcutGuide {
         Section(title: "표시", entries: [
             Entry(keys: "0–5", action: "별점 설정"),
             Entry(keys: "P / X / U", action: "선택 / 제외 / 표시 해제"),
-            Entry(keys: "Delete", action: "카탈로그에서 빼기(확인 후, 원본 파일은 그대로) · 내 폴더에서는 그 폴더에서만 빼기"),
+            Entry(keys: "Delete", action: "카탈로그에서 빼기(확인 후, 원본 파일은 그대로, ⌘Z로 되돌리기) · 내 폴더에서는 그 폴더에서만 빼기"),
         ]),
         Section(title: "보정·내보내기", entries: [
             Entry(keys: "⌘Z / ⇧⌘Z", action: "실행 취소 / 다시 실행 (보정·별점·표시)"),

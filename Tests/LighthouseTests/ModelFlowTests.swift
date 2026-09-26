@@ -823,8 +823,8 @@ final class ModelFlowTests: XCTestCase {
         model.removeFromCatalog([copyPhoto.id])
         try await Task.sleep(nanoseconds: 300_000_000)
         check(model.photo(withID: copyPhoto.id) == nil && model.photo(withID: masterPhoto.id) != nil &&
-              model.selectedID == masterPhoto.id && !FileManager.default.fileExists(atPath: thumbFolder.path),
-              "deleting removes only the copy and returns to the original")
+              model.selectedID == masterPhoto.id && FileManager.default.fileExists(atPath: thumbFolder.path),
+              "deleting removes only the copy, returns to the original and keeps its thumbnail for undo")
         model.removeFromCatalog([secondCopy.id])
         check(!model.photoFolders.contains { $0.photoIDs.contains(secondCopy.id) }, "deleted copy leaves folders")
 
@@ -856,8 +856,13 @@ final class ModelFlowTests: XCTestCase {
         model.setRating(2)
         model.removeFromCatalog([undatedCopy.id])
         model.undo()
-        check(model.photos[undatedIndex].rating == 0, "undo after deleting a copy skips the copy's steps")
+        check(model.photos[undatedIndex + 1].id == undatedCopy.id && model.photos[undatedIndex + 1].edits.saturation == 0,
+              "undo puts a deleted copy back in place with its edits")
         model.undo()
+        check(model.photos[undatedIndex].rating == 0, "the step before the deletion undoes next")
+        model.undo()
+        check(model.photo(withID: undatedCopy.id)?.edits.saturation == 1, "the restored copy's own steps undo too")
+        model.removeFromCatalog([undatedCopy.id])
         check(FileManager.default.fileExists(atPath: masterPhoto.path), "original file kept")
 
         if rawSample != nil {

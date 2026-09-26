@@ -54,12 +54,24 @@ extension LibraryModel {
         catalogRemoval = CatalogRemoval(photos: targets + hidden, hiddenCompanions: hidden.count)
     }
 
-    /// 항목을 카탈로그에서 뺀다. 원본 파일은 지우거나 옮기지 않는다. 실행 취소할 수 없다.
+    /// 항목을 카탈로그에서 뺀다. 원본 파일은 지우거나 옮기지 않는다. ⌘Z로 원래 자리·보정·내 폴더와 함께 되돌린다.
     func removeFromCatalog(_ ids: Set<UUID>) {
         guard catalogLoaded, loadError == nil else { return }
-        let removed = photos.filter { ids.contains($0.id) }
+        let removed = photos.enumerated().compactMap { index, photo -> RemovedPhoto? in
+            guard ids.contains(photo.id) else { return nil }
+            let folders = photoFolders.filter { $0.photoIDs.contains(photo.id) }.map(\.id)
+            return RemovedPhoto(index: index, photo: photo, folderIDs: folders)
+        }
         guard !removed.isEmpty else { return }
-        let removedIDs = Set(removed.map(\.id))
+        editHistory.recordRemoval(removed)
+        performRemoval(Set(removed.map(\.photo.id)))
+        let copiesOnly = removed.allSatisfy(\.photo.isVirtualCopy)
+        operationMessage = (copiesOnly ? "가상 사본 \(removed.count)개를 지웠습니다." : "카탈로그에서 \(removed.count)장을 뺐습니다.") +
+            " 원본 파일은 그대로이며 ⌘Z로 되돌릴 수 있습니다."
+    }
+
+    /// 빼기와 다시 실행에서 쓴다. 기록은 남기지 않는다. 디스크의 썸네일은 되돌릴 때를 위해 다음 실행까지 둔다.
+    func performRemoval(_ removedIDs: Set<UUID>) {
         let fallbackPath = selection.flatMap { removedIDs.contains($0.id) ? $0.path : nil }
         photos.removeAll { removedIDs.contains($0.id) }
         if foldersLoaded, folderLoadError == nil {
@@ -70,10 +82,6 @@ extension LibraryModel {
             burstFailedIDs.remove(id)
             thumbnailCache.removeObject(forKey: id.uuidString as NSString)
         }
-        editHistory.removeChanges(for: removedIDs)
-        thumbnailQueue.async { [thumbnailStore] in
-            for id in removedIDs { thumbnailStore.remove(photoID: id) }
-        }
         if pinnedID.map(removedIDs.contains) == true { pinnedID = nil }
         scheduleSave()
         ensureSelectionVisible()
@@ -81,9 +89,35 @@ extension LibraryModel {
         if selectedID == nil, let fallbackPath, let sibling = visiblePhotos.first(where: { $0.path == fallbackPath }) {
             focusPhoto(sibling)
         }
-        operationMessage = removed.allSatisfy(\.isVirtualCopy)
-            ? "가상 사본 \(removed.count)개를 지웠습니다. 원본 파일은 그대로입니다."
-            : "카탈로그에서 \(removed.count)장을 뺐습니다. 원본 파일은 그대로입니다."
+    }
+
+    /// 뺐던 사진을 빼기 전 순서와 내 폴더에 되돌린다. 그사이 같은 파일을 다시 가져왔으면 그 항목은 건너뛴다.
+    func restoreRemoved(_ removed: [RemovedPhoto]) {
+        var updated = photos
+        let present = Set(updated.map { "\($0.path)|\($0.copyName ?? "")" })
+        var restored: [RemovedPhoto] = []
+        for item in removed.sorted(by: { $0.index < $1.index })
+        where updated.allSatisfy({ $0.id != item.photo.id }) && !present.contains("\(item.photo.path)|\(item.photo.copyName ?? "")") {
+            updated.insert(item.photo, at: min(item.index, updated.count))
+            restored.append(item)
+        }
+        guard !restored.isEmpty else {
+            operationMessage = "되돌릴 사진이 이미 카탈로그에 있습니다."
+            return
+        }
+        photos = updated
+        if foldersLoaded, folderLoadError == nil {
+            for item in restored {
+                for folderID in item.folderIDs {
+                    photoFolders.firstIndex { $0.id == folderID }.map { photoFolders[$0].add([item.photo.id]) }
+                }
+            }
+        }
+        scheduleSave()
+        if selectedID == nil { focusPhoto(restored[0].photo) } else { ensureSelectionVisible() }
+        let skipped = removed.count - restored.count
+        operationMessage = "\(restored.count)장을 카탈로그에 되돌렸습니다." +
+            (skipped > 0 ? " \(skipped)장은 그사이 다시 가져와 건너뛰었습니다." : "")
     }
 
     func scheduleSave(debounce: Bool = false) {

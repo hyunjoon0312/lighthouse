@@ -299,9 +299,9 @@ struct WorkspaceView: View {
 
     private var removalMessage: String {
         guard let removal = model.catalogRemoval else { return "" }
-        if removal.isCopiesOnly { return "사본의 보정·별점만 지웁니다. 원본 파일과 원래 항목은 그대로이며 실행 취소할 수 없습니다." }
+        if removal.isCopiesOnly { return "사본의 보정·별점만 지웁니다. 원본 파일과 원래 항목은 그대로이며 ⌘Z로 되돌릴 수 있습니다." }
         let companions = removal.hiddenCompanions > 0 ? " 한 장으로 묶여 있던 JPEG \(removal.hiddenCompanions)장도 함께 뺍니다." : ""
-        return "원본 파일은 지우거나 옮기지 않고, 보정·별점·폴더 정보만 카탈로그에서 지웁니다. 실행 취소할 수 없으며 다시 가져오면 보정 없이 새로 들어옵니다." + companions
+        return "원본 파일은 지우거나 옮기지 않고, 보정·별점·폴더 정보만 카탈로그에서 지웁니다. ⌘Z로 되돌릴 수 있습니다(앱을 다시 열면 되돌릴 수 없고, 다시 가져오면 보정 없이 새로 들어옵니다)." + companions
     }
 
     private var selectionToolbar: some View {
