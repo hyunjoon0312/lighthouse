@@ -414,6 +414,20 @@ final class LibraryModel: ObservableObject {
     var selectedID: UUID? { photoSelection.activeID }
     var selectedPhotoIDs: Set<UUID> { photoSelection.selectedIDs }
     var selectedPhotos: [PhotoAsset] { visiblePhotos.filter { selectedPhotoIDs.contains($0.id) } }
+    /// 지금 보는 목록의 이름. 사이드바와 같은 이름을 위쪽 제목에 쓴다.
+    var filterTitle: String {
+        switch filter {
+        case .all: "전체 사진"
+        case .picks: "선택됨"
+        case .rejects: "제외됨"
+        case .edited: "보정됨"
+        case .bursts: "연속 촬영"
+        case .missing: "원본 없음"
+        case .folder(let path): URL(fileURLWithPath: path).lastPathComponent
+        case .collection(let id): photoFolders.first { $0.id == id }?.name ?? "내 폴더"
+        case .smart(let id): smartFolders.first { $0.id == id }?.name ?? "스마트 폴더"
+        }
+    }
     var selection: PhotoAsset? { selectedID.flatMap(photo(withID:)) }
     var pinned: PhotoAsset? { photos.first { $0.id == pinnedID } }
     var canUndo: Bool { editHistory.canUndo }

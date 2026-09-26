@@ -140,14 +140,18 @@ struct WorkspaceView: View {
             VStack(spacing: 0) {
                 toolbar
                 Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
-                selectionToolbar
-                Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                if !model.photos.isEmpty {
+                    selectionToolbar
+                    Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                }
                 if model.filter == .bursts {
                     BurstBar()
                     Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
                 }
                 mainContent.frame(maxWidth: .infinity, maxHeight: .infinity)
-                filmstrip
+                statusBar
+                // 그리드는 같은 사진을 이미 모두 보여 주므로 필름 스트립을 두지 않는다.
+                if model.mode != .grid && !model.visiblePhotos.isEmpty { filmstrip }
             }
             Rectangle().fill(.white.opacity(0.08)).frame(width: 1)
             inspector.frame(width: 300)
@@ -292,18 +296,30 @@ struct WorkspaceView: View {
     }
 
     private var toolbar: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("사진 라이브러리").font(.system(size: 18, weight: .semibold))
+                Text(model.filterTitle).font(.system(size: 18, weight: .semibold)).lineLimit(1)
                 Text(toolbarSubtitle).font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
-                    .help(toolbarSubtitle)
             }
-            Spacer(minLength: 20)
+            .frame(minWidth: 60, maxWidth: .infinity, alignment: .leading)
+            .help(model.filterTitle + " · " + toolbarSubtitle)
+            // 창이 좁으면 별점·정렬을 아이콘 메뉴로 줄여 모든 단추가 보이게 한다.
+            ViewThatFits(in: .horizontal) {
+                toolbarControls(compact: false)
+                toolbarControls(compact: true)
+            }
+            .layoutPriority(1)
+        }
+        .padding(.horizontal, 16).frame(height: 67).background(Palette.panel)
+    }
+
+    private func toolbarControls(compact: Bool) -> some View {
+        HStack(spacing: compact ? 8 : 12) {
             HStack(spacing: 5) {
                 ForEach(WorkspaceMode.allCases, id: \.self) { mode in
                     Button { model.setMode(mode) } label: {
                         Image(systemName: mode.icon)
-                            .frame(width: 34, height: 28)
+                            .frame(width: compact ? 30 : 34, height: 28)
                             .background(model.mode == mode ? Palette.accent.opacity(0.20) : .clear, in: RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain).help(mode.rawValue)
@@ -313,12 +329,22 @@ struct WorkspaceView: View {
             }
             .padding(3).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
             TextField("파일명·키워드 검색", text: $model.search)
-                .textFieldStyle(.roundedBorder).frame(width: 165)
-            Picker("별점", selection: $model.minimumRating) {
-                Text("모든 별점").tag(0)
-                ForEach(1...5, id: \.self) { Text("\($0)★ 이상").tag($0) }
+                .textFieldStyle(.roundedBorder).frame(width: compact ? 120 : 165)
+            if compact {
+                Menu {
+                    Picker("별점", selection: $model.minimumRating) { ratingChoices }.pickerStyle(.inline)
+                } label: {
+                    Image(systemName: model.minimumRating > 0 ? "star.fill" : "star")
+                        .foregroundStyle(model.minimumRating > 0 ? Palette.accent : Color.white.opacity(0.82))
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .tint(model.minimumRating > 0 ? Palette.accent : Color.white.opacity(0.82))
+                .help(model.minimumRating > 0 ? "\(model.minimumRating)★ 이상만 보기" : "별점으로 거르기")
+                .accessibilityLabel("별점으로 거르기")
+            } else {
+                Picker("별점", selection: $model.minimumRating) { ratingChoices }
+                    .labelsHidden().frame(width: 112)
             }
-            .labelsHidden().frame(width: 112)
             Button { showsCriteria.toggle() } label: {
                 Image(systemName: model.criteria.isEmpty ? "line.3.horizontal.decrease.circle"
                                                          : "line.3.horizontal.decrease.circle.fill")
@@ -329,16 +355,36 @@ struct WorkspaceView: View {
             .help("카메라·렌즈·초점거리·ISO·촬영일로 거르고 스마트 폴더로 저장")
             .accessibilityLabel(model.criteria.isEmpty ? "조건으로 거르기" : "조건으로 거르기, 조건 걸림")
             .popover(isPresented: $showsCriteria, arrowEdge: .bottom) { CriteriaPopover().environmentObject(model) }
-            Picker("정렬", selection: $model.sortOrder) {
-                ForEach(PhotoSortOrder.allCases) { Text($0.title).tag($0) }
+            if compact {
+                Menu {
+                    Picker("정렬", selection: $model.sortOrder) { sortChoices }.pickerStyle(.inline)
+                } label: { Image(systemName: "arrow.up.arrow.down") }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .tint(Color.white.opacity(0.82))
+                    .help("정렬: \(model.sortOrder.title)")
+                    .accessibilityLabel("정렬")
+            } else {
+                Picker("정렬", selection: $model.sortOrder) { sortChoices }
+                    .labelsHidden().frame(width: 118)
+                    .help("보이는 목록의 순서. 같은 값끼리는 촬영 시각 순입니다.")
             }
-            .labelsHidden().frame(width: 118)
-            .help("보이는 목록의 순서. 같은 값끼리는 촬영 시각 순입니다.")
-            Button { model.showExport = true } label: { Label("내보내기", systemImage: "square.and.arrow.up") }
-                .accessibilityLabel("내보내기")
-                .disabled(model.selection == nil || model.isExporting || !model.catalogLoaded)
+            Button { model.showExport = true } label: {
+                if compact { Image(systemName: "square.and.arrow.up") } else { Label("내보내기", systemImage: "square.and.arrow.up") }
+            }
+            .help("내보내기 (⇧⌘E)")
+            .accessibilityLabel("내보내기")
+            .disabled(model.selection == nil || model.isExporting || !model.catalogLoaded)
         }
-        .padding(.horizontal, 20).frame(height: 67).background(Palette.panel)
+        .fixedSize()
+    }
+
+    @ViewBuilder private var ratingChoices: some View {
+        Text("모든 별점").tag(0)
+        ForEach(1...5, id: \.self) { Text("\($0)★ 이상").tag($0) }
+    }
+
+    @ViewBuilder private var sortChoices: some View {
+        ForEach(PhotoSortOrder.allCases) { Text($0.title).tag($0) }
     }
 
     /// 보이는 장수와, 걸린 조건(스마트 폴더·조건 창)의 요약.
@@ -365,11 +411,24 @@ struct WorkspaceView: View {
         return "원본 파일은 지우거나 옮기지 않고, 보정·별점·폴더 정보만 카탈로그에서 지웁니다. ⌘Z로 되돌릴 수 있습니다(앱을 다시 열면 되돌릴 수 없고, 다시 가져오면 보정 없이 새로 들어옵니다)." + companions
     }
 
+    /// 선택한 사진에 쓰는 단추. 창이 좁으면 보기 설정을 "보기" 메뉴로 접고, 더 좁으면 기준 사진 이름을 뺀다.
     private var selectionToolbar: some View {
-        ScrollView(.horizontal) { HStack(spacing: 12) {
+        ViewThatFits(in: .horizontal) {
+            selectionControls(collapsesOptions: false, showsActiveName: true)
+            selectionControls(collapsesOptions: true, showsActiveName: true)
+            selectionControls(collapsesOptions: true, showsActiveName: false)
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 36).background(Palette.panel)
+    }
+
+    private func selectionControls(collapsesOptions: Bool, showsActiveName: Bool) -> some View {
+        HStack(spacing: 12) {
             Text("\(model.selectedPhotoIDs.count)장 선택")
                 .font(.caption.weight(.semibold)).foregroundStyle(Palette.accent)
-            if let name = model.selection?.displayName {
+            if showsActiveName, let name = model.selection?.displayName {
                 Text("기준: \(name)").font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
             }
             Button("전체 선택") { model.selectAllVisible() }
@@ -378,21 +437,31 @@ struct WorkspaceView: View {
             if model.mode == .grid {
                 HStack(spacing: 4) {
                     Image(systemName: "square.grid.3x3").font(.caption2).foregroundStyle(Palette.muted)
-                    Slider(value: $tileWidth, in: 130...260).frame(width: 90)
+                    Slider(value: $tileWidth, in: 130...260).frame(width: collapsesOptions ? 70 : 90)
                     Image(systemName: "square.grid.2x2").font(.caption).foregroundStyle(Palette.muted)
                 }
                 .help("썸네일 크기")
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("썸네일 크기")
             }
-            Toggle("RAW+JPEG 한 장으로", isOn: $model.collapsesRAWJPEGPairs)
-                .toggleStyle(.checkbox)
-                .help("RAW와 함께 찍힌 JPEG를 숨기고 RAW만 보여 줍니다. JPEG는 카탈로그에 남아 있으며 끄면 다시 보입니다.")
-                .accessibilityLabel("RAW와 JPEG를 한 장으로 보기")
-            Toggle("표시 후 다음 사진", isOn: $model.autoAdvance)
-                .toggleStyle(.checkbox)
-                .help("P·X·U·0–5 키로 표시하면 다음 사진으로 넘어갑니다")
-                .accessibilityLabel("표시 후 자동으로 다음 사진")
+            if collapsesOptions {
+                Menu("보기") {
+                    Toggle("RAW+JPEG 한 장으로", isOn: $model.collapsesRAWJPEGPairs)
+                    Toggle("표시 후 다음 사진", isOn: $model.autoAdvance)
+                }
+                .fixedSize()
+                .help("RAW+JPEG 한 장으로 · 표시 후 다음 사진")
+                .accessibilityLabel("보기 설정")
+            } else {
+                Toggle("RAW+JPEG 한 장으로", isOn: $model.collapsesRAWJPEGPairs)
+                    .toggleStyle(.checkbox)
+                    .help("RAW와 함께 찍힌 JPEG를 숨기고 RAW만 보여 줍니다. JPEG는 카탈로그에 남아 있으며 끄면 다시 보입니다.")
+                    .accessibilityLabel("RAW와 JPEG를 한 장으로 보기")
+                Toggle("표시 후 다음 사진", isOn: $model.autoAdvance)
+                    .toggleStyle(.checkbox)
+                    .help("P·X·U·0–5 키로 표시하면 다음 사진으로 넘어갑니다")
+                    .accessibilityLabel("표시 후 자동으로 다음 사진")
+            }
             Button("선택 해제") { model.clearPhotoSelection() }
                 .accessibilityLabel("사진 선택 해제")
                 .disabled(model.selectedPhotoIDs.isEmpty)
@@ -407,6 +476,7 @@ struct WorkspaceView: View {
                 Divider()
                 Button("새 폴더에 추가…") { model.presentCreateFolder() }
             }
+            .fixedSize()
             .disabled(model.selectedPhotoIDs.isEmpty || !model.foldersLoaded)
             .accessibilityLabel("선택한 사진을 폴더에 추가")
             if case .collection = model.filter {
@@ -414,10 +484,8 @@ struct WorkspaceView: View {
                     .disabled(model.selectedPhotoIDs.isEmpty || !model.foldersLoaded)
                     .accessibilityLabel("선택한 사진을 현재 폴더에서 빼기")
             }
-        }.padding(.horizontal, 20) }
-        .scrollIndicators(.hidden)
-        .buttonStyle(.borderless)
-        .frame(height: 36).background(Palette.panel)
+        }
+        .fixedSize()
     }
 
     @ViewBuilder private var mainContent: some View {
@@ -626,39 +694,48 @@ struct WorkspaceView: View {
         ))
     }
 
-    private var filmstrip: some View {
-        VStack(spacing: 0) {
-            if model.isImporting || model.isExporting {
-                HStack {
-                    ProgressView(value: model.operationProgress).tint(Palette.accent)
-                    if model.isImporting && model.canCancelImport {
-                        Button(model.isCancellingImport ? "중지하는 중…" : "중지") { model.cancelImport() }
-                            .disabled(model.isCancellingImport)
-                            .controlSize(.small)
-                            .accessibilityLabel("카드 복사 중지")
-                    }
-                }
-                .padding(.horizontal, 16).padding(.top, 4)
-            }
-            if let message = model.operationMessage {
-                HStack { Text(message).lineLimit(2); Spacer(); Button { model.operationMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }
-                    .font(.caption).foregroundStyle(Palette.muted).padding(.horizontal, 16).padding(.top, 6)
-            }
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    LazyHStack(spacing: 8) {
-                        ForEach(model.visiblePhotos) { photo in
-                            FilmstripTile(photo: photo,
-                                          selected: model.selectedPhotoIDs.contains(photo.id),
-                                          active: photo.id == model.selectedID)
-                                .id(photo.id)
+    /// 가져오기·내보내기 진행과 안내. 필름 스트립이 없는 그리드에서도 보인다.
+    @ViewBuilder private var statusBar: some View {
+        if model.isImporting || model.isExporting || model.operationMessage != nil {
+            VStack(spacing: 0) {
+                if model.isImporting || model.isExporting {
+                    HStack {
+                        ProgressView(value: model.operationProgress).tint(Palette.accent)
+                        if model.isImporting && model.canCancelImport {
+                            Button(model.isCancellingImport ? "중지하는 중…" : "중지") { model.cancelImport() }
+                                .disabled(model.isCancellingImport)
+                                .controlSize(.small)
+                                .accessibilityLabel("카드 복사 중지")
                         }
-                    }.padding(.horizontal, 14).padding(.vertical, 10)
+                    }
+                    .padding(.horizontal, 16).padding(.top, 4)
                 }
-                .onChange(of: model.selectedID) { _, id in scroll(proxy, to: id) }
+                if let message = model.operationMessage {
+                    HStack { Text(message).lineLimit(2); Spacer(); Button { model.operationMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("안내 닫기") }
+                        .font(.caption).foregroundStyle(Palette.muted).padding(.horizontal, 16).padding(.vertical, 6)
+                }
             }
+            .frame(maxWidth: .infinity)
+            .background(Palette.panel)
         }
-        .frame(height: (model.operationMessage == nil ? 106 : 129) + (model.isImporting || model.isExporting ? 22 : 0))
+    }
+
+    private var filmstrip: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 8) {
+                    ForEach(model.visiblePhotos) { photo in
+                        FilmstripTile(photo: photo,
+                                      selected: model.selectedPhotoIDs.contains(photo.id),
+                                      active: photo.id == model.selectedID)
+                            .id(photo.id)
+                    }
+                }.padding(.horizontal, 14).padding(.vertical, 10)
+            }
+            .onChange(of: model.selectedID) { _, id in scroll(proxy, to: id) }
+            .onAppear { scroll(proxy, to: model.selectedID) }
+        }
+        .frame(height: 106)
         .background(Palette.panel)
     }
 

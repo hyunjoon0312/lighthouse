@@ -35,6 +35,7 @@ final class SmartFolderTests: XCTestCase {
         XCTAssertNil(model.saveSmartFolder(name: "S9 고감도"))
         let folder = try XCTUnwrap(model.smartFolders.first)
         XCTAssertEqual(model.filter, .smart(folder.id))
+        XCTAssertEqual(model.filterTitle, "S9 고감도", "위쪽 제목은 보고 있는 목록 이름")
         XCTAssertTrue(model.criteria.isEmpty && model.minimumRating == 0, "걸었던 조건은 폴더로 옮겨 간다")
         XCTAssertEqual(model.visiblePhotos.map(\.id), [model.photos[2].id], "저장한 뒤에도 같은 사진")
         XCTAssertEqual(model.counts.smart[folder.id], 1)
