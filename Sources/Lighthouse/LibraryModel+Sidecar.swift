@@ -4,10 +4,10 @@ import LighthouseCore
 /// XMP 사이드카. 켜 둔 동안 별점·라벨·키워드·설명이 바뀌면 잠시 모았다가 백그라운드에서 쓴다.
 @MainActor
 extension LibraryModel {
-    /// 사이드카를 쓸 사진. 가상 사본은 원본이 하나라 빼고, RAW와 같은 이름의 JPEG·HEIC는 RAW의 사이드카를 함께 쓰므로 뺀다.
+    /// 사이드카를 쓸 사진. `<이름>.xmp` 사이드카는 RAW의 방식이라(Lightroom 등은 JPEG·HEIC에서 파일 안의 XMP를 읽는다)
+    /// RAW만 쓰고, 가상 사본은 원본이 하나라 뺀다. RAW+JPEG는 RAW 쪽 한 파일이 된다.
     func sidecarTargets(_ ids: Set<UUID>) -> [PhotoAsset] {
-        let companions = RAWJPEGPairs.companions(in: photos)
-        return photos.filter { ids.contains($0.id) && !$0.isVirtualCopy && companions[$0.id] == nil }
+        photos.filter { ids.contains($0.id) && $0.isRAW && !$0.isVirtualCopy }
     }
 
     func scheduleSidecarWrite(_ id: UUID) {

@@ -42,8 +42,17 @@ final class XMPSidecarTests: XCTestCase {
         XCTAssertEqual(XMPSidecar.write(foreign), .foreign)
         XCTAssertEqual(try Data(contentsOf: XMPSidecar.url(for: foreign)), camera, "다른 프로그램의 사이드카는 그대로")
 
-        let missing = PhotoAsset(url: folder.appendingPathComponent("없는 폴더/C.RW2"))
+        var missing = PhotoAsset(url: folder.appendingPathComponent("없는 폴더/C.RW2"))
+        missing.rating = 1
         guard case .failed = XMPSidecar.write(missing) else { return XCTFail("원본 폴더가 없으면 실패") }
+
+        var plain = PhotoAsset(url: folder.appendingPathComponent("D.RW2"))
+        plain.flag = .pick
+        XCTAssertEqual(XMPSidecar.write(plain), .unchanged, "적을 표시가 없으면(선택 표시는 XMP 항목이 없음) 만들지 않는다")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: XMPSidecar.url(for: plain).path))
+        photo.rating = 0
+        XCTAssertEqual(XMPSidecar.write(photo), .written, "이미 쓴 사이드카는 표시를 모두 지워도 별점 0으로 고쳐 쓴다")
+        XCTAssertTrue(try String(contentsOf: XMPSidecar.url(for: photo), encoding: .utf8).contains("xmp:Rating=\"0\""))
     }
 
     /// 다른 앱이 Lighthouse 사이드카에 항목을 더해 저장하면 `CreatorTool`이 남아 있어도 덮어쓰지 않는다.

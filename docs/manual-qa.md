@@ -133,7 +133,7 @@ LIGHTHOUSE_DATA_DIR=/tmp/lh-qa/data dist/Lighthouse.app/Contents/MacOS/Lighthous
 
 ## XMP 사이드카
 
-- [ ] 사진 메뉴의 "별점·키워드를 XMP 사이드카로 쓰기"를 켠다 → 사진 폴더에 `.xmp`가 생기고 "XMP 사이드카 N개 씀" 안내가 보인다. 별점·라벨·키워드를 바꾸면 곧 파일이 바뀐다.
+- [ ] 사진 메뉴의 "별점·키워드를 XMP 사이드카로 쓰기"를 켠다 → 별점·라벨·키워드가 있는 RAW 옆에만 `.xmp`가 생기고(표시 없는 RAW와 JPEG·HEIC 옆에는 없음) "XMP 사이드카 N개 씀" 안내가 보인다. 별점·라벨·키워드를 바꾸면 곧 파일이 바뀐다. Lightroom·Bridge에서 그 RAW를 열면 별점·라벨·키워드가 보인다.
 - [ ] 카메라나 다른 앱이 만든 `.xmp`가 있는 사진, 또는 Lighthouse가 쓴 `.xmp`를 다른 앱(Lightroom 등)에서 고쳐 저장한 사진 → 덮어쓰지 않았다는 안내가 보이고 그 파일은 그대로다. 끄면 더는 쓰지 않는다(이미 쓴 파일은 남는다).
 
 ## 보관본과 오류 안내

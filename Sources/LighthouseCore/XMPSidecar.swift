@@ -7,7 +7,7 @@ public enum XMPSidecar {
 
     public enum Outcome: Equatable, Sendable {
         case written
-        /// 내용이 같아 다시 쓰지 않았다.
+        /// 쓸 것이 없었다. 내용이 같거나, 사이드카가 없고 적을 표시도 없다.
         case unchanged
         /// 다른 프로그램이 만든 사이드카라 덮어쓰지 않았다.
         case foreign
@@ -70,13 +70,17 @@ public enum XMPSidecar {
             """
     }
 
-    /// 사이드카가 없거나 Lighthouse가 쓴 것이면 쓴다. 원본 폴더가 없으면(원본 없음) 실패다.
+    /// 사이드카가 없거나 Lighthouse가 쓴 것이면 쓴다. 사이드카가 없고 적을 표시(별점·제외·라벨·키워드·설명)도 없으면
+    /// 만들지 않아 표시하지 않은 사진 옆에 파일이 생기지 않는다. 원본 폴더가 없으면(원본 없음) 실패다.
     public static func write(_ photo: PhotoAsset) -> Outcome {
         let target = url(for: photo)
-        let data = Data(document(for: photo).utf8)
+        let marks = marks(of: photo)
+        let data = Data(document(marks).utf8)
         if let existing = try? Data(contentsOf: target) {
             guard isOurs(existing) else { return .foreign }
             if existing == data { return .unchanged }
+        } else if marks.isEmpty {
+            return .unchanged
         }
         do {
             try data.write(to: target, options: .atomic)

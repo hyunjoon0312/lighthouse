@@ -105,7 +105,7 @@ struct LighthouseApp: App {
                 Divider()
                 Toggle("별점·키워드를 XMP 사이드카로 쓰기", isOn: $library.writesXMPSidecars)
                     .disabled(!library.catalogLoaded)
-                Button("모든 사진의 XMP 사이드카 다시 쓰기") { library.writeAllSidecars() }
+                Button("RAW의 XMP 사이드카 모두 다시 쓰기") { library.writeAllSidecars() }
                     .disabled(!library.writesXMPSidecars || !library.catalogLoaded)
             }
             CommandGroup(replacing: .undoRedo) {
