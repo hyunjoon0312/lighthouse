@@ -148,6 +148,7 @@ struct LighthouseApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var library: LibraryModel?
+    private var terminationPending = false
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
@@ -157,9 +158,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if terminationPending { return .terminateLater }
+        if let upload = library?.driveUpload, upload.isBusy {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Google Drive 작업이 진행 중입니다"
+            alert.informativeText = "지금 종료하면 작업을 중지합니다. 전송 중이던 파일은 Drive에 도착했을 수 있습니다."
+            alert.addButton(withTitle: "앱으로 돌아가기")
+            alert.addButton(withTitle: "업로드 취소하고 종료")
+            guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
+            terminationPending = true
+            Task { @MainActor [weak self] in
+                await upload.cancelAndWait()
+                let shouldTerminate = self?.flushBeforeTermination() ?? false
+                self?.terminationPending = false
+                sender.reply(toApplicationShouldTerminate: shouldTerminate)
+            }
+            return .terminateLater
+        }
+        return flushBeforeTermination() ? .terminateNow : .terminateCancel
+    }
+
+    @MainActor
+    private func flushBeforeTermination() -> Bool {
         do {
             try library?.flushSave()
-            return .terminateNow
+            return true
         } catch {
             AppLog.catalog.fault("save on quit failed: \(error.localizedDescription, privacy: .private)")
             let alert = NSAlert()
@@ -168,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.informativeText = "\(error.localizedDescription)\n문제를 해결한 뒤 다시 종료하세요."
             alert.addButton(withTitle: "앱으로 돌아가기")
             alert.runModal()
-            return .terminateCancel
+            return false
         }
     }
 }

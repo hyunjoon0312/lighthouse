@@ -307,6 +307,7 @@ final class LibraryModel: ObservableObject {
     }
 
     let pipeline = ImagePipeline()
+    let driveUpload: GoogleDriveUploadModel
     let previewPipeline = ImagePipeline(cachesDevelopment: true)
     let thumbnailStore = ThumbnailStore()
     let lutStore = LUTStore()
@@ -415,7 +416,8 @@ final class LibraryModel: ObservableObject {
     static let thumbnailPixels = 360
     private static let pasteComponents: EditComponents = [.global, .lut]
 
-    init() {
+    init(driveUpload: GoogleDriveUploadModel? = nil) {
+        self.driveUpload = driveUpload ?? GoogleDriveUploadModel()
         thumbnailCache.countLimit = 240
         thumbnailCache.totalCostLimit = 200 * 1024 * 1024
     }

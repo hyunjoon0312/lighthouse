@@ -2,12 +2,21 @@ import AppKit
 import SwiftUI
 import LighthouseCore
 
+private enum ExportDestination: String, CaseIterable, Identifiable {
+    case mac, drive
+    var id: Self { self }
+    var title: String { self == .mac ? "Mac" : "Google Drive" }
+}
+
 struct ExportSheet: View {
     @EnvironmentObject private var model: LibraryModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.displayScale) private var displayScale
     @StateObject private var previewModel = JPEGPreviewModel()
     @State private var scope: ExportScope = .current
+    @State private var destination: ExportDestination = .mac
+    @State private var driveContent: GoogleDriveUploadContent = .edited
+    @State private var driveBusy = false
     @State private var options = ExportPresetLibrary.lastOptions
     @State private var userPresets = ExportPresetLibrary.userPresets
     @State private var directory: URL? = ExportPresetLibrary.lastDirectory
@@ -33,12 +42,12 @@ struct ExportSheet: View {
             HStack(alignment: .top, spacing: 18) {
                 ScrollView { settings.padding(.trailing, 6) }
                     .frame(width: 320)
-                    .disabled(model.isExporting)
                 previewColumn
             }
             footer
         }
         .padding(24).frame(minWidth: 940, minHeight: 680)
+        .interactiveDismissDisabled(model.isExporting || driveBusy)
         .onAppear {
             model.exportReport = nil
             scope = model.selectedPhotos.count >= 2 ? .selected : .current
@@ -46,8 +55,11 @@ struct ExportSheet: View {
             requestPreview(debounce: false)
         }
         .onChange(of: model.isExporting) { _, exporting in if !exporting { changed = model.changedSinceExport } }
+        .onReceive(model.driveUpload.$isBusy) { driveBusy = $0 }
         .onDisappear { previewModel.cancel() }
         .onChange(of: scope) { _, _ in requestPreview() }
+        .onChange(of: destination) { _, _ in requestPreview() }
+        .onChange(of: driveContent) { _, _ in requestPreview() }
         .onChange(of: renderOptions) { _, _ in requestPreview() }
         .onChange(of: options) { _, value in ExportPresetLibrary.lastOptions = value }
         .alert("내보내기 프리셋 저장", isPresented: $savingPreset) {
@@ -64,27 +76,56 @@ struct ExportSheet: View {
             Image(systemName: "square.and.arrow.up").font(.title2).foregroundStyle(.orange)
             Text("내보내기").font(.title2.weight(.semibold))
             Spacer()
-            if previewModel.isPreparing { ProgressView().controlSize(.small) }
-            presetMenu
+            if showsEditedPreview && previewModel.isPreparing { ProgressView().controlSize(.small) }
+            if showsEditedPreview { presetMenu }
         }
     }
 
     private var previewColumn: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Spacer()
-                Toggle(actualSize ? "100%" : "화면 맞춤", isOn: $actualSize)
-                    .toggleStyle(.button).accessibilityLabel("내보내기 미리보기 100퍼센트")
-            }
-            previewPane.frame(minWidth: 560, minHeight: 420)
-            if targets.count > 1 {
-                Text("미리보기와 파일 크기는 대표 사진 1장의 결과입니다. 같은 설정으로 \(targets.count)장을 내보냅니다.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if showsEditedPreview {
+                HStack {
+                    if destination == .drive { Text("보정본 미리보기").font(.headline) }
+                    Spacer()
+                    Toggle(actualSize ? "100%" : "화면 맞춤", isOn: $actualSize)
+                        .toggleStyle(.button).accessibilityLabel("내보내기 미리보기 100퍼센트")
+                }
+                previewPane.frame(minWidth: 560, minHeight: 420)
+                if targets.count > 1 {
+                    Text("미리보기와 파일 크기는 대표 사진 1장의 결과입니다. 같은 설정으로 \(targets.count)장을 내보냅니다.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                originalSummary.frame(minWidth: 560, minHeight: 420)
             }
         }
     }
 
-    private var footer: some View {
+    private var showsEditedPreview: Bool { destination == .mac || driveContent.includesEdited }
+
+    private var originalSummary: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "doc.badge.arrow.up").font(.system(size: 42)).foregroundStyle(.secondary)
+            Text("원본 파일을 그대로 업로드합니다").font(.headline)
+            Text("\(targets.count)장 · 원본 바이트와 기존 메타데이터를 바꾸지 않습니다.\n원본에 위치 정보가 있으면 그대로 포함됩니다.")
+                .multilineTextAlignment(.center).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder private var footer: some View {
+        if destination == .drive {
+            HStack {
+                Spacer()
+                Button("닫기") { dismiss() }.disabled(driveBusy)
+            }
+        } else {
+            localFooter
+        }
+    }
+
+    private var localFooter: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(directory?.path ?? "저장 폴더를 선택하세요").font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -145,13 +186,35 @@ struct ExportSheet: View {
 
     private var settings: some View {
         VStack(alignment: .leading, spacing: 12) {
-            reexportBox
+            Picker("보낼 곳", selection: $destination) {
+                ForEach(ExportDestination.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .disabled(model.isExporting || driveBusy)
+            if destination == .mac { reexportBox.disabled(model.isExporting) }
             Picker("대상", selection: $scope) {
                 Text("현재 사진").tag(ExportScope.current)
                 Text("선택한 사진 (\(model.selectedPhotos.count)장)").tag(ExportScope.selected)
                 Text("현재 필터 결과 (\(model.visiblePhotos.count)장)").tag(ExportScope.visible)
             }
             .accessibilityLabel("내보내기 대상")
+            .disabled(model.isExporting || driveBusy)
+            if destination == .drive {
+                GoogleDriveExportPanel(upload: model.driveUpload, photos: targets,
+                                       options: options, content: $driveContent)
+                if driveContent.includesEdited {
+                    Divider()
+                    Text(driveContent == .both ? "보정본 설정" : "편집본 설정").font(.headline)
+                    exportSettings
+                }
+            } else {
+                exportSettings
+            }
+        }
+    }
+
+    private var exportSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
             Picker("형식", selection: $options.format) {
                 ForEach(ExportFormat.allCases, id: \.self) { Text($0.title).tag($0) }
             }
@@ -194,6 +257,7 @@ struct ExportSheet: View {
             Divider()
             watermarkSettings
         }
+        .disabled(model.isExporting || driveBusy)
     }
 
     private var filenameSettings: some View {
@@ -262,7 +326,7 @@ struct ExportSheet: View {
             }
         }
         .fixedSize()
-        .disabled(model.isExporting)
+        .disabled(model.isExporting || driveBusy)
         .accessibilityLabel("내보내기 프리셋")
     }
 
