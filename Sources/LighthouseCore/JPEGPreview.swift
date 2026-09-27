@@ -133,13 +133,21 @@ public extension ImagePipeline {
             for key in tiffKeys { tiff[key] = originalTIFF[key] }
         }
         metadata[kCGImagePropertyTIFFDictionary] = tiff
-        for key in [kCGImagePropertyExifAuxDictionary, kCGImagePropertyIPTCDictionary] {
-            if let dictionary = original[key] { metadata[key] = dictionary }
+        if let exifAux = original[kCGImagePropertyExifAuxDictionary] {
+            metadata[kCGImagePropertyExifAuxDictionary] = exifAux
         }
-        if !keywords.isEmpty || !caption.isEmpty {
-            var iptc = metadata[kCGImagePropertyIPTCDictionary] as? [CFString: Any] ?? [:]
-            if !keywords.isEmpty { iptc[kCGImagePropertyIPTCKeywords] = keywords }
-            if !caption.isEmpty { iptc[kCGImagePropertyIPTCCaptionAbstract] = caption }
+        var iptc = original[kCGImagePropertyIPTCDictionary] as? [CFString: Any] ?? [:]
+        if keywords.isEmpty {
+            iptc.removeValue(forKey: kCGImagePropertyIPTCKeywords)
+        } else {
+            iptc[kCGImagePropertyIPTCKeywords] = keywords
+        }
+        if caption.isEmpty {
+            iptc.removeValue(forKey: kCGImagePropertyIPTCCaptionAbstract)
+        } else {
+            iptc[kCGImagePropertyIPTCCaptionAbstract] = caption
+        }
+        if !iptc.isEmpty {
             metadata[kCGImagePropertyIPTCDictionary] = iptc
         }
         if includeLocation, let gps = original[kCGImagePropertyGPSDictionary] {

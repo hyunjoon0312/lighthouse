@@ -164,7 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppLog.catalog.fault("save on quit failed: \(error.localizedDescription, privacy: .private)")
             let alert = NSAlert()
             alert.alertStyle = .critical
-            alert.messageText = "사진 또는 폴더 정보를 저장하지 못했습니다"
+            alert.messageText = "사진·폴더 또는 XMP 사이드카를 저장하지 못했습니다"
             alert.informativeText = "\(error.localizedDescription)\n문제를 해결한 뒤 다시 종료하세요."
             alert.addButton(withTitle: "앱으로 돌아가기")
             alert.runModal()

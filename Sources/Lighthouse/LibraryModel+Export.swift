@@ -63,17 +63,16 @@ extension LibraryModel {
     }
 
     /// 바뀐 사진을 마지막 내보내기와 같은 설정·폴더·이름으로 다시 내보낸다. `trashPrevious`이면 이전 파일이
-    /// 앱이 쓴 그대로(크기·수정 시각)일 때만 휴지통으로 옮기고 같은 이름으로 쓴다. 아니면 이전 파일은 두고 번호를 붙인다.
+    /// 카탈로그 원본이 아니고 앱이 쓴 그대로일 때만 휴지통으로 옮긴다. 아니면 보존하고 새 파일에 번호를 붙인다.
     func reexport(_ targets: [PhotoAsset], trashPrevious: Bool) {
         guard !isExporting, catalogLoaded, loadError == nil else { return }
         let work = targets.compactMap { photo in photo.lastExport.map { (photo, $0) } }
         guard !work.isEmpty else { return }
         let cancellation = beginExport()
-        let moveToTrash = self.moveToTrash
         batchQueue.async { [pipeline] in
             var records: [UUID: ExportRecord] = [:]
             var failures: [String] = []
-            var trashed = 0, kept = 0, skipped = 0
+            var trashed = 0, protectedOriginals = 0, keptChanged = 0, skipped = 0
             for (index, (photo, previous)) in work.enumerated() {
                 if cancellation.isCancelled {
                     skipped = work.count - index
@@ -84,8 +83,16 @@ extension LibraryModel {
                     // 새 파일을 만들 수 있을 때만 이전 파일을 옮긴다. 원본이 없거나 현상에 실패하면 이전 파일은 그대로다.
                     let data = try pipeline.prepareExport(url: photo.url, edits: photo.edits, options: previous.options,
                                                           keywords: photo.keywords, caption: photo.caption).data
-                    if trashPrevious, FileManager.default.fileExists(atPath: previous.path) {
-                        if previous.fileIsUntouched { try moveToTrash(previousFile); trashed += 1 } else { kept += 1 }
+                    if trashPrevious {
+                        let handling = try DispatchQueue.main.sync {
+                            try self.handlePreviousExport(previous, at: previousFile)
+                        }
+                        switch handling {
+                        case .missing: break
+                        case .trashed: trashed += 1
+                        case .protectedOriginal: protectedOriginals += 1
+                        case .externallyChanged: keptChanged += 1
+                        }
                     }
                     let file = try pipeline.writeExport(data, format: previous.options.format, baseName: previous.baseName,
                                                         to: previousFile.deletingLastPathComponent())
@@ -102,11 +109,30 @@ extension LibraryModel {
                 self.finishExport(records: records)
                 self.exportReport = "\(records.count)장 다시 내보냄" +
                     (trashed > 0 ? " · 이전 파일 \(trashed)장 휴지통으로" : "") +
-                    (kept > 0 ? " · \(kept)장은 이전 파일이 바뀌어 그대로 둠" : "") +
+                    (protectedOriginals > 0 ? " · 카탈로그 원본 \(protectedOriginals)장 보존" : "") +
+                    (keptChanged > 0 ? " · \(keptChanged)장은 이전 파일이 외부에서 바뀌어 그대로 둠" : "") +
                     " · 실패 \(failures.count)장" + (skipped > 0 ? " · 중지해서 \(skipped)장 건너뜀" : "") +
                     (failures.isEmpty ? "" : "\n" + failures.prefix(8).joined(separator: "\n"))
             }
         }
+    }
+
+    private enum PreviousExportHandling {
+        case missing, trashed, protectedOriginal, externallyChanged
+    }
+
+    /// 카탈로그 변경과 이전 파일 이동 사이에 다른 메인 액터 작업이 끼어들지 않게 한 임계 구간이다.
+    private func handlePreviousExport(_ previous: ExportRecord, at file: URL) throws -> PreviousExportHandling {
+        guard FileManager.default.fileExists(atPath: previous.path) else { return .missing }
+        let resolvedPath = file.standardizedFileURL.resolvingSymlinksInPath().path
+        if isImporting || photos.contains(where: {
+            $0.url.standardizedFileURL.resolvingSymlinksInPath().path == resolvedPath
+        }) {
+            return .protectedOriginal
+        }
+        guard previous.fileIsUntouched else { return .externallyChanged }
+        try moveToTrash(file)
+        return .trashed
     }
 
     private func beginExport() -> CancellationFlag {

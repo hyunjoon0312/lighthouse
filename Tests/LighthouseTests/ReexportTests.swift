@@ -86,4 +86,99 @@ final class ReexportTests: XCTestCase {
         try await TestSupport.wait("missing") { model.isMissing(photo) }
         XCTAssertTrue(model.changedSinceExport.isEmpty, "원본이 없는 사진은 다시 내보낼 목록에서 빠진다")
     }
+
+    func testCatalogOriginalAtPreviousExportPathIsPreserved() async throws {
+        let (model, root, _) = try await TestSupport.startedModel(self, photos: 1)
+        let exports = root.appendingPathComponent("blog", isDirectory: true)
+        let trash = root.appendingPathComponent("trash", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+        model.moveToTrash = { url in
+            try FileManager.default.moveItem(at: url, to: trash.appendingPathComponent(url.lastPathComponent))
+        }
+        model.export(scope: .current, options: ExportOptions(maxPixel: 40, quality: 0.8), directory: exports)
+        try await TestSupport.wait("export") { !model.isExporting }
+        let source = try XCTUnwrap(model.photos.first)
+        let previous = try XCTUnwrap(source.lastExport)
+        let previousURL = URL(fileURLWithPath: previous.path)
+        let originalBytes = try Data(contentsOf: previousURL)
+
+        // 내보낸 파일을 다시 가져오면 그 파일은 이제 카탈로그 원본이다.
+        model.importURLs([previousURL])
+        try await TestSupport.wait("import exported file") { !model.isImporting && model.photos.count == 2 }
+        let imported = try XCTUnwrap(model.photos.first { $0.path == previousURL.resolvingSymlinksInPath().path })
+        let alias = root.appendingPathComponent("export-alias.jpg")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: previousURL)
+        var virtualAlias = imported.virtualCopy(among: model.photos)
+        virtualAlias.path = alias.standardizedFileURL.resolvingSymlinksInPath().path
+        model.photos.append(virtualAlias)
+
+        model.focusPhoto(source)
+        var edits = source.edits
+        edits.exposure = 0.7
+        model.updateEdits(edits)
+        model.reexport([try XCTUnwrap(model.photo(withID: source.id))], trashPrevious: true)
+        try await TestSupport.wait("protected re-export") { !model.isExporting }
+
+        XCTAssertEqual(try Data(contentsOf: previousURL), originalBytes, "카탈로그 원본 bytes는 그대로 둔다")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: previous.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: trash.path), [])
+        XCTAssertNotEqual(model.photo(withID: source.id)?.lastExport?.path, previous.path, "새 파일에는 번호를 붙인다")
+        XCTAssertTrue(model.exportReport?.contains("카탈로그 원본 1장 보존") == true, model.exportReport ?? "")
+    }
+
+    func testProtectionUsesCatalogStateAtTrashDecision() async throws {
+        let (model, root, _) = try await TestSupport.startedModel(self, photos: 1)
+        let exports = root.appendingPathComponent("blog", isDirectory: true)
+        let trash = root.appendingPathComponent("trash", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+        model.moveToTrash = { url in
+            try FileManager.default.moveItem(at: url, to: trash.appendingPathComponent(url.lastPathComponent))
+        }
+        model.export(scope: .current, options: ExportOptions(maxPixel: 40, quality: 0.8), directory: exports)
+        try await TestSupport.wait("export") { !model.isExporting }
+        let source = try XCTUnwrap(model.photos.first)
+        let previous = try XCTUnwrap(source.lastExport)
+        let previousURL = URL(fileURLWithPath: previous.path)
+        let originalBytes = try Data(contentsOf: previousURL)
+        model.focusPhoto(source)
+        var edits = source.edits
+        edits.exposure = 0.4
+        model.updateEdits(edits)
+
+        let gate = DispatchSemaphore(value: 0)
+        model.batchQueue.async { gate.wait() }
+        model.reexport([try XCTUnwrap(model.photo(withID: source.id))], trashPrevious: true)
+        XCTAssertTrue(model.isExporting)
+        model.photos.append(PhotoAsset(url: previousURL))
+        gate.signal()
+        try await TestSupport.wait("late catalog protection") { !model.isExporting }
+
+        XCTAssertEqual(try Data(contentsOf: previousURL), originalBytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: trash.path), [])
+        XCTAssertTrue(model.exportReport?.contains("카탈로그 원본 1장 보존") == true, model.exportReport ?? "")
+    }
+
+    func testImportInProgressConservativelyPreservesPreviousExport() async throws {
+        let (model, root, _) = try await TestSupport.startedModel(self, photos: 1)
+        let exports = root.appendingPathComponent("blog", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        model.export(scope: .current, options: ExportOptions(maxPixel: 40, quality: 0.8), directory: exports)
+        try await TestSupport.wait("export") { !model.isExporting }
+        let source = try XCTUnwrap(model.photos.first)
+        let previous = try XCTUnwrap(source.lastExport)
+        model.focusPhoto(source)
+        var edits = source.edits
+        edits.exposure = 0.2
+        model.updateEdits(edits)
+        model.isImporting = true
+        model.reexport([try XCTUnwrap(model.photo(withID: source.id))], trashPrevious: true)
+        try await TestSupport.wait("re-export while importing") { !model.isExporting }
+        model.isImporting = false
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: previous.path))
+        XCTAssertNotEqual(model.photo(withID: source.id)?.lastExport?.path, previous.path)
+        XCTAssertTrue(model.exportReport?.contains("카탈로그 원본 1장 보존") == true, model.exportReport ?? "")
+    }
 }

@@ -192,5 +192,6 @@ extension LibraryModel {
             try catalog.save(snapshot)
             if canSaveFolders { try folderStore.save(folderSnapshot) }
         }
+        try flushSidecars()
     }
 }

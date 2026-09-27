@@ -282,7 +282,8 @@ final class LibraryModel: ObservableObject {
     @Published var writesXMPSidecars = UserDefaults.standard.bool(forKey: "writesXMPSidecars") {
         didSet {
             UserDefaults.standard.set(writesXMPSidecars, forKey: "writesXMPSidecars")
-            if writesXMPSidecars && !oldValue { writeAllSidecars() }
+            guard writesXMPSidecars != oldValue else { return }
+            if writesXMPSidecars { writeAllSidecars() } else { disableSidecarWrites() }
         }
     }
     let canvas = CanvasStrokeState()
@@ -330,6 +331,8 @@ final class LibraryModel: ObservableObject {
     let autoAdjustQueue = DispatchQueue(label: "com.rian.lighthouse.auto", qos: .userInitiated)
     let sidecarQueue = DispatchQueue(label: "com.rian.lighthouse.sidecar", qos: .utility)
     var pendingSidecarIDs = Set<UUID>()
+    var dirtySidecarIDs = Set<UUID>()
+    var sidecarVersions: [UUID: UInt64] = [:]
     var sidecarDelay: DispatchWorkItem?
     var saveDelay: DispatchWorkItem?
     var renderDelay: DispatchWorkItem?

@@ -52,25 +52,30 @@ final class PhotoCopierTests: XCTestCase {
         XCTAssertThrowsError(try PhotoCopier.copy(card.appendingPathComponent("missing.RW2"), into: library))
     }
 
-    func testSameSizeAndModificationTimeCountsAsCopiedWithoutReading() throws {
+    func testSameSizeAndModificationTimeRequiresMatchingDigest() throws {
         let card = try temporaryDirectory()
         let library = try temporaryDirectory()
         let source = card.appendingPathComponent("P1000002.RW2")
-        try Data(repeating: 7, count: 50_000).write(to: source)
+        let sourceData = Data(repeating: 7, count: 50_000)
+        try sourceData.write(to: source)
         let taken = Date(timeIntervalSince1970: 1_800_000_000)
         try FileManager.default.setAttributes([.modificationDate: taken], ofItemAtPath: source.path)
         let copied = try PhotoCopier.copy(source, into: library)
         let copiedDate = try FileManager.default.attributesOfItem(atPath: copied.url.path)[.modificationDate] as? Date
         XCTAssertEqual(copiedDate, taken, "복사는 수정 시각을 옮긴다")
 
-        // 크기와 수정 시각이 같으면 내용을 읽지 않고 같은 파일로 본다(카메라 파일은 찍은 뒤 바뀌지 않는다).
+        // 이름, 크기, 수정 시각이 모두 같아도 바이트가 다르면 별도 파일로 복사한다.
         try Data(repeating: 9, count: 50_000).write(to: copied.url)
         try FileManager.default.setAttributes([.modificationDate: taken], ofItemAtPath: copied.url.path)
-        XCTAssertEqual(try PhotoCopier.copy(source, into: library), .alreadyPresent(copied.url))
+        let renamed = try PhotoCopier.copy(source, into: library)
+        XCTAssertEqual(renamed, .copied(library.appendingPathComponent("P1000002-2.RW2")))
+        XCTAssertEqual(try Data(contentsOf: renamed.url), sourceData)
+        XCTAssertEqual(try Data(contentsOf: source), sourceData)
+        XCTAssertEqual(try PhotoCopier.copy(source, into: library), .alreadyPresent(renamed.url))
 
-        // 수정 시각이 다르면 내용을 비교해 다른 파일로 복사한다.
-        try FileManager.default.setAttributes([.modificationDate: taken.addingTimeInterval(1)], ofItemAtPath: copied.url.path)
-        XCTAssertEqual(try PhotoCopier.copy(source, into: library),
-                       .copied(library.appendingPathComponent("P1000002-2.RW2")))
+        // 동일한 바이트는 수정 시각이 달라도 기존 복사본으로 판정한다.
+        try FileManager.default.setAttributes([.modificationDate: taken.addingTimeInterval(1)],
+                                              ofItemAtPath: renamed.url.path)
+        XCTAssertEqual(try PhotoCopier.copy(source, into: library), .alreadyPresent(renamed.url))
     }
 }
