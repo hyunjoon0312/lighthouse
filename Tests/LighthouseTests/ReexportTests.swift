@@ -181,4 +181,209 @@ final class ReexportTests: XCTestCase {
         XCTAssertNotEqual(model.photo(withID: source.id)?.lastExport?.path, previous.path)
         XCTAssertTrue(model.exportReport?.contains("카탈로그 원본 1장 보존") == true, model.exportReport ?? "")
     }
+
+    func testCandidateWriteFailureLeavesPreviousFileAndNeverCallsTrash() async throws {
+        let (model, root, _) = try await TestSupport.startedModel(self, photos: 1)
+        let exports = root.appendingPathComponent("read-only", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        model.export(scope: .current, options: ExportOptions(maxPixel: 40), directory: exports)
+        try await TestSupport.wait("initial export") { !model.isExporting }
+        let previous = try XCTUnwrap(model.photos.first?.lastExport)
+        let previousBytes = try Data(contentsOf: URL(fileURLWithPath: previous.path))
+        let trashCalls = LockedCounter()
+        model.moveToTrash = { _ in trashCalls.increment() }
+        var edits = try XCTUnwrap(model.photos.first).edits
+        edits.exposure = 0.5
+        model.updateEdits(edits)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: exports.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: exports.path) }
+
+        model.reexport(model.changedSinceExport, trashPrevious: true)
+        try await TestSupport.wait("failed candidate") { !model.isExporting }
+
+        XCTAssertEqual(trashCalls.value, 0)
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: previous.path)), previousBytes)
+        XCTAssertEqual(model.photos.first?.lastExport, previous)
+        XCTAssertTrue(model.exportReport?.contains("실패 1장") == true, model.exportReport ?? "")
+    }
+
+    func testTrashFailureKeepsOldAndCandidateAndRecordsNewExport() async throws {
+        let (model, root, _) = try await TestSupport.startedModel(self, photos: 1)
+        let exports = root.appendingPathComponent("trash-failure", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        model.export(scope: .current, options: ExportOptions(maxPixel: 40), directory: exports)
+        try await TestSupport.wait("initial export") { !model.isExporting }
+        let previous = try XCTUnwrap(model.photos.first?.lastExport)
+        model.moveToTrash = { _ in throw TestFailure.expected }
+        var edits = try XCTUnwrap(model.photos.first).edits
+        edits.exposure = 0.4
+        model.updateEdits(edits)
+
+        model.reexport(model.changedSinceExport, trashPrevious: true)
+        try await TestSupport.wait("trash failure") { !model.isExporting }
+
+        let replacement = try XCTUnwrap(model.photos.first?.lastExport)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: previous.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: replacement.path))
+        XCTAssertNotEqual(replacement.path, previous.path)
+        XCTAssertTrue(model.exportReport?.contains("이전 파일 정리 실패 1장") == true,
+                      model.exportReport ?? "")
+        XCTAssertTrue(model.exportReport?.contains("실패 0장") == true, model.exportReport ?? "")
+    }
+
+    func testSameSizeAndModificationTimeContentChangeProtectsPreviousFile() async throws {
+        let (model, root, _) = try await TestSupport.startedModel(self, photos: 1)
+        let exports = root.appendingPathComponent("fingerprint", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        model.export(scope: .current, options: ExportOptions(maxPixel: 40), directory: exports)
+        try await TestSupport.wait("initial export") { !model.isExporting }
+        let previous = try XCTUnwrap(model.photos.first?.lastExport)
+        let previousURL = URL(fileURLWithPath: previous.path)
+        var changedBytes = try Data(contentsOf: previousURL)
+        changedBytes[changedBytes.index(before: changedBytes.endIndex)] ^= 0x01
+        try changedBytes.write(to: previousURL)
+        try FileManager.default.setAttributes([.modificationDate: previous.fileModified],
+                                              ofItemAtPath: previous.path)
+        let trashCalls = LockedCounter()
+        model.moveToTrash = { _ in trashCalls.increment() }
+        var edits = try XCTUnwrap(model.photos.first).edits
+        edits.exposure = 0.3
+        model.updateEdits(edits)
+
+        model.reexport(model.changedSinceExport, trashPrevious: true)
+        try await TestSupport.wait("fingerprint protection") { !model.isExporting }
+
+        XCTAssertEqual(try Data(contentsOf: previousURL), changedBytes)
+        XCTAssertEqual(trashCalls.value, 0)
+        XCTAssertNotEqual(model.photos.first?.lastExport?.path, previous.path)
+        XCTAssertTrue(model.exportReport?.contains("보존(외부 변경 또는 확인 불가)") == true,
+                      model.exportReport ?? "")
+    }
+
+    func testLegacyRecordWithoutFileHashProtectsPreviousFile() async throws {
+        let (model, root, _) = try await TestSupport.startedModel(self, photos: 1)
+        let exports = root.appendingPathComponent("legacy", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        model.export(scope: .current, options: ExportOptions(maxPixel: 40), directory: exports)
+        try await TestSupport.wait("initial export") { !model.isExporting }
+        var previous = try XCTUnwrap(model.photos.first?.lastExport)
+        previous.fileSHA256 = nil
+        model.photos[0].lastExport = previous
+        let trashCalls = LockedCounter()
+        model.moveToTrash = { _ in trashCalls.increment() }
+        var edits = model.photos[0].edits
+        edits.exposure = 0.2
+        model.updateEdits(edits)
+
+        model.reexport(model.changedSinceExport, trashPrevious: true)
+        try await TestSupport.wait("legacy protection") { !model.isExporting }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: previous.path))
+        XCTAssertEqual(trashCalls.value, 0)
+        XCTAssertNotEqual(model.photos.first?.lastExport?.path, previous.path)
+        XCTAssertTrue(model.exportReport?.contains("보존(외부 변경 또는 확인 불가)") == true,
+                      model.exportReport ?? "")
+    }
+
+    func testOccupiedPreferredNameSurvivesAndCandidateIsRetained() async throws {
+        let (model, root, _) = try await TestSupport.startedModel(self, photos: 1)
+        let exports = root.appendingPathComponent("occupied", isDirectory: true)
+        let trash = root.appendingPathComponent("occupied-trash", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+        model.export(scope: .current, options: ExportOptions(maxPixel: 40), directory: exports)
+        try await TestSupport.wait("initial export") { !model.isExporting }
+        let previous = try XCTUnwrap(model.photos.first?.lastExport)
+        let previousURL = URL(fileURLWithPath: previous.path)
+        let occupant = Data("occupied preferred name".utf8)
+        model.moveToTrash = { url in
+            try FileManager.default.moveItem(at: url, to: trash.appendingPathComponent(url.lastPathComponent))
+            try occupant.write(to: url)
+        }
+        var edits = try XCTUnwrap(model.photos.first).edits
+        edits.exposure = 0.1
+        model.updateEdits(edits)
+
+        model.reexport(model.changedSinceExport, trashPrevious: true)
+        try await TestSupport.wait("occupied preferred") { !model.isExporting }
+
+        let replacement = try XCTUnwrap(model.photos.first?.lastExport)
+        XCTAssertEqual(try Data(contentsOf: previousURL), occupant)
+        XCTAssertNotEqual(replacement.path, previous.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: replacement.path))
+        XCTAssertEqual(model.lastExportedFiles, [URL(fileURLWithPath: replacement.path)])
+    }
+
+    func testSuffixedPreviousDoesNotRecreateMissingProtectedPreferredName() async throws {
+        let (model, root, _) = try await TestSupport.startedModel(self, photos: 1)
+        let exports = root.appendingPathComponent("suffixed", isDirectory: true)
+        let trash = root.appendingPathComponent("suffixed-trash", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+        model.export(scope: .current, options: ExportOptions(maxPixel: 40), directory: exports)
+        try await TestSupport.wait("initial export") { !model.isExporting }
+        let source = try XCTUnwrap(model.photos.first)
+        let originalRecord = try XCTUnwrap(source.lastExport)
+        let preferred = URL(fileURLWithPath: originalRecord.path)
+        let suffixed = preferred.deletingLastPathComponent()
+            .appendingPathComponent(preferred.deletingPathExtension().lastPathComponent + "-2")
+            .appendingPathExtension(preferred.pathExtension)
+        try FileManager.default.moveItem(at: preferred, to: suffixed)
+        let suffixedRecord = try XCTUnwrap(ExportRecord.make(photo: source, file: suffixed,
+                                                             baseName: originalRecord.baseName,
+                                                             options: originalRecord.options))
+        model.photos[0].lastExport = suffixedRecord
+        model.photos.append(PhotoAsset(url: preferred))
+        model.photos[0].edits.exposure = 0.6
+        model.moveToTrash = { url in
+            try FileManager.default.moveItem(at: url, to: trash.appendingPathComponent(url.lastPathComponent))
+        }
+
+        model.reexport([model.photos[0]], trashPrevious: true)
+        try await TestSupport.wait("protected preferred") { !model.isExporting }
+
+        let replacement = try XCTUnwrap(model.photo(withID: source.id)?.lastExport)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: preferred.path),
+                       "사라진 카탈로그 원본 경로에 보정본을 만들지 않는다")
+        XCTAssertNotEqual(replacement.path, preferred.path)
+        XCTAssertNotEqual(replacement.path, suffixed.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: replacement.path))
+    }
+
+    func testMissingPreviousPublishesCandidateAtUsualBaseNameWithoutTrashingIt() async throws {
+        let (model, root, _) = try await TestSupport.startedModel(self, photos: 1)
+        let exports = root.appendingPathComponent("missing-previous", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        model.export(scope: .current, options: ExportOptions(maxPixel: 40), directory: exports)
+        try await TestSupport.wait("initial export") { !model.isExporting }
+        let previous = try XCTUnwrap(model.photos.first?.lastExport)
+        try FileManager.default.removeItem(atPath: previous.path)
+        let trashCalls = LockedCounter()
+        model.moveToTrash = { _ in trashCalls.increment() }
+        model.photos[0].edits.exposure = 0.2
+
+        model.reexport([model.photos[0]], trashPrevious: true)
+        try await TestSupport.wait("missing previous") { !model.isExporting }
+
+        XCTAssertEqual(trashCalls.value, 0)
+        XCTAssertEqual(model.photos.first?.lastExport?.path, previous.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: previous.path))
+    }
+}
+
+private enum TestFailure: Error { case expected }
+
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+    func increment() {
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
 }

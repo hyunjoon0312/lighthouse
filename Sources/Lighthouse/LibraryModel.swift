@@ -356,6 +356,7 @@ final class LibraryModel: ObservableObject {
     var moveDirection = 1
     private var pendingCollapse: DispatchWorkItem?
     var exportCancellation: CancellationFlag?
+    var exportCompletionWaiters: [CheckedContinuation<Void, Never>] = []
     /// 다시 내보낼 때 이전 파일을 휴지통으로 옮긴다. 테스트는 임시 폴더로 옮기도록 바꾼다.
     var moveToTrash: @Sendable (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
     /// Finder에서 파일을 선택해 보여 준다. 테스트는 부른 파일만 기록하도록 바꾼다.

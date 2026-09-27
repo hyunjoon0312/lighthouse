@@ -159,17 +159,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminationPending { return .terminateLater }
-        if let upload = library?.driveUpload, upload.isBusy {
+        if let library, library.driveUpload.isBusy || library.isExporting {
             let alert = NSAlert()
             alert.alertStyle = .warning
-            alert.messageText = "Google Drive 작업이 진행 중입니다"
-            alert.informativeText = "지금 종료하면 작업을 중지합니다. 전송 중이던 파일은 Drive에 도착했을 수 있습니다."
+            alert.messageText = "내보내기 작업이 진행 중입니다"
+            alert.informativeText = "지금 종료하면 진행 중인 작업을 중지하고 정리를 마친 뒤 종료합니다. Drive로 전송 중이던 파일은 도착했을 수 있습니다."
             alert.addButton(withTitle: "앱으로 돌아가기")
-            alert.addButton(withTitle: "업로드 취소하고 종료")
+            alert.addButton(withTitle: "내보내기 취소하고 종료")
             guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
+            library.cancelExport()
+            library.driveUpload.cancel()
             terminationPending = true
             Task { @MainActor [weak self] in
-                await upload.cancelAndWait()
+                await library.driveUpload.cancelAndWait()
+                await library.cancelExportAndWait()
                 let shouldTerminate = self?.flushBeforeTermination() ?? false
                 self?.terminationPending = false
                 sender.reply(toApplicationShouldTerminate: shouldTerminate)

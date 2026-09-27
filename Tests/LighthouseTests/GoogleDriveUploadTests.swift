@@ -40,6 +40,45 @@ final class GoogleDriveUploadTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: upload.url.path))
     }
 
+    func testEditedBatchReclaimsEachStageAndReservesNamesAfterDeletion() async throws {
+        let first = try makePhoto(name: "first.jpg", width: 80, height: 50).0
+        let second = try makePhoto(name: "second.jpg", width: 80, height: 50).0
+        let third = try makePhoto(name: "third.jpg", width: 80, height: 50).0
+        let service = DriveServiceSpy(failingNames: ["shared.jpg"])
+        let model = makeModel(service: service)
+
+        model.upload(photos: [first, second, third], content: .edited,
+                     options: ExportOptions(maxPixel: 24, filenameTemplate: "shared"))
+        try await wait(model)
+
+        let uploads = await service.uploads
+        let attemptedNames = await service.attemptedNames
+        let attemptedURLs = await service.attemptedURLs
+        let stageSnapshots = await service.stageSnapshots
+        XCTAssertEqual(attemptedNames, ["shared.jpg", "shared-2.jpg", "shared-3.jpg"])
+        XCTAssertEqual(uploads.map(\.name), ["shared-2.jpg", "shared-3.jpg"])
+        XCTAssertEqual(stageSnapshots.map(\.fileCount), [1, 1, 1])
+        XCTAssertTrue(stageSnapshots.allSatisfy { $0.byteCount > 0 })
+        XCTAssertTrue(attemptedURLs.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+        XCTAssertEqual(model.failedCount, 1)
+        XCTAssertEqual(model.uploadedCount, 2)
+    }
+
+    func testFailedEditedSendPromptlyCleansPreparedFile() async throws {
+        let photo = try makePhoto(name: "failed.jpg").0
+        let service = DriveServiceSpy(failingNames: ["failed-stage.jpg"])
+        let model = makeModel(service: service)
+
+        model.upload(photos: [photo], content: .edited,
+                     options: ExportOptions(filenameTemplate: "failed-stage"))
+        try await wait(model)
+
+        let attemptedURLs = await service.attemptedURLs
+        let attemptedURL = try XCTUnwrap(attemptedURLs.first)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: attemptedURL.path))
+        XCTAssertEqual(model.failedCount, 1)
+    }
+
     func testBothDeduplicatesVirtualCopyOriginalsAndNamesEditedCollision() async throws {
         let (photo, _, bytes) = try makePhoto(name: "shared.jpg")
         var copy = photo
@@ -193,9 +232,15 @@ private actor DriveServiceSpy: GoogleDriveServicing {
         let data: Data
     }
 
+    struct StageSnapshot: Sendable {
+        let fileCount: Int
+        let byteCount: Int
+    }
+
     private(set) var uploads: [Upload] = []
     private(set) var attemptedNames: [String] = []
     private(set) var attemptedURLs: [URL] = []
+    private(set) var stageSnapshots: [StageSnapshot] = []
     let failingNames: Set<String>
     let unauthorizedNames: Set<String>
     let suspendingNames: Set<String>
@@ -223,6 +268,15 @@ private actor DriveServiceSpy: GoogleDriveServicing {
         accessToken: String) async throws -> GoogleDriveFile {
         attemptedNames.append(name)
         attemptedURLs.append(fileURL)
+        let directory = fileURL.deletingLastPathComponent()
+        if directory.lastPathComponent.hasPrefix("lighthouse-drive-") {
+            let files = try FileManager.default.contentsOfDirectory(at: directory,
+                                                                    includingPropertiesForKeys: [.fileSizeKey])
+            let byteCount = try files.reduce(into: 0) { total, file in
+                total += try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            }
+            stageSnapshots.append(StageSnapshot(fileCount: files.count, byteCount: byteCount))
+        }
         if suspendingNames.contains(name) { try await Task.sleep(nanoseconds: 60_000_000_000) }
         if unauthorizedNames.contains(name) { throw GoogleDriveError.httpStatus(401) }
         if failingNames.contains(name) { throw DriveTestError.rejected }

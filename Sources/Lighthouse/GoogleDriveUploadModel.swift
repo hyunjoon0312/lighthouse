@@ -241,6 +241,7 @@ final class GoogleDriveUploadModel: ObservableObject {
             let temporary = FileManager.default.temporaryDirectory
                 .appendingPathComponent("lighthouse-drive-\(UUID().uuidString)", isDirectory: true)
             var sentOriginals = Set<String>()
+            var reservedEditedNames = Set<String>()
             do {
                 try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: false)
                 defer { try? FileManager.default.removeItem(at: temporary) }
@@ -260,11 +261,16 @@ final class GoogleDriveUploadModel: ObservableObject {
                             self.currentFileName = photo.displayName
                             let staged = try await Self.stageEdited(photo: photo, options: frozenOptions,
                                                                     sequence: index + 1, forBoth: content == .both,
-                                                                    directory: temporary, pipeline: pipeline)
-                            try Task.checkCancellation()
-                            try await self.send(staged, name: staged.lastPathComponent,
-                                                mimeType: Self.mimeType(for: staged), folderID: folderID,
-                                                token: token)
+                                                                    directory: temporary, pipeline: pipeline,
+                                                                    reservedNames: reservedEditedNames)
+                            reservedEditedNames.insert(staged.lastPathComponent.lowercased())
+                            do {
+                                defer { try? FileManager.default.removeItem(at: staged) }
+                                try Task.checkCancellation()
+                                try await self.send(staged, name: staged.lastPathComponent,
+                                                    mimeType: Self.mimeType(for: staged), folderID: folderID,
+                                                    token: token)
+                            }
                         } catch {
                             if Self.isCancellation(error) || Self.isFatalAuthorization(error) { throw error }
                             guard token == generation else { return }
@@ -367,7 +373,8 @@ final class GoogleDriveUploadModel: ObservableObject {
 
     nonisolated private static func stageEdited(photo: PhotoAsset, options: ExportOptions, sequence: Int,
                                                 forBoth: Bool, directory: URL,
-                                                pipeline: ImagePipeline) async throws -> URL {
+                                                pipeline: ImagePipeline,
+                                                reservedNames: Set<String>) async throws -> URL {
         let preparation = Task.detached(priority: .userInitiated) {
             try Task.checkCancellation()
             let rendered = try pipeline.prepareExport(url: photo.url, edits: photo.edits, options: options,
@@ -379,7 +386,17 @@ final class GoogleDriveUploadModel: ObservableObject {
             if forBoth, baseName.caseInsensitiveCompare(photo.url.deletingPathExtension().lastPathComponent) == .orderedSame {
                 baseName += "-edited"
             }
-            return try pipeline.writeExport(rendered.data, format: options.format, baseName: baseName, to: directory)
+            let fileExtension = options.format.fileExtension
+            for number in 1...10_000 {
+                let suffix = number == 1 ? "" : "-\(number)"
+                let candidateBaseName = baseName + suffix
+                let candidateName = candidateBaseName + "." + fileExtension
+                if !reservedNames.contains(candidateName.lowercased()) {
+                    return try pipeline.writeExport(rendered.data, format: options.format,
+                                                    baseName: candidateBaseName, to: directory)
+                }
+            }
+            throw ImagePipelineError.exportFailed(directory)
         }
         return try await withTaskCancellationHandler(operation: { try await preparation.value },
                                                      onCancel: { preparation.cancel() })
