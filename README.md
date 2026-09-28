@@ -6,14 +6,66 @@ macOS에서 사진을 정리하고 선별한 뒤 RAW를 보정해 JPEG로 내보
 
 현재 Mac에서는 `dist/Lighthouse.app`을 더블클릭해 실행하면 됩니다. **사진 가져오기**로 시작하세요. 로컬 사진 정리·보정에는 외부 패키지나 계정이 필요하지 않습니다. Google Drive 업로드를 쓸 때는 [연결 설정](docs/google-drive.md)을 한 번 진행합니다.
 
-소스에서 빌드하려면 macOS 15 이상과 Swift 6을 포함한 Xcode 또는 Command Line Tools가 필요합니다.
+실행에는 **macOS 15 이상**이 필요합니다. 다른 Mac에 옮길 때는 아래 Universal ZIP을 사용하면 됩니다. 앱 실행만 할 때는 Xcode나 개발 도구가 필요하지 않습니다.
+
+### 새로운 Mac에 앱 설치
+
+1. 빌드한 Mac의 `dist/Lighthouse-macOS-universal.zip`과 `dist/Lighthouse-macOS-universal.zip.sha256`을 AirDrop·외장 드라이브 등으로 새 Mac에 복사합니다. ZIP에는 Apple Silicon(`arm64`)과 Intel(`x86_64`) 실행 파일이 함께 들어 있습니다.
+2. ZIP을 풀고 `Lighthouse.app`을 **응용 프로그램** 폴더로 옮깁니다. 기존 앱을 교체할 때는 먼저 Lighthouse를 종료합니다.
+3. 앱을 열고 **사진 가져오기**로 시작합니다. 기존 보정 작업을 이어가려면 아래의 **기존 사진·보정값 이전** 절차를 먼저 따릅니다.
+
+현재 앱은 로컬 ad-hoc 서명을 사용하며 **Developer ID 서명·Apple 공증을 받은 배포본은 아닙니다**. 처음 실행할 때 개발자를 확인할 수 없다는 안내가 나오면, 직접 빌드했거나 전달받은 출처와 파일을 확인한 뒤 **시스템 설정 → 개인정보 보호 및 보안 → 그래도 열기**를 사용합니다. [Apple의 앱 실행 안내](https://support.apple.com/ko-kr/102445)를 참고하세요. 앱이 손상됐다는 안내가 나오면 파일을 다시 전달받거나 아래 방법으로 해당 Mac에서 직접 빌드하세요.
+
+전달 중 파일이 바뀌지 않았는지 확인하려면 ZIP과 체크섬 파일이 있는 폴더에서 실행합니다.
 
 ```sh
+shasum -a 256 -c Lighthouse-macOS-universal.zip.sha256
+```
+
+`dist/`의 실행 앱과 ZIP은 Git에 포함하지 않습니다. GitHub의 **Code → Download ZIP**은 소스 코드이며, 실행 앱이 필요하면 위 파일을 전달받거나 직접 빌드해야 합니다. Apple Silicon·macOS 26.5.2에서 `arm64` 직접 실행과 Rosetta를 통한 `x86_64` 실행을 확인했습니다. Intel Mac 실물과 macOS 15에서의 실행은 별도 검증이 필요하며, RAW 지원은 해당 Mac의 macOS 카메라 지원에 따릅니다.
+
+### 새로운 Mac에서 소스로 빌드
+
+소스 빌드에는 **macOS 26 SDK와 Swift 6 이상을 포함한 Xcode 26 이상** 또는 해당 Command Line Tools가 필요합니다. RAW 하이라이트 복구 API를 컴파일하기 위한 요건이며, 완성된 앱의 최소 실행 대상은 macOS 15입니다. 이 API는 실행 중 macOS 26 이상에서만 사용합니다. 현재 검증한 개발 도구는 Xcode 26.5·Swift 6.3.2입니다.
+
+도구가 없으면 `xcode-select --install`을 실행하고 설치 창이 끝난 뒤 아래 두 명령으로 확인합니다. 설치된 SDK가 26보다 낮으면 Mac에서 지원하는 Xcode 26 이상을 설치·선택하거나, 앞 절차의 완성된 앱을 전달받으세요. [Apple의 개발 도구 설치 안내](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools)를 참고하세요.
+
+```sh
+swift --version
+xcrun --sdk macosx --show-sdk-version
+```
+
+```sh
+git clone https://github.com/hyunjoon0312/lighthouse.git
+cd lighthouse
+git switch master
 ./scripts/build-app.sh
 open dist/Lighthouse.app
 ```
 
-개발 중에는 `swift run Lighthouse`로 실행할 수 있습니다. `Package.swift`를 Xcode에서 열어 개발할 수도 있습니다. 현재 번들은 로컬 실행용 ad-hoc 서명을 사용하며 배포용 공증은 포함하지 않습니다.
+기본 빌드는 현재 Mac의 아키텍처용 앱을 만듭니다. 다른 Mac으로 전달할 Universal 앱은 전체 Xcode를 설치하고 활성 개발 도구로 선택한 환경에서 다음과 같이 만듭니다.
+
+```sh
+# Xcode를 /Applications/Xcode.app에 설치한 경우 한 번 선택합니다.
+sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+./scripts/build-app.sh --universal
+ditto -c -k --sequesterRsrc --keepParent dist/Lighthouse.app dist/Lighthouse-macOS-universal.zip
+(cd dist && shasum -a 256 Lighthouse-macOS-universal.zip > Lighthouse-macOS-universal.zip.sha256)
+```
+
+이미 소스를 받은 Mac에서 최신 버전으로 갱신할 때는 앱을 종료하고 저장소 폴더에서 `git pull --ff-only origin master` 후 다시 빌드합니다. 개발 중에는 `swift run Lighthouse`로 실행할 수 있고, `Package.swift`를 Xcode에서 열어 개발할 수도 있습니다.
+
+### 기존 사진·보정값 이전
+
+앱 파일과 개인 사진·보정 데이터는 따로 보관됩니다. 앱이나 소스 코드만 복사하면 기존 작업은 따라가지 않습니다.
+
+1. 두 Mac에서 Lighthouse를 종료합니다. 새 Mac에 이미 작업 데이터가 있으면 먼저 별도로 백업하세요. 카탈로그 두 개를 자동으로 합치는 기능은 없습니다.
+2. 원본 RAW·JPEG 등 **실제 사진 폴더**를 새 Mac이나 외장 드라이브로 복사합니다. 앱에서 내보낸 결과도 계속 쓸 경우 별도로 옮깁니다.
+3. 기존 Mac의 **`~/Library/Application Support/Lighthouse/` 폴더 전체**를 새 Mac의 같은 위치로 복사합니다. Finder의 **이동 → 폴더로 이동…**(⇧⌘G)에 경로를 붙여 넣으면 열 수 있습니다. `catalog.json`뿐 아니라 `folders.json`, `smart-folders.json`, `presets.json`, `LUTs`, `Masks`를 함께 옮겨야 폴더·프리셋·LUT·자동 마스크가 유지됩니다. 전체 폴더 복사는 썸네일과 보관본도 포함합니다. `LIGHTHOUSE_DATA_DIR`로 저장 위치를 바꿨다면 그 폴더를 사용합니다.
+4. 새 Mac에서 앱을 엽니다. 사용자 이름이나 사진 경로가 달라 **원본 없음**이 표시되면 해당 사진을 선택하고 **사진 → 위치 다시 찾기…**에서 새 사진 폴더를 선택합니다. 같은 옛 폴더 아래의 누락 사진도 새 위치에서 찾으면 함께 연결합니다. 기존 보정을 이어갈 때는 사진을 새 항목으로 가져오기 전에 위치를 다시 연결하세요.
+5. 사진 몇 장의 별점·보정·LUT·마스크를 확인하고 한 장을 내보내 봅니다. 정렬·화면 옵션·내보내기 프리셋 등 Mac 환경설정은 위 데이터 폴더와 별도로 저장되므로 필요한 항목은 새 Mac에서 다시 설정합니다. Google Drive는 새 Mac에서 [OAuth JSON 가져오기와 계정 연결](docs/google-drive.md)을 다시 진행합니다. 인증 정보는 카탈로그가 아닌 macOS 키체인에 저장됩니다.
+
+자동 `Backups`에는 원본 사진과 LUT가 들어가지 않으므로, 새 Mac으로 옮길 때는 위의 원본 사진과 데이터 폴더 전체를 사용하세요.
 
 ## 사용 흐름
 

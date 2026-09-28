@@ -2,12 +2,46 @@
 set -euo pipefail
 
 repo_dir="${0:A:h:h}"
+script_name="${0:t}"
 cd "$repo_dir"
-swift build -c release
+
+usage() {
+    print "Usage: $script_name [--universal]"
+}
+
+universal=false
+case "$#:${1-}" in
+    0:)
+        ;;
+    1:--universal)
+        universal=true
+        ;;
+    1:--help|1:-h)
+        usage
+        exit 0
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac
+
+build_args=(-c release)
+if [[ "$universal" == true ]]; then
+    build_args+=(--arch arm64 --arch x86_64)
+fi
+
+swift build "${build_args[@]}"
+bin_path="$(swift build "${build_args[@]}" --show-bin-path)"
+built_executable="$bin_path/Lighthouse"
+
+if [[ "$universal" == true ]]; then
+    lipo "$built_executable" -verify_arch arm64 x86_64
+fi
 
 app_dir="$repo_dir/dist/Lighthouse.app/Contents"
 mkdir -p "$app_dir/MacOS" "$app_dir/Resources"
-cp "$repo_dir/.build/release/Lighthouse" "$app_dir/MacOS/Lighthouse"
+cp "$built_executable" "$app_dir/MacOS/Lighthouse"
 cp "$repo_dir/Resources/Info.plist" "$app_dir/Info.plist"
 if [[ -d "$repo_dir/Resources/App" ]]; then
     cp -R "$repo_dir/Resources/App/." "$app_dir/Resources/"

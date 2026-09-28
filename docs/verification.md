@@ -457,3 +457,14 @@ release 앱을 QA 전용 번들 식별자와 격리 카탈로그로 실행해 S9
 `./scripts/build-app.sh`와 `codesign --verify --deep --strict dist/Lighthouse.app`가 통과했고 debug·release 빌드 경고는 없었다. 최종 release 앱을 고유 QA 식별자와 격리 카탈로그에서 실행해 S9 RW2·PNG 두 장과 썸네일 두 개를 확인했다. 정상 종료 후 같은 카탈로그로 재시작했고 두 번 모두 종료 코드 0, 사진 목록 유지, 표본과 복사본의 SHA-256 보존을 확인했다. 팀 실행 `ux-quality-20260928-v5` 완료·입력·산출물 최신성 검사도 오류 0개였다.
 
 외부 접근성 도구의 release 창 읽기는 `permission_denied`로 차단됐다. 위 입력 검사는 별도 NSWindow에 실제 제품 SwiftUI를 띄운 AppKit 이벤트 검사이며 외부 접근성 자동화와 구분한다. 실제 Google 로그인·키체인 재연결·서버 업로드는 OAuth 클라이언트가 아직 없어 미검증이다.
+
+## 다른 Mac으로 전달할 앱 빌드 — 2026-09-28
+
+`scripts/build-app.sh`에 `--universal`을 추가했다. 기본 실행은 현재 Mac 아키텍처를 유지하며, Universal 실행은 SwiftPM에서 실제 출력 경로를 받아 `arm64`와 `x86_64`가 모두 있는지 확인한 뒤 앱을 구성한다. 도움말과 잘못된 인자 처리, 셸 문법 검사, 기본 release 빌드와 최종 Universal 빌드가 통과했다. 초기 Universal 빌드에서 아키텍처 확인 명령의 인자 순서 오류를 발견해 수정하고 다시 빌드했다.
+
+- `dist/Lighthouse.app`은 두 아키텍처를 포함하며 양쪽 모두 최소 실행 대상이 macOS 15.0이다. macOS 26.5 SDK·Xcode 26.5·Swift 6.3.2로 빌드했다. 동적 의존성은 시스템 라이브러리·프레임워크뿐이며 개발 Mac의 절대 경로에 의존하지 않는다.
+- `dist/Lighthouse-macOS-universal.zip`과 SHA-256 파일을 만들고 무결성을 확인했다. 별도 폴더에 다시 푼 앱의 모든 파일 바이트·권한이 원래 앱과 같고, 원래 앱과 압축 해제한 앱 모두 엄격한 코드 서명 검사를 통과했다. 서명은 ad-hoc이며 Developer ID 서명·Apple 공증은 하지 않았다.
+- 압축 해제한 앱을 QA 전용 식별자로 복사·재서명해 각각 `arm64` 직접 실행과 Rosetta의 `x86_64` 실행을 했다. 각 실행은 격리 카탈로그에 S9 RW2·PNG 복사본 2장을 가져와 썸네일 2개를 만들었으며, 정상 종료와 같은 카탈로그 재시작 후 종료가 모두 코드 0이었다. 두 실행 모두 사진 목록과 표본·복사본의 SHA-256이 유지됐다.
+- README에 새 Mac 설치, 개발 도구와 소스 빌드, ZIP·체크섬 만들기, 원본 사진과 전체 데이터 폴더 이전, 누락 원본 재연결, Google Drive 재인증을 기록했다. 소스 컴파일에는 RAW 하이라이트 복구 API 때문에 macOS 26 SDK가 필요하며 완성 앱의 최소 실행 대상과 구분한다.
+
+실제 검증 장비는 Apple Silicon·macOS 26.5.2다. Intel Mac 실물과 macOS 15는 미검증이며, Rosetta 실행으로 대신 검증됐다고 보지 않는다. 이번 변경은 앱 소스와 테스트를 바꾸지 않아 직전 전체 검사 247개 통과 결과를 유지하고 빌드·패키징·실행 검증에 집중했다. 외부 접근성 화면 조작과 실제 Google 로그인·업로드는 이번에도 실행하지 않았다. 상세 로그·체크섬·실행 결과는 로컬 `.artifacts/release-portable-20260928/`에 있다.
