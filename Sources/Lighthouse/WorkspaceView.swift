@@ -57,6 +57,7 @@ struct WorkspaceView: View {
         .sheet(isPresented: $model.showBatchEdit) { BatchEditSheet() }
         .sheet(isPresented: $model.showCardImport) { CardImportSheet() }
         .sheet(isPresented: $model.showShortcuts) { ShortcutHelpSheet() }
+        .sheet(isPresented: $model.showPeople) { PeopleSheet() }
         .sheet(item: $model.presetSheet) { request in PresetSheet(request: request) }
         .sheet(item: $model.cropSource) { source in CropSheet(source: source) }
         .confirmationDialog(removalTitle, isPresented: Binding(
@@ -201,6 +202,25 @@ struct WorkspaceView: View {
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
+                    sectionLabel("사람").padding(.top, 20)
+                    Button { model.showPeople = true } label: {
+                        Label("얼굴 찾기 · 관리…", systemImage: "person.crop.square.badge.plus")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 18).padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!model.catalogLoaded)
+                    if let error = model.peopleLoadError {
+                        Text("사람 정보 오류: \(error)").font(.caption2).foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 16)
+                    }
+                    ForEach(model.sortedPeople) { person in
+                        sidebarRow(person.name, icon: "person.crop.square",
+                                   count: model.counts.people[person.id] ?? 0,
+                                   selected: model.filter == .person(person.id)) {
+                            model.filter = .person(person.id)
+                        }
+                    }
                     sectionLabel("스마트 폴더").padding(.top, 24)
                     if let error = model.smartFolderLoadError {
                         Text("스마트 폴더 오류: \(error)").font(.caption2).foregroundStyle(.red)
@@ -552,6 +572,7 @@ struct WorkspaceView: View {
         case .missing: "모든 원본을 찾았습니다."
         case .collection: "사진은 전체 라이브러리에서 선택해 이 폴더에 추가하세요."
         case .smart: "조건에 맞는 사진이 없습니다. 사이드바의 … 메뉴에서 이름을 바꾸거나 지울 수 있습니다."
+        case .person: "이름이 확인된 사진이 없습니다. 얼굴 찾기 · 관리에서 얼굴을 확인하세요."
         case .all, .folder: "이 목록에 사진이 없습니다."
         }
         return emptyState("‘\(model.filterTitle)’에 사진이 없습니다", icon: "photo.on.rectangle", detail: detail)

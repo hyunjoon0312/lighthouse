@@ -1,0 +1,78 @@
+SFace Core ML model attribution and provenance
+================================================
+
+This resource is the OpenCV Zoo SFace face-recognition model converted from
+ONNX to Core ML for use by Lighthouse. It produces an unnormalized
+128-dimensional identity embedding from an aligned RGB face crop.
+
+Upstream work and attribution
+-----------------------------
+
+- SFace and the model contribution: Yaoyao Zhong
+- ONNX conversion credited by the upstream README: Chengrui Wang
+- Model collection and distribution: OpenCV Zoo
+- Affiliation: Shenzhen Institute of Artificial Intelligence and Robotics for Society
+
+Copyright (C) 2021, Shenzhen Institute of Artificial Intelligence and Robotics for Society, all rights reserved.
+Third party copyrights are property of their respective owners.
+
+Upstream revision:
+47534e27c9851bb1128ccc0102f1145e27f23f98
+
+Pinned ONNX source:
+https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/face_recognition_sface_2021dec.onnx
+
+Upstream README:
+https://github.com/opencv/opencv_zoo/blob/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/README.md
+
+Upstream license:
+https://github.com/opencv/opencv_zoo/blob/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/LICENSE
+
+Original project and paper:
+https://github.com/zhongyy/SFace
+https://arxiv.org/abs/2205.12010
+
+Licensing
+---------
+
+The upstream README states that all files in the SFace model directory are
+licensed under the Apache License 2.0. The verbatim license is included in
+SFace-LICENSE.txt.
+
+Modification
+------------
+
+Converted from the pinned ONNX graph to a Float32 Core ML neural-network model
+by Lighthouse. The conversion maps the inference graph directly and does not
+add embedding normalization. No training data or input photographs are part of
+this resource or conversion process.
+
+Hashes
+------
+
+ONNX SHA-256:
+0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79
+
+SFace.mlmodel SHA-256:
+01b8a13fe20e13a430b50abf1468d0d5a208ee4deacebbbbda6f3a6b149e15ac
+
+Conversion environment
+----------------------
+
+Python 3.11.11
+attrs==26.1.0
+cattrs==26.2.1
+coremltools==9.0
+flatbuffers==25.12.19
+ml_dtypes==0.6.0
+mpmath==1.3.0
+numpy==2.4.6
+onnx==1.23.0
+onnxruntime==1.30.0
+packaging==26.3
+protobuf==7.36.2
+pyaml==26.7.0
+PyYAML==6.0.3
+sympy==1.14.0
+tqdm==4.70.1
+typing_extensions==4.16.0

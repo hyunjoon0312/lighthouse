@@ -12,7 +12,7 @@ enum WorkspaceMode: String, CaseIterable {
 }
 
 enum LibraryFilter: Hashable {
-    case all, picks, rejects, edited, bursts, missing, folder(String), collection(UUID), smart(UUID)
+    case all, picks, rejects, edited, bursts, missing, folder(String), collection(UUID), smart(UUID), person(UUID)
 }
 
 /// 사진 목록 정렬. 카탈로그는 촬영 시각 순으로 보관하고 보이는 목록만 다시 정렬한다.
@@ -139,6 +139,8 @@ struct LibraryCounts {
     var folders: [UUID: Int] = [:]
     /// 스마트 폴더별로 조건에 맞는 사진 수.
     var smart: [UUID: Int] = [:]
+    /// 이름이 확정된 사람별 사진 수. RAW+JPEG 한 장 보기를 따른다.
+    var people: [UUID: Int] = [:]
 }
 
 extension UTType {
@@ -204,6 +206,19 @@ final class LibraryModel: ObservableObject {
     @Published var showBatchEdit = false
     @Published var showCardImport = false
     @Published var showShortcuts = false
+    @Published var showPeople = false
+    @Published var peopleCatalog = PeopleCatalog() {
+        didSet { visibleCache = nil; countsCache = nil }
+    }
+    @Published var peopleLoaded = false
+    @Published var peopleLoadError: String?
+    @Published var peopleMessage: String?
+    @Published var peopleSaveError: String?
+    @Published var isAnalyzingFaces = false
+    @Published var faceAnalysisCompleted = 0
+    @Published var faceAnalysisTotal = 0
+    @Published var isCancellingFaces = false
+    @Published var isClearingPeople = false
     @Published var presets: [EditPreset] = []
     @Published var presetLoadError: String?
     @Published var presetSheet: PresetSheetRequest?
@@ -328,6 +343,9 @@ final class LibraryModel: ObservableObject {
     let presetStore = EditPresetStore(url: EditPresetStore.defaultURL)
     let smartFolderStore = SmartFolderStore(url: SmartFolderStore.defaultURL)
     let backup = CatalogBackup(directory: CatalogBackup.defaultDirectory)
+    let peopleStore = PeopleStore(url: PeopleStore.defaultURL)
+    let faceAnalyzer = FaceAnalyzer()
+    let facePipeline = ImagePipeline()
     var backupFailureReported = false
     let previewQueue = DispatchQueue(label: "com.rian.lighthouse.preview", qos: .userInitiated)
     let thumbnailQueue = DispatchQueue(label: "com.rian.lighthouse.thumbnails", qos: .utility)
@@ -343,11 +361,18 @@ final class LibraryModel: ObservableObject {
     let surveyQueue = DispatchQueue(label: "com.rian.lighthouse.survey", qos: .userInitiated)
     let autoAdjustQueue = DispatchQueue(label: "com.rian.lighthouse.auto", qos: .userInitiated)
     let sidecarQueue = DispatchQueue(label: "com.rian.lighthouse.sidecar", qos: .utility)
+    let faceQueue = DispatchQueue(label: "com.rian.lighthouse.faces", qos: .utility)
     var pendingSidecarIDs = Set<UUID>()
     var dirtySidecarIDs = Set<UUID>()
     var sidecarVersions: [UUID: UInt64] = [:]
     var sidecarDelay: DispatchWorkItem?
     var saveDelay: DispatchWorkItem?
+    var peopleSaveDelay: DispatchWorkItem?
+    var peopleSaveScheduled = false
+    var peopleSaveInFlight = false
+    var peopleSaveDirty = false
+    var peopleSaveUrgent = false
+    var peopleSaveRevision: UInt64 = 0
     var renderDelay: DispatchWorkItem?
     var generation = 0
     var renderedSource: String?
@@ -375,6 +400,10 @@ final class LibraryModel: ObservableObject {
     var revealInFinder: ([URL]) -> Void = { NSWorkspace.shared.activateFileViewerSelecting($0) }
     var importCancellation: CancellationFlag?
     var importCompletionWaiters: [CheckedContinuation<Void, Never>] = []
+    var faceCancellation: CancellationFlag?
+    var faceCompletionWaiters: [CheckedContinuation<Void, Never>] = []
+    var faceBatchGeneration = 0
+    var faceAnalyzeOverride: (@Sendable (URL) throws -> [DetectedFace])?
     private(set) var visibleCache: [PhotoAsset]?
     private(set) var indexCache: [UUID: Int]?
     private(set) var countsCache: LibraryCounts?
@@ -430,8 +459,12 @@ final class LibraryModel: ObservableObject {
     static let thumbnailPixels = 360
     private static let pasteComponents: EditComponents = [.global, .lut]
 
-    init(driveUpload: GoogleDriveUploadModel? = nil) {
+    init(
+        driveUpload: GoogleDriveUploadModel? = nil,
+        faceAnalyze: (@Sendable (URL) throws -> [DetectedFace])? = nil
+    ) {
         self.driveUpload = driveUpload ?? GoogleDriveUploadModel()
+        self.faceAnalyzeOverride = faceAnalyze
         thumbnailCache.countLimit = 240
         thumbnailCache.totalCostLimit = 200 * 1024 * 1024
     }
@@ -451,6 +484,7 @@ final class LibraryModel: ObservableObject {
         case .folder(let path): URL(fileURLWithPath: path).lastPathComponent
         case .collection(let id): photoFolders.first { $0.id == id }?.name ?? "내 폴더"
         case .smart(let id): smartFolders.first { $0.id == id }?.name ?? "스마트 폴더"
+        case .person(let id): peopleCatalog.people.first { $0.id == id }?.name ?? "사람"
         }
     }
     var selection: PhotoAsset? { selectedID.flatMap(photo(withID:)) }
@@ -458,7 +492,7 @@ final class LibraryModel: ObservableObject {
     var canUndo: Bool { editHistory.canUndo }
     var canRedo: Bool { editHistory.canRedo }
     var hasModalPresentation: Bool {
-        showBatchEdit || showExport || showCardImport || showShortcuts || presetSheet != nil || referenceMatchSource != nil || folderSheetRequest != nil ||
+        showBatchEdit || showExport || showCardImport || showShortcuts || showPeople || presetSheet != nil || referenceMatchSource != nil || folderSheetRequest != nil ||
             cropSource != nil || catalogRemoval != nil
     }
     var selectedLocal: LocalAdjustment? { selection?.edits.localAdjustments.first { $0.id == selectedLocalID } }
@@ -520,6 +554,19 @@ final class LibraryModel: ObservableObject {
             let criteria = folder.criteria
             computed.smart[folder.id] = collapsedFilter { criteria.matches($0) }.count
         }
+        if peopleLoaded, peopleLoadError == nil {
+            let current = currentPeopleCatalog
+            var photoIDsByPerson: [UUID: Set<UUID>] = [:]
+            for analysis in current.analyses {
+                for personID in Set(analysis.faces.compactMap(\.personID)) {
+                    photoIDsByPerson[personID, default: []].insert(analysis.photoID)
+                }
+            }
+            for person in peopleCatalog.people {
+                let ids = photoIDsByPerson[person.id] ?? []
+                computed.people[person.id] = collapsedFilter { ids.contains($0.id) }.count
+            }
+        }
         countsCache = computed
         return computed
     }
@@ -566,7 +613,7 @@ final class LibraryModel: ObservableObject {
 
     /// `matches`에 드는 사진 중 같은 이름의 RAW도 `matches`에 드는 JPEG 짝을 뺀다.
     /// RAW가 없는 폴더·필터에서는 JPEG를 그대로 보인다.
-    private func collapsedFilter(_ matches: (PhotoAsset) -> Bool) -> [PhotoAsset] {
+    func collapsedFilter(_ matches: (PhotoAsset) -> Bool) -> [PhotoAsset] {
         let companions = activeCompanions
         return photos.filter { matches($0) && !isHiddenCompanion($0, companions, matches) }
     }
@@ -705,6 +752,21 @@ final class LibraryModel: ObservableObject {
         let positions = filter == .bursts ? burstIndex.positions : [:]
         let missing = filter == .missing ? missingPaths : []
         let smartCriteria = smartFolderCriteria
+        let currentPeople = currentPeopleCatalog
+        let personPhotoIDs: Set<UUID>
+        if case .person(let id) = filter {
+            personPhotoIDs = Set(currentPeople.analyses.compactMap { analysis in
+                analysis.faces.contains { $0.personID == id } ? analysis.photoID : nil
+            })
+        } else {
+            personPhotoIDs = []
+        }
+        let matchingPeople = search.isEmpty ? Set<UUID>() : Set(peopleCatalog.people.compactMap { person in
+            person.name.localizedCaseInsensitiveContains(search) ? person.id : nil
+        })
+        let personNamePhotoIDs = matchingPeople.isEmpty ? Set<UUID>() : Set(currentPeople.analyses.compactMap { analysis in
+            analysis.faces.contains { face in face.personID.map(matchingPeople.contains) == true } ? analysis.photoID : nil
+        })
         var computed = collapsedFilter { photo in
             let matchesFilter: Bool
             switch filter {
@@ -717,11 +779,12 @@ final class LibraryModel: ObservableObject {
             case .folder(let path): matchesFilter = (photo.path as NSString).deletingLastPathComponent == path
             case .collection: matchesFilter = members?.contains(photo.id) ?? false
             case .smart: matchesFilter = smartCriteria?.matches(photo) ?? false
+            case .person: matchesFilter = personPhotoIDs.contains(photo.id)
             }
             return matchesFilter && photo.rating >= minimumRating && criteria.matches(photo) &&
                 (search.isEmpty || photo.displayName.localizedCaseInsensitiveContains(search) ||
                  photo.keywords.contains { $0.localizedCaseInsensitiveContains(search) } ||
-                 photo.caption.localizedCaseInsensitiveContains(search))
+                 photo.caption.localizedCaseInsensitiveContains(search) || personNamePhotoIDs.contains(photo.id))
         }
         // 같은 값끼리는 촬영 시각 순서를 지킨다.
         switch sortOrder {
@@ -744,12 +807,21 @@ final class LibraryModel: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
-        batchQueue.async { [catalog, folderStore, presetStore, smartFolderStore] in
+        batchQueue.async { [catalog, folderStore, presetStore, smartFolderStore, peopleStore] in
             let result = Result { try catalog.load() }
             let folders = Result { try folderStore.load() }
             let presets = Result { try presetStore.load() }
             let smartFolders = Result { try smartFolderStore.load() }
+            let people = Result { try peopleStore.load() }
             DispatchQueue.main.async {
+                switch people {
+                case .success(let loaded):
+                    self.peopleCatalog = loaded
+                    self.peopleLoaded = true
+                case .failure(let error):
+                    AppLog.catalog.error("people.json load failed: \(error.localizedDescription, privacy: .private)")
+                    self.peopleLoadError = "사람 정보를 열 수 없습니다. 손상된 파일을 확인하기 전에는 사람 정보를 저장하지 않습니다. \(error.localizedDescription)"
+                }
                 switch result {
                 case .success(let photos):
                     self.photos = photos

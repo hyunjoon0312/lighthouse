@@ -9,7 +9,10 @@ let package = Package(
         .executable(name: "Lighthouse", targets: ["Lighthouse"]),
     ],
     targets: [
-        .target(name: "LighthouseCore"),
+        .target(
+            name: "LighthouseCore",
+            resources: [.copy("Resources")]
+        ),
         .executableTarget(name: "Lighthouse", dependencies: ["LighthouseCore"]),
         .testTarget(name: "LighthouseCoreTests", dependencies: ["LighthouseCore"]),
         .testTarget(name: "LighthouseTests", dependencies: ["Lighthouse", "LighthouseCore"]),

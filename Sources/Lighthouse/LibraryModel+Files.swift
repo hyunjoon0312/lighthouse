@@ -102,6 +102,20 @@ extension LibraryModel {
             if let target = moves[updated[index].path] { updated[index].path = target }
         }
         photos = updated
+        if peopleLoaded, peopleLoadError == nil {
+            var people = peopleCatalog
+            var changed = false
+            for index in people.analyses.indices {
+                if let target = moves[people.analyses[index].sourcePath] {
+                    people.analyses[index].sourcePath = target
+                    changed = true
+                }
+            }
+            if changed {
+                peopleCatalog = people
+                schedulePeopleSave()
+            }
+        }
         missingPaths.subtract(moves.keys)
         ensureSelectionVisible()
         scheduleSave()

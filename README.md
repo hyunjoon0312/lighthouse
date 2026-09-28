@@ -61,7 +61,7 @@ ditto -c -k --sequesterRsrc --keepParent dist/Lighthouse.app dist/Lighthouse-mac
 
 1. 두 Mac에서 Lighthouse를 종료합니다. 새 Mac에 이미 작업 데이터가 있으면 먼저 별도로 백업하세요. 카탈로그 두 개를 자동으로 합치는 기능은 없습니다.
 2. 원본 RAW·JPEG 등 **실제 사진 폴더**를 새 Mac이나 외장 드라이브로 복사합니다. 앱에서 내보낸 결과도 계속 쓸 경우 별도로 옮깁니다.
-3. 기존 Mac의 **`~/Library/Application Support/Lighthouse/` 폴더 전체**를 새 Mac의 같은 위치로 복사합니다. Finder의 **이동 → 폴더로 이동…**(⇧⌘G)에 경로를 붙여 넣으면 열 수 있습니다. `catalog.json`뿐 아니라 `folders.json`, `smart-folders.json`, `presets.json`, `LUTs`, `Masks`를 함께 옮겨야 폴더·프리셋·LUT·자동 마스크가 유지됩니다. 전체 폴더 복사는 썸네일과 보관본도 포함합니다. `LIGHTHOUSE_DATA_DIR`로 저장 위치를 바꿨다면 그 폴더를 사용합니다.
+3. 기존 Mac의 **`~/Library/Application Support/Lighthouse/` 폴더 전체**를 새 Mac의 같은 위치로 복사합니다. Finder의 **이동 → 폴더로 이동…**(⇧⌘G)에 경로를 붙여 넣으면 열 수 있습니다. `catalog.json`뿐 아니라 `folders.json`, `smart-folders.json`, `presets.json`, `people.json`, `LUTs`, `Masks`를 함께 옮겨야 폴더·프리셋·사람 분류·LUT·자동 마스크가 유지됩니다. 전체 폴더 복사는 썸네일과 보관본도 포함합니다. `LIGHTHOUSE_DATA_DIR`로 저장 위치를 바꿨다면 그 폴더를 사용합니다.
 4. 새 Mac에서 앱을 엽니다. 사용자 이름이나 사진 경로가 달라 **원본 없음**이 표시되면 해당 사진을 선택하고 **사진 → 위치 다시 찾기…**에서 새 사진 폴더를 선택합니다. 같은 옛 폴더 아래의 누락 사진도 새 위치에서 찾으면 함께 연결합니다. 기존 보정을 이어갈 때는 사진을 새 항목으로 가져오기 전에 위치를 다시 연결하세요.
 5. 사진 몇 장의 별점·보정·LUT·마스크를 확인하고 한 장을 내보내 봅니다. 정렬·화면 옵션·내보내기 프리셋 등 Mac 환경설정은 위 데이터 폴더와 별도로 저장되므로 필요한 항목은 새 Mac에서 다시 설정합니다. Google Drive는 새 Mac에서 [OAuth JSON 가져오기와 계정 연결](docs/google-drive.md)을 다시 진행합니다. 인증 정보는 카탈로그가 아닌 macOS 키체인에 저장됩니다.
 
@@ -87,6 +87,8 @@ ditto -c -k --sequesterRsrc --keepParent dist/Lighthouse.app dist/Lighthouse-mac
 **여러 장 보기**에서 사진을 읽지 못하면 해당 칸에 오류와 **다시 시도**를 표시합니다. 내보내기 미리보기도 다시 시도할 수 있으며, 여러 장 중 대표 사진의 미리보기가 실패해도 일괄 내보내기를 진행해 사진별 성공·실패를 확인할 수 있습니다.
 
 내보내기의 **보낼 곳 → Google Drive**에서는 원본·편집본·둘 다를 선택해 여러 사진을 직접 업로드합니다. Google 계정 연결, Lighthouse 폴더 생성·선택, 진행 상황과 취소를 지원합니다. 최초 OAuth 연결 방법과 지원 범위는 [Google Drive 안내](docs/google-drive.md)에 있습니다.
+
+**사람 → 얼굴 찾기 · 관리…**에서는 사진 속 얼굴에 이름을 붙이고 같은 사람 후보를 확인합니다. 확인한 사람은 왼쪽 이름 목록이나 검색창으로 찾아 사진을 모아 볼 수 있습니다. 한 사진에 여러 사람이 있어도 각각 분류되며, 후보를 확인하기 전에는 이름으로 확정하지 않습니다. 얼굴 분석 모델이 앱에 포함되어 Mac 안에서 처리하므로 계정이나 다운로드가 필요하지 않습니다. [사람별 사진 찾기](docs/people.md)에 사용법과 수정·삭제 방법을 적었습니다.
 
 ## 단축키
 
@@ -128,7 +130,7 @@ ditto -c -k --sequesterRsrc --keepParent dist/Lighthouse.app dist/Lighthouse-mac
 
 다른 사진 앱과 별점·키워드를 나누려면 **사진 › 별점·키워드를 XMP 사이드카로 쓰기**를 켜세요. 켜 둔 동안 별점·제외(-1)·색상 라벨·키워드·설명을 원본 옆 `<파일 이름>.xmp`(Adobe 방식)에 쓰며 원본 파일은 바꾸지 않습니다. RAW 파일에만 쓰고(RAW+JPEG는 RAW 쪽 한 파일), 가상 사본과 JPEG·HEIC는 쓰지 않습니다. 표시가 하나도 없는 사진 옆에는 파일을 만들지 않습니다. 이미 있는 사이드카가 카메라·다른 앱이 만든 것이거나, Lighthouse가 쓴 뒤 다른 앱이 고친 것이면 덮어쓰지 않고 알려 줍니다. 보정값은 사이드카에 넣지 않습니다(다른 앱과 보정 방식이 달라서). 기본은 꺼져 있으며, 켜면 사진 폴더에 파일이 생깁니다.
 
-사진과 보정은 `catalog.json`, 내 폴더 구성은 같은 위치의 `folders.json`, 스마트 폴더는 `smart-folders.json`, LUT와 표시 이름은 `LUTs` 폴더, 자동 선택 마스크는 `Masks` 폴더, 보정 프리셋은 `presets.json`에 보관합니다. `Thumbnails` 폴더는 사진마다 최신 썸네일 한 장을 두는 캐시입니다(360px JPEG, 한 장에 수십 KB). 원본이 없거나 드라이브를 뺀 사진도 이 썸네일로 보이며, 지워도 다시 만들어집니다. 첫 버전은 개인 라이브러리를 대상으로 하며 수만 장의 대규모 처리 성능은 아직 검증하지 않았습니다. 백업할 때 이 파일·폴더들과 원본 사진을 함께 보관하세요. 앱은 하루에 한 번(그날 처음 열 때, 켜 둔 채 날짜가 바뀌면 그날 첫 저장 때) `Backups/YYYY-MM-DD` 폴더에 카탈로그·내 폴더·스마트 폴더·프리셋을 남기고 최근 7일치만 유지합니다. 자동 마스크는 날짜 폴더의 `Masks`에 함께 들어 있어 그 폴더만으로 되돌릴 수 있습니다. 바뀌지 않은 마스크는 원래 `Masks`의 파일을 하드 링크하므로 보관본이 여러 개여도 디스크를 한 벌만 씁니다. **파일 › 카탈로그 보관본 보기**로 폴더를 엽니다. 되돌리려면 앱을 끝낸 뒤 원하는 날짜 폴더 안의 파일과 `Masks` 폴더를 위 위치에 덮어 두세요. LUT와 원본 사진은 보관본에 들어가지 않습니다.
+사진과 보정은 `catalog.json`, 내 폴더 구성은 같은 위치의 `folders.json`, 스마트 폴더는 `smart-folders.json`, LUT와 표시 이름은 `LUTs` 폴더, 자동 선택 마스크는 `Masks` 폴더, 보정 프리셋은 `presets.json`, 사람 이름·얼굴 분석·분류 결과는 `people.json`에 보관합니다. `Thumbnails` 폴더는 사진마다 최신 썸네일 한 장을 두는 캐시입니다(360px JPEG, 한 장에 수십 KB). 원본이 없거나 드라이브를 뺀 사진도 이 썸네일로 보이며, 지워도 다시 만들어집니다. 첫 버전은 개인 라이브러리를 대상으로 하며 수만 장의 대규모 처리 성능은 아직 검증하지 않았습니다. 백업할 때 이 파일·폴더들과 원본 사진을 함께 보관하세요. 앱은 하루에 한 번(그날 처음 열 때, 켜 둔 채 날짜가 바뀌면 그날 첫 저장 때) `Backups/YYYY-MM-DD` 폴더에 카탈로그·내 폴더·스마트 폴더·프리셋·사람 분류를 남기고 최근 7일치만 유지합니다. 자동 마스크는 날짜 폴더의 `Masks`에 함께 들어 있어 그 폴더만으로 되돌릴 수 있습니다. 바뀌지 않은 마스크는 원래 `Masks`의 파일을 하드 링크하므로 보관본이 여러 개여도 디스크를 한 벌만 씁니다. **파일 › 카탈로그 보관본 보기**로 폴더를 엽니다. 되돌리려면 앱을 끝낸 뒤 원하는 날짜 폴더 안의 파일과 `Masks` 폴더를 위 위치에 덮어 두세요. LUT와 원본 사진은 보관본에 들어가지 않습니다.
 
 RAW 지원은 macOS의 카메라 지원에 따릅니다. 현재 개발 Mac에서 S9의 일반 24MP RW2를 실제 현상·내보내기로 확인했습니다. 모든 펌웨어·촬영 모드의 RW2를 확인한 것은 아닙니다. 내보내기는 SDR(JPEG·HEIF·TIFF, sRGB 또는 Display P3)이 기본이며, RAW에 **HDR 하이라이트**를 켠 사진은 JPEG·HEIF에 게인 맵을 넣은 HDR 파일로 저장합니다(TIFF는 SDR). 클라우드 동기화, 여러 장 HDR 병합, Lightroom 카탈로그 호환은 제공하지 않습니다. 자동 선택은 사진에 따라 실패하거나 수동 수정이 필요할 수 있습니다.
 
@@ -144,6 +146,8 @@ swift build
 ```sh
 LIGHTHOUSE_SAMPLE_RW2=/path/to/P1000123.RW2 LIGHTHOUSE_SAMPLE_FACES=/path/to/faces swift test
 ```
+
+얼굴 비교 표본은 `LIGHTHOUSE_FACE_FIXTURES` 폴더에 `person-a-1.jpg`, `person-a-2.jpg`(같은 사람), `person-b-1.jpg`(다른 사람)를 넣어 검사합니다. 선택 표본 `two-people.jpg`, `person-a-exif6.jpg`로 다인 사진과 EXIF 방향도 확인합니다. 표본이 없으면 해당 검사는 건너뛰며 개인 얼굴 사진은 저장소에 넣지 않습니다. 모델의 출처와 변환 재현 방법은 `Sources/LighthouseCore/Resources/SFace-NOTICE.txt`에 있습니다.
 
 `.github/workflows/ci.yml`은 푸시·풀 리퀘스트마다 macOS 26 러너에서 빌드와 테스트를 돌리도록 적어 두었으나 원격 실행은 아직 확인하지 않았습니다.
 
@@ -167,6 +171,7 @@ LIGHTHOUSE_DATA_DIR="$PWD/.artifacts/test-catalog" swift run Lighthouse
 - [일괄 편집 계약](docs/batch-edit-contract.md)
 - [참조 사진 색감 계약](docs/reference-match-contract.md)
 - [폴더 관리 계약](docs/photo-folders-contract.md)
+- [사람별 분류 계약](docs/people-contract.md)
 - [고급 보정 계약](docs/advanced-editing-contract.md)
 - [검증 기록](docs/verification.md)
 - [화면 수동 점검표](docs/manual-qa.md)

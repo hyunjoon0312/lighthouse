@@ -165,7 +165,7 @@ extension LibraryModel {
     /// `saveQueue`에서 부른다. 실패는 한 번만 알린다.
     nonisolated func backUpIfNeeded(_ photos: [PhotoAsset]) {
         do {
-            try backup.backUpIfNeeded(photos: photos, copying: [folderStore.url, presetStore.url, smartFolderStore.url],
+            try backup.backUpIfNeeded(photos: photos, copying: [folderStore.url, presetStore.url, smartFolderStore.url, peopleStore.url],
                                       linkingMasksFrom: catalog.maskDirectory)
         } catch {
             AppLog.catalog.error("daily backup failed: \(error.localizedDescription, privacy: .private)")
@@ -185,12 +185,27 @@ extension LibraryModel {
     func flushSave() throws {
         guard catalogLoaded, loadError == nil else { return }
         saveDelay?.cancel()
+        peopleSaveDelay?.cancel()
+        peopleSaveScheduled = false
         let snapshot = photos
         let folderSnapshot = photoFolders
         let canSaveFolders = foldersLoaded && folderLoadError == nil
         try saveQueue.sync {
             try catalog.save(snapshot)
             if canSaveFolders { try folderStore.save(folderSnapshot) }
+        }
+        if peopleLoaded, peopleLoadError == nil {
+            peopleSaveRevision &+= 1
+            let peopleSnapshot = peopleCatalog
+            do {
+                try saveQueue.sync { try peopleStore.save(peopleSnapshot) }
+                peopleSaveDirty = false
+                peopleSaveUrgent = false
+                peopleSaveError = nil
+            } catch {
+                peopleSaveError = "사람 정보 저장 실패: \(error.localizedDescription)"
+                throw error
+            }
         }
         try flushSidecars()
     }

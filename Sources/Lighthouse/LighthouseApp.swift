@@ -65,6 +65,9 @@ struct LighthouseApp: App {
                 Divider()
             }
             CommandMenu("사진") {
+                Button("얼굴 찾기 · 관리…") { library.showPeople = true }
+                    .disabled(!library.catalogLoaded || library.hasModalPresentation)
+                Divider()
                 Button("선택 표시 (P)") { library.markFromKeyboard(flag: .pick) }
                     .disabled(library.selection == nil || library.hasModalPresentation)
                 Button("제외 표시 (X)") { library.markFromKeyboard(flag: .reject) }
@@ -159,22 +162,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminationPending { return .terminateLater }
-        if let library, library.driveUpload.isBusy || library.isExporting || library.isImporting {
+        if let library, library.driveUpload.isBusy || library.isExporting || library.isImporting || library.isAnalyzingFaces {
             let alert = NSAlert()
             alert.alertStyle = .warning
-            alert.messageText = "가져오기·내보내기 작업이 진행 중입니다"
-            alert.informativeText = "지금 종료하면 진행 중인 작업을 중지하고 정리를 마친 뒤 종료합니다. 완료된 가져오기 파일과 카탈로그 항목은 유지되며, Drive로 전송 중이던 파일은 도착했을 수 있습니다."
+            alert.messageText = "가져오기·내보내기 또는 얼굴 분석이 진행 중입니다"
+            alert.informativeText = "지금 종료하면 진행 중인 작업을 중지하고 정리를 마친 뒤 종료합니다. 완료된 가져오기·얼굴 분석 결과와 카탈로그 항목은 유지되며, Drive로 전송 중이던 파일은 도착했을 수 있습니다."
             alert.addButton(withTitle: "앱으로 돌아가기")
             alert.addButton(withTitle: "작업 취소하고 종료")
             guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
             library.cancelExport()
             library.cancelImport()
+            library.cancelFaceAnalysis()
             library.driveUpload.cancel()
             terminationPending = true
             Task { @MainActor [weak self] in
                 await library.driveUpload.cancelAndWait()
                 await library.cancelExportAndWait()
                 await library.cancelImportAndWait()
+                await library.cancelFaceAnalysisAndWait()
                 let shouldTerminate = self?.flushBeforeTermination() ?? false
                 self?.terminationPending = false
                 sender.reply(toApplicationShouldTerminate: shouldTerminate)
@@ -193,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AppLog.catalog.fault("save on quit failed: \(error.localizedDescription, privacy: .private)")
             let alert = NSAlert()
             alert.alertStyle = .critical
-            alert.messageText = "사진·폴더 또는 XMP 사이드카를 저장하지 못했습니다"
+            alert.messageText = "사진·폴더·사람 정보 또는 XMP 사이드카를 저장하지 못했습니다"
             alert.informativeText = "\(error.localizedDescription)\n문제를 해결한 뒤 다시 종료하세요."
             alert.addButton(withTitle: "앱으로 돌아가기")
             alert.runModal()

@@ -34,9 +34,14 @@ fi
 swift build "${build_args[@]}"
 bin_path="$(swift build "${build_args[@]}" --show-bin-path)"
 built_executable="$bin_path/Lighthouse"
+core_bundle="$bin_path/Lighthouse_LighthouseCore.bundle"
 
 if [[ "$universal" == true ]]; then
     lipo "$built_executable" -verify_arch arm64 x86_64
+fi
+if [[ ! -d "$core_bundle" ]]; then
+    print -u2 "Missing required LighthouseCore resource bundle: $core_bundle"
+    exit 1
 fi
 
 app_dir="$repo_dir/dist/Lighthouse.app/Contents"
@@ -46,6 +51,9 @@ cp "$repo_dir/Resources/Info.plist" "$app_dir/Info.plist"
 if [[ -d "$repo_dir/Resources/App" ]]; then
     cp -R "$repo_dir/Resources/App/." "$app_dir/Resources/"
 fi
+packaged_core_bundle="$app_dir/Resources/Lighthouse_LighthouseCore.bundle"
+rm -rf -- "$packaged_core_bundle"
+cp -R "$core_bundle" "$packaged_core_bundle"
 if command -v codesign >/dev/null; then
     codesign --force --deep --sign - "$repo_dir/dist/Lighthouse.app"
 fi
