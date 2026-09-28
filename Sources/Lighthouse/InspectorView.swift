@@ -158,6 +158,7 @@ struct InspectorView: View {
             Divider()
             section("디테일 및 구도")
             adjustment("선명도", \.sharpness, range: 0...2, scale: 50)
+            NoiseReductionControls(edits: edits)
             adjustment("비네팅", \.vignette, range: -1...1, scale: 100)
             HStack {
                 Button { model.rotate(clockwise: false) } label: { Image(systemName: "rotate.left") }

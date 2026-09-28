@@ -34,6 +34,7 @@ public extension EditSettings {
             ("HSL", colorRanges != before.colorRanges),
             ("필름 입자", grain != before.grain),
             ("RAW 현상", rawDevelop != before.rawDevelop),
+            ("노이즈 감소", noiseReduction != before.noiseReduction),
             ("HDR", hdrAmount != before.hdrAmount),
             ("선명도", sharpness != before.sharpness),
             ("비네팅", vignette != before.vignette),

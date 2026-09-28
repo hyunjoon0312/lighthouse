@@ -215,7 +215,7 @@ public final class ImagePipeline: @unchecked Sendable {
     /// 일반 사진은 Core Image가 이미 줄여 읽어서 따로 줄이면 오히려 메모리를 더 쓴다(24MP JPEG 114MB→431MB).
     /// 필름 입자는 픽셀 단위 무늬라 해상도에 따라 보이는 세기가 불규칙하게 달라지므로, 입자가 있으면 원본 해상도로 현상한다.
     func decodeScale(url: URL, edits: EditSettings, maxPixel: Int?) -> Double {
-        guard Self.isRAW(url), edits.grain.amount == 0, let maxPixel, maxPixel > 0,
+        guard Self.isRAW(url), !edits.noiseReduction.isActive, edits.grain.amount == 0, let maxPixel, maxPixel > 0,
               let size = sourceSize(url: url) else { return 1 }
         // RAW 디코더가 딱 필요한 크기로 줄이면 원본을 줄인 것보다 눈에 띄게 부드러워서 여유를 둔다.
         // S9 2200px에서 0.59배가 되어 최대 메모리는 약 절반, 잔 디테일 차이는 약 20%였다.
@@ -267,8 +267,10 @@ public final class ImagePipeline: @unchecked Sendable {
     }
 
     private static func fileIdentity(_ url: URL) -> String {
-        let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
-        return "\(url.path)|\(modified?.timeIntervalSinceReferenceDate ?? 0)"
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let modified = attributes?[.modificationDate] as? Date
+        let size = (attributes?[.size] as? NSNumber)?.uint64Value ?? 0
+        return "\(url.path)|\(size)|\(modified?.timeIntervalSinceReferenceDate ?? 0)"
     }
 
     private func render(url: URL, edits: EditSettings, maxPixel: Int?, scale: Double, allowApproximation: Bool,
@@ -321,7 +323,8 @@ public final class ImagePipeline: @unchecked Sendable {
 
     func composed(url: URL, edits: EditSettings, maxPixel: Int?, scale: Double,
                           allowApproximation: Bool) throws -> Composition {
-        let development = try developed(url: url, edits: edits, scale: scale, allowApproximation: allowApproximation)
+        let development = try developed(url: url, edits: edits, scale: scale,
+                                        allowApproximation: allowApproximation && !edits.noiseReduction.isActive)
         let retouch = try RetouchProcessor.applyResolvingOffsets(to: development.image, strokes: edits.retouchStrokes,
                                                                  context: context, colorSpace: colorSpace)
         var image = retouch.image
@@ -539,6 +542,7 @@ public final class ImagePipeline: @unchecked Sendable {
         if let delta = source.delta {
             image = Self.approximated(image, by: delta)
         }
+        image = try applyNoiseReduction(edits.noiseReduction, to: image, url: url, edits: edits)
         if !Self.isRAW(url) {
             if edits.exposure != 0 {
                 let filter = CIFilter.exposureAdjust()
@@ -588,6 +592,28 @@ public final class ImagePipeline: @unchecked Sendable {
         let offset = CGPoint(x: -image.extent.minX, y: -image.extent.minY)
         return (image.transformed(by: CGAffineTransform(translationX: offset.x, y: offset.y)),
                 source.delta != nil, source.image, offset)
+    }
+
+    private func applyNoiseReduction(_ settings: NoiseReductionSettings, to image: CIImage,
+                                     url: URL, edits: EditSettings) throws -> CIImage {
+        guard settings.mode != .off else { return image }
+        guard settings.amount.isFinite, (0...1).contains(settings.amount) else {
+            throw NoiseReductionError.invalidAmount
+        }
+        guard settings.amount > 0 else { return image }
+        switch settings.mode {
+        case .off:
+            return image
+        case .standard:
+            let filter = CIFilter.noiseReduction()
+            filter.inputImage = image
+            filter.noiseLevel = Float(settings.amount * 0.1)
+            filter.sharpness = 0
+            return (filter.outputImage ?? image).cropped(to: image.extent)
+        case .ai:
+            return try NoiseReductionService.shared.apply(to: image, url: url, edits: edits,
+                                                          context: context, colorSpace: colorSpace)
+        }
     }
 
     /// RAW 현상 결과에 노출·색온도·틴트 차이를 덧씌운 근사. 색온도는 켈빈이 아니라 미레드(1/K) 차이로 옮긴다.

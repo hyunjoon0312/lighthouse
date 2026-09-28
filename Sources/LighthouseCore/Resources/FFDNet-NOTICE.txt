@@ -1,0 +1,18 @@
+FFDNet color denoising model
+
+Upstream project: KAIR by Kai Zhang
+Repository: https://github.com/cszn/KAIR
+Source revision: fc1732f4a4514e42ce15e5b3a1e18c828af47a1e
+Official release weights: https://github.com/cszn/KAIR/releases/download/v1.0/ffdnet_color_clip.pth
+Weights SHA-256: 99a5081e32afdaa25df3ded11aa16447556692e550906caed320db31324af5ce
+License: MIT; see FFDNet-LICENSE.txt.
+
+The bundled FFDNet.mlmodel is a Lighthouse conversion of the official
+ffdnet_color_clip weights. It contains the 12 convolution layers and the ReLU
+activations between them. The caller supplies an FP32 [13,160,160] tensor:
+12 pixel-unshuffled sRGB planes in channel order 4*c + 2*dy + dx, followed by
+one constant sigma plane. The FP32 [12,160,160] output is the directly restored
+RGB tile in the same plane order; it is not a residual.
+
+Conversion toolchain: Python 3.11, torch 2.7.0, coremltools 9.0, numpy 2.4.6.
+Reproduction and parity checks: scripts/convert-denoise-model.py

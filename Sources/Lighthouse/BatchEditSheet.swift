@@ -40,7 +40,7 @@ struct BatchEditSheet: View {
                 Text("선택한 \(snapshot.targets.count)장의 사진에 원하는 보정 항목을 복사합니다.")
                     .font(.caption).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 9) {
-                    Toggle("전체 보정 (빛·색·명료도·생동감·비네팅·곡선·HSL·선명도·입자·RAW 현상)", isOn: $copyGlobal)
+                    Toggle("전체 보정 (빛·색·명료도·생동감·비네팅·곡선·HSL·선명도·노이즈 감소·입자·RAW 현상)", isOn: $copyGlobal)
                     Toggle("LUT", isOn: $copyLUT)
                     if snapshot.edits.lut == nil {
                         Text("LUT를 포함하면 대상 사진의 LUT가 해제됩니다.")

@@ -163,6 +163,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
     public var cropRect: NormalizedCrop?
     public var retouchStrokes: [RetouchStroke]
     public var rawDevelop: RAWDevelopSettings
+    public var noiseReduction: NoiseReductionSettings
     public var vibrance: Double
     public var clarity: Double
     public var vignette: Double
@@ -177,6 +178,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
                 colorRanges: [ColorRangeAdjustment] = [], grain: GrainSettings = GrainSettings(),
                 straightenDegrees: Double = 0, cropRect: NormalizedCrop? = nil,
                 retouchStrokes: [RetouchStroke] = [], rawDevelop: RAWDevelopSettings = RAWDevelopSettings(),
+                noiseReduction: NoiseReductionSettings = NoiseReductionSettings(),
                 vibrance: Double = 0, clarity: Double = 0, vignette: Double = 0, hdrAmount: Double = 0) {
         self.exposure = exposure
         self.contrast = contrast
@@ -197,6 +199,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
         self.cropRect = cropRect
         self.retouchStrokes = retouchStrokes
         self.rawDevelop = rawDevelop
+        self.noiseReduction = noiseReduction
         self.vibrance = vibrance
         self.clarity = clarity
         self.vignette = vignette
@@ -209,7 +212,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case exposure, contrast, saturation, temperatureShift, tintShift, highlights, shadows
         case sharpness, rotationQuarterTurns, cropAspect, localAdjustments, lut
-        case curves, colorRanges, grain, straightenDegrees, cropRect, retouchStrokes, rawDevelop
+        case curves, colorRanges, grain, straightenDegrees, cropRect, retouchStrokes, rawDevelop, noiseReduction
         case vibrance, clarity, vignette, hdrAmount
     }
 
@@ -241,6 +244,8 @@ public struct EditSettings: Codable, Equatable, Sendable {
             ? container.decode([RetouchStroke].self, forKey: .retouchStrokes) : []
         rawDevelop = try container.contains(.rawDevelop)
             ? container.decode(RAWDevelopSettings.self, forKey: .rawDevelop) : RAWDevelopSettings()
+        noiseReduction = try container.contains(.noiseReduction)
+            ? container.decode(NoiseReductionSettings.self, forKey: .noiseReduction) : NoiseReductionSettings()
         vibrance = try container.decodeIfPresent(Double.self, forKey: .vibrance) ?? 0
         clarity = try container.decodeIfPresent(Double.self, forKey: .clarity) ?? 0
         vignette = try container.decodeIfPresent(Double.self, forKey: .vignette) ?? 0
@@ -269,6 +274,9 @@ public struct EditSettings: Codable, Equatable, Sendable {
         try container.encodeIfPresent(cropRect, forKey: .cropRect)
         try container.encode(retouchStrokes, forKey: .retouchStrokes)
         try container.encode(rawDevelop, forKey: .rawDevelop)
+        if noiseReduction != NoiseReductionSettings() {
+            try container.encode(noiseReduction, forKey: .noiseReduction)
+        }
         try container.encode(vibrance, forKey: .vibrance)
         try container.encode(clarity, forKey: .clarity)
         try container.encode(vignette, forKey: .vignette)

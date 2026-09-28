@@ -166,7 +166,7 @@ extension LibraryModel {
             }
             DispatchQueue.main.async {
                 guard token == self.generation else {
-                    guard source == self.renderedSource, token > self.displayedToken,
+                    guard self.canDisplaySupersededRender(source: source, token: token, edits: edits),
                           case .success(let cg)? = current else { return }
                     self.displayedToken = token
                     self.rendered = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
@@ -239,6 +239,16 @@ extension LibraryModel {
         }
         renderDelay = dispatch
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: dispatch)
+    }
+
+    /// 같은 사진의 중간 렌더는 순서대로 보여 주되, AI 설정이나 사진이 바뀐 뒤 끝난 결과는 버린다.
+    func canDisplaySupersededRender(source: String, token: Int, edits: EditSettings) -> Bool {
+        let latestNoiseReduction = isOriginal
+            ? EditSettings.neutral.noiseReduction
+            : selection?.edits.noiseReduction
+        let includesAI = edits.noiseReduction.mode == .ai || latestNoiseReduction?.mode == .ai
+        return source == renderedSource && token > displayedToken &&
+            (!includesAI || latestNoiseReduction == edits.noiseReduction)
     }
 
     /// 나눠 보기의 보정 전 모습이 보여야 하는지.
@@ -355,6 +365,7 @@ extension LibraryModel {
         let photo = visible[index + moveDirection]
         let originalView = isOriginal
         let edits = originalView ? EditSettings.neutral : photo.edits
+        guard edits.noiseReduction.mode != .ai || !edits.noiseReduction.isActive else { return }
         let key = "\(photo.id):\(originalView)"
         guard !prefetching.contains(key), !recentRenders.contains(where: { $0.key == key && $0.edits == edits }) else {
             return
