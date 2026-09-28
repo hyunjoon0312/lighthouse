@@ -41,12 +41,22 @@ struct InspectorView: View {
                 if model.isMissing(photo) { missingOriginal }
                 HistogramView()
                 ratingRow
-                ColorLabelRow(current: photo.colorLabel) { model.setColorLabel($0) }
+                ColorLabelRow(current: model.commonMarkColorLabel) { model.toggleMarkColorLabel($0) }
                 HStack(spacing: 8) {
                     flagButton("선택", icon: "flag.fill", flag: .pick)
                     flagButton("제외", icon: "xmark", flag: .reject)
-                    Button("해제") { model.setFlag(.none) }.accessibilityLabel("선택과 제외 표시 해제").disabled(photo.flag == .none)
+                    Button("해제") { model.setFlag(.none) }
+                        .accessibilityLabel("선택과 제외 표시 해제")
+                        .disabled(!model.canClearMarkFlags)
                 }.buttonStyle(.bordered)
+                if model.markTargetPhotos.count > 1 {
+                    Text("별점·표시·라벨은 선택한 \(model.markTargetPhotos.count)장에 함께 적용됩니다.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                if model.hasMixedMarks {
+                    Text("선택한 사진의 별점·표시·라벨 값이 서로 다릅니다.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 DescriptionFields(photo: photo)
                 if model.selectedPhotoIDs.count >= 2 {
                     Text("슬라이더는 기준 사진에 적용됩니다.")
@@ -497,13 +507,14 @@ struct InspectorView: View {
     }
 
     private var ratingRow: some View {
-        HStack(spacing: 3) {
+        let rating = model.commonMarkRating
+        return HStack(spacing: 3) {
             Text("별점").font(.caption).foregroundStyle(.secondary)
             Spacer()
             ForEach(1...5, id: \.self) { n in
-                Button { model.setRating(photo.rating == n ? 0 : n) } label: {
-                    Image(systemName: n <= photo.rating ? "star.fill" : "star")
-                        .foregroundStyle(n <= photo.rating ? .orange : .gray)
+                Button { model.toggleMarkRating(n) } label: {
+                    Image(systemName: rating.map { n <= $0 } == true ? "star.fill" : "star")
+                        .foregroundStyle(rating.map { n <= $0 } == true ? .orange : .gray)
                 }.buttonStyle(.plain).accessibilityLabel("별점 \(n)점")
             }
         }
@@ -511,7 +522,7 @@ struct InspectorView: View {
 
     private func flagButton(_ title: String, icon: String, flag: PhotoFlag) -> some View {
         Button { model.setFlag(flag) } label: { Label(title, systemImage: icon) }
-            .tint(photo.flag == flag ? .orange : .gray)
+            .tint(model.commonMarkFlag == flag ? .orange : .gray)
             .accessibilityLabel("\(title) 표시")
     }
 

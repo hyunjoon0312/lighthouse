@@ -41,4 +41,68 @@ final class SurveyModeTests: XCTestCase {
         model.isFocusView = false
         XCTAssertTrue(model.surveyImages.isEmpty, "여러 장 보기를 떠나면 그림을 버린다")
     }
+
+    func testSurveyKeepsSiblingSuccessShowsFailureAndRetryRecovers() async throws {
+        let (model, _, urls) = try await TestSupport.startedModel(self, photos: 2)
+        let photos = model.photos
+        let missingBytes = try Data(contentsOf: urls[1])
+        try FileManager.default.removeItem(at: urls[1])
+        model.select(photos[0])
+        model.handleTileClick(photos[1], clickCount: 1, modifiers: .command)
+        model.setMode(.survey)
+
+        try await TestSupport.wait("survey success and error") {
+            model.surveyImages[photos[0].id] != nil && model.surveyErrors[photos[1].id] != nil &&
+                model.surveyLoadingIDs.isEmpty
+        }
+        let successfulSibling = model.surveyImages[photos[0].id]
+        model.requestSurveyImages()
+        XCTAssertEqual(Set(model.surveyErrors.keys), [photos[1].id], "실패를 자동으로 무한 재시도하지 않는다")
+
+        try missingBytes.write(to: urls[1])
+        model.retrySurveyImage(photos[1].id)
+        try await TestSupport.wait("survey retry") {
+            model.surveyImages[photos[1].id] != nil && model.surveyErrors[photos[1].id] == nil &&
+                !model.surveyLoadingIDs.contains(photos[1].id)
+        }
+        XCTAssertTrue(model.surveyImages[photos[0].id] === successfulSibling, "성공한 형제 사진은 그대로 둔다")
+
+        model.setMode(.grid)
+        XCTAssertTrue(model.surveyImages.isEmpty)
+        XCTAssertTrue(model.surveyErrors.isEmpty)
+        XCTAssertTrue(model.surveyLoadingIDs.isEmpty)
+    }
+
+    func testSurveyDiscardsQueuedResultsAfterEditAndLeavingMode() async throws {
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 2)
+        let photos = model.photos
+        model.select(photos[0])
+        model.handleTileClick(photos[1], clickCount: 1, modifiers: .command)
+        model.surveyQueue.suspend()
+        var queueSuspended = true
+        defer { if queueSuspended { model.surveyQueue.resume() } }
+        model.setMode(.survey)
+        XCTAssertEqual(model.surveyLoadingIDs.count, 2)
+        var edits = photos[0].edits
+        edits.exposure = 0.75
+        model.focusPhoto(photos[0])
+        model.updateEdits(edits)
+        model.setMode(.grid)
+        XCTAssertTrue(model.surveyLoadingIDs.isEmpty)
+        XCTAssertTrue(model.surveyImages.isEmpty)
+
+        let drained = expectation(description: "stale survey queue drained")
+        model.surveyQueue.async { drained.fulfill() }
+        model.surveyQueue.resume()
+        queueSuspended = false
+        await fulfillment(of: [drained], timeout: 5)
+        XCTAssertTrue(model.surveyImages.isEmpty, "떠난 뒤의 늦은 결과는 반영하지 않는다")
+        XCTAssertTrue(model.surveyErrors.isEmpty)
+
+        model.setMode(.survey)
+        try await TestSupport.wait("fresh survey generation") {
+            model.surveyImages.count == 2 && model.surveyRenderedEdits[photos[0].id] == edits &&
+                model.surveyLoadingIDs.isEmpty
+        }
+    }
 }

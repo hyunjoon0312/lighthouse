@@ -535,8 +535,10 @@ final class ModelFlowTests: XCTestCase {
             model.importByCopying(from: card, to: root.appendingPathComponent("library-cancel-\(UUID().uuidString)"),
                                   organizeByDate: false)
             model.cancelImport()
-            try await waitFor("cancelled card import") { !model.isImporting && model.operationMessage?.contains("중지해서") == true }
-            check(true, "cancelled card copy reports skipped photos")
+            try await waitFor("cancelled card import") { !model.isImporting }
+            check(model.operationMessage?.contains("중지됨") == true &&
+                  !model.isCancellingImport && model.importCancellation == nil,
+                  "cancelled card copy reports cancellation and clears busy state")
         }
 
         // 6. 표시 후 다음 사진과 클릭 위치 확대.

@@ -4,6 +4,12 @@ import LighthouseCore
 /// 촬영 정보 조건과 스마트 폴더.
 @MainActor
 extension LibraryModel {
+    var normalizedSearch: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var hasTemporaryFilters: Bool {
+        !normalizedSearch.isEmpty || minimumRating > 0 || !criteria.isEmpty
+    }
+
     /// 스마트 폴더를 보고 있으면 그 조건.
     var smartFolderCriteria: PhotoCriteria? {
         guard case .smart(let id) = filter else { return nil }
@@ -23,9 +29,16 @@ extension LibraryModel {
     /// 목록 위에 걸린 검색어·별점·조건을 합친 조건.
     var combinedCriteria: PhotoCriteria {
         var combined = criteria
-        combined.text = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        combined.text = normalizedSearch
         combined.minimumRating = max(criteria.minimumRating, minimumRating)
         return combined
+    }
+
+    func clearTemporaryFilters() {
+        search = ""
+        minimumRating = 0
+        criteria = PhotoCriteria()
+        ensureSelectionVisible()
     }
 
     /// 지금 걸린 검색어·별점·조건을 스마트 폴더로 저장하고 연다. 걸었던 조건은 폴더로 옮겨 가므로 비운다.

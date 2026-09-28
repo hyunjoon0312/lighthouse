@@ -6,7 +6,7 @@ import LighthouseCore
 @MainActor
 extension LibraryModel {
     func presentImport() {
-        guard catalogLoaded, loadError == nil, !isImporting else { return }
+        guard canBeginLocalImport() else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
@@ -15,20 +15,29 @@ extension LibraryModel {
         if panel.runModal() == .OK { importURLs(panel.urls) }
     }
 
-    nonisolated static func supportedFiles(in urls: [URL]) -> [URL] {
+    nonisolated static func supportedFiles(in urls: [URL], cancellation: CancellationFlag? = nil) -> [URL] {
         let manager = FileManager.default
         var paths: [URL] = []
+        var seen = Set<String>()
         for input in urls {
+            if cancellation?.isCancelled == true { break }
             let canonical = input.standardizedFileURL.resolvingSymlinksInPath()
             var isDirectory: ObjCBool = false
             guard manager.fileExists(atPath: canonical.path, isDirectory: &isDirectory) else { continue }
             if isDirectory.boolValue {
                 if let items = manager.enumerator(at: canonical, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
-                    for case let url as URL in items where ImagePipeline.supportedExtensions.contains(url.pathExtension.lowercased()) {
-                        paths.append(url.standardizedFileURL.resolvingSymlinksInPath())
+                    for case let url as URL in items {
+                        if cancellation?.isCancelled == true { return paths }
+                        let item = url.standardizedFileURL.resolvingSymlinksInPath()
+                        guard ImagePipeline.supportedExtensions.contains(item.pathExtension.lowercased()),
+                              (try? item.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+                              seen.insert(item.path).inserted else { continue }
+                        paths.append(item)
                     }
                 }
-            } else if ImagePipeline.supportedExtensions.contains(canonical.pathExtension.lowercased()) {
+            } else if ImagePipeline.supportedExtensions.contains(canonical.pathExtension.lowercased()),
+                      (try? canonical.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+                      seen.insert(canonical.path).inserted {
                 paths.append(canonical)
             }
         }
@@ -36,19 +45,27 @@ extension LibraryModel {
     }
 
     func importURLs(_ urls: [URL], summaryPrefix: String? = nil) {
-        guard catalogLoaded, loadError == nil, !isImporting else { return }
-        isImporting = true
-        operationProgress = 0
-        operationMessage = "파일을 찾는 중…"
-        let existing = Set(photos.map(\.path))
+        guard canBeginLocalImport() else { return }
+        let cancellation = beginImport(message: "파일을 찾는 중…")
+        let existing = Set(photos.map { $0.url.standardizedFileURL.resolvingSymlinksInPath().path })
+        let preset = importPreset
         batchQueue.async { [pipeline] in
-            let paths = Self.supportedFiles(in: urls)
+            let paths = Self.supportedFiles(in: urls, cancellation: cancellation)
             var seen = existing
             let candidates = paths.filter { seen.insert($0.path).inserted }
             var added: [PhotoAsset] = []
             var failed: [String] = []
+            var skipped = 0
             for (index, url) in candidates.enumerated() {
-                do { added.append(PhotoAsset(url: url, metadata: try pipeline.metadata(for: url))) }
+                if cancellation.isCancelled {
+                    skipped = candidates.count - index
+                    break
+                }
+                do {
+                    var photo = PhotoAsset(url: url, metadata: try pipeline.metadata(for: url))
+                    if let preset { photo.edits = preset.applied(to: photo.edits) }
+                    added.append(photo)
+                }
                 catch {
                     AppLog.files.error("import failed: \(url.lastPathComponent, privacy: .private): \(error.localizedDescription, privacy: .private)")
                     failed.append("\(url.lastPathComponent): \(error.localizedDescription)")
@@ -57,31 +74,62 @@ extension LibraryModel {
                 DispatchQueue.main.async { self.operationProgress = progress; self.operationMessage = "가져오는 중 \(index + 1)/\(candidates.count)" }
             }
             DispatchQueue.main.async {
-                if let preset = self.importPreset {
-                    for index in added.indices { added[index].edits = preset.applied(to: added[index].edits) }
-                }
-                // 같은 시각끼리는 원래 순서를 지켜 가상 사본이 원래 항목 바로 뒤에 남게 한다.
-                self.photos = (self.photos + added).enumerated().sorted { first, second in
-                    let a = first.element.metadata.capturedAt ?? first.element.importedAt
-                    let b = second.element.metadata.capturedAt ?? second.element.importedAt
-                    return a != b ? a < b : first.offset < second.offset
-                }.map(\.element)
-                if self.selectedID == nil, let first = added.first {
-                    self.photoSelection.select(first.id, in: self.visiblePhotos.map(\.id))
-                }
-                self.isImporting = false
                 let onExternalVolume = added.contains { $0.path.hasPrefix("/Volumes/") }
-                self.operationMessage = (summaryPrefix.map { $0 + " · " } ?? "") +
-                    (self.importPreset.map { "프리셋 ‘\($0.name)’ 적용 · " } ?? "") +
+                let summary = (summaryPrefix.map { $0 + " · " } ?? "") +
+                    (preset.map { "프리셋 ‘\($0.name)’ 적용 · " } ?? "") +
                     "\(added.count)장 가져옴 · 중복 \(paths.count - candidates.count)장 · 실패 \(failed.count)장" +
+                    (cancellation.isCancelled ? " · 중지됨" : "") +
+                    (skipped > 0 ? " · \(skipped)장 건너뜀" : "") +
                     (onExternalVolume ? " · 외장 볼륨의 사진은 연결을 해제하면 열 수 없습니다. 카드는 ‘카드에서 복사해 가져오기’를 쓰세요." : "") +
                     (failed.isEmpty ? "" : "\n" + failed.prefix(5).joined(separator: "\n"))
-                if !added.isEmpty { self.scheduleSave(); self.requestRender() }
+                self.finishImport(added: added, message: paths.isEmpty && !cancellation.isCancelled
+                    ? "선택한 위치에 가져올 수 있는 사진이 없습니다." : summary)
             }
         }
     }
 
     var canCancelImport: Bool { importCancellation != nil }
+
+    private func canBeginLocalImport() -> Bool {
+        guard catalogLoaded, loadError == nil else { return false }
+        guard !isImporting, !isExporting else {
+            operationMessage = isImporting ? "가져오기가 진행 중입니다." : "내보내기가 끝난 뒤 가져오세요."
+            return false
+        }
+        return true
+    }
+
+    private func beginImport(message: String) -> CancellationFlag {
+        let cancellation = CancellationFlag()
+        importCancellation = cancellation
+        isImporting = true
+        isCancellingImport = false
+        operationProgress = 0
+        operationMessage = message
+        return cancellation
+    }
+
+    private func finishImport(added: [PhotoAsset], message: String) {
+        if !added.isEmpty {
+            photos = (photos + added).enumerated().sorted { first, second in
+                let a = first.element.metadata.capturedAt ?? first.element.importedAt
+                let b = second.element.metadata.capturedAt ?? second.element.importedAt
+                return a != b ? a < b : first.offset < second.offset
+            }.map(\.element)
+            if selectedID == nil, let first = added.first {
+                photoSelection.select(first.id, in: visiblePhotos.map(\.id))
+            }
+            scheduleSave()
+            requestRender()
+        }
+        operationMessage = message
+        isImporting = false
+        isCancellingImport = false
+        importCancellation = nil
+        let waiters = importCompletionWaiters
+        importCompletionWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
 
     var importPreset: EditPreset? { importPresetID.flatMap { id in presets.first { $0.id == id } } }
 
@@ -128,17 +176,15 @@ extension LibraryModel {
 
     /// 카드의 사진을 `root`로 복사한 뒤 복사본을 가져온다. 카드의 원본은 읽기만 한다.
     func importByCopying(from source: URL, to root: URL, organizeByDate: Bool) {
-        guard catalogLoaded, loadError == nil, !isImporting else { return }
-        isImporting = true
-        isCancellingImport = false
-        operationProgress = 0
-        operationMessage = "카드에서 사진을 찾는 중…"
-        let cancellation = CancellationFlag()
-        importCancellation = cancellation
+        guard canBeginLocalImport() else { return }
+        let cancellation = beginImport(message: "카드에서 사진을 찾는 중…")
+        let existing = Set(photos.map { $0.url.standardizedFileURL.resolvingSymlinksInPath().path })
+        let preset = importPreset
         batchQueue.async { [pipeline] in
-            let files = Self.supportedFiles(in: [source])
-            var destinations: [URL] = []
-            var copied = 0, present = 0, skipped = 0
+            let files = Self.supportedFiles(in: [source], cancellation: cancellation)
+            var seen = existing
+            var added: [PhotoAsset] = []
+            var copied = 0, present = 0, duplicates = 0, skipped = 0
             var failures: [String] = []
             for (index, file) in files.enumerated() {
                 if cancellation.isCancelled {
@@ -150,8 +196,15 @@ extension LibraryModel {
                 let folder = PhotoCopier.folder(for: captured, in: root, organizeByDate: organizeByDate)
                 do {
                     let result = try PhotoCopier.copy(file, into: folder)
-                    destinations.append(result.url)
                     if case .copied = result { copied += 1 } else { present += 1 }
+                    let destination = result.url.standardizedFileURL.resolvingSymlinksInPath()
+                    if seen.insert(destination.path).inserted {
+                        var photo = PhotoAsset(url: destination, metadata: try pipeline.metadata(for: destination))
+                        if let preset { photo.edits = preset.applied(to: photo.edits) }
+                        added.append(photo)
+                    } else {
+                        duplicates += 1
+                    }
                 } catch {
                     AppLog.files.error("card copy failed: \(error.localizedDescription, privacy: .private)")
                     failures.append(error.localizedDescription)
@@ -163,17 +216,14 @@ extension LibraryModel {
                 }
             }
             DispatchQueue.main.async {
-                self.isImporting = false
-                self.isCancellingImport = false
-                self.importCancellation = nil
                 let summary = "복사 \(copied)장 · 이미 있음 \(present)장" +
+                    (duplicates > 0 ? " · 카탈로그 중복 \(duplicates)장" : "") +
                     (skipped > 0 ? " · 중지해서 \(skipped)장 건너뜀" : "") +
+                    (cancellation.isCancelled ? " · 중지됨" : "") +
                     (failures.isEmpty ? "" : " · 복사 실패 \(failures.count)장\n" + failures.prefix(5).joined(separator: "\n"))
-                guard !destinations.isEmpty else {
-                    self.operationMessage = files.isEmpty ? "선택한 위치에 가져올 수 있는 사진이 없습니다." : summary
-                    return
-                }
-                self.importURLs(destinations, summaryPrefix: summary)
+                self.finishImport(added: added, message: files.isEmpty && !cancellation.isCancelled
+                    ? "선택한 위치에 가져올 수 있는 사진이 없습니다." : summary +
+                        (preset.map { " · 프리셋 ‘\($0.name)’ 적용" } ?? "") + " · \(added.count)장 가져옴")
             }
         }
     }
@@ -183,5 +233,14 @@ extension LibraryModel {
         guard isImporting, let importCancellation else { return }
         importCancellation.cancel()
         isCancellingImport = true
+    }
+
+    func cancelImportAndWait() async {
+        guard isImporting else { return }
+        importCancellation?.cancel()
+        isCancellingImport = true
+        await withCheckedContinuation { continuation in
+            importCompletionWaiters.append(continuation)
+        }
     }
 }

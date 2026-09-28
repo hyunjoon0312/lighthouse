@@ -11,35 +11,97 @@ extension LibraryModel {
     /// 여러 장 보기에 놓는 사진. 선택한 사진을 목록 순서대로 최대 12장.
     var surveyPhotos: [PhotoAsset] { Array(selectedPhotos.prefix(Self.surveyLimit)) }
 
-    /// 보정이 바뀌었거나 아직 그리지 않은 사진만 차례로 그린다. 빠진 사진의 그림은 버린다.
+    /// 보정·경로·선택 세대가 현재 상태와 일치하는 사진만 캐시한다.
     func requestSurveyImages() {
         guard mode == .survey else {
-            if !surveyImages.isEmpty { surveyImages = [:]; surveyRenderedEdits = [:] }
+            invalidateSurveyImages(clearAll: true)
             return
         }
         let photos = surveyPhotos
-        let ids = Set(photos.map(\.id))
-        if surveyImages.keys.contains(where: { !ids.contains($0) }) {
-            surveyImages = surveyImages.filter { ids.contains($0.key) }
-            surveyRenderedEdits = surveyRenderedEdits.filter { ids.contains($0.key) }
+        let state = photos.map { SurveyRequestKey(photoID: $0.id, path: $0.path, edits: $0.edits) }
+        if state != surveyState {
+            surveyGeneration += 1
+            surveyState = state
+            surveyRequests.removeAll()
+            surveyLoadingIDs.removeAll()
         }
-        let stale = photos.filter { surveyRenderedEdits[$0.id] != $0.edits }
-        guard !stale.isEmpty else { return }
-        surveyGeneration += 1
+        let ids = Set(state.map(\.photoID))
+        surveyImages = surveyImages.filter { ids.contains($0.key) }
+        surveyRenderedEdits = surveyRenderedEdits.filter { ids.contains($0.key) }
+        surveyRenderedPaths = surveyRenderedPaths.filter { ids.contains($0.key) }
+        surveyErrors = surveyErrors.filter { ids.contains($0.key) }
+        surveyFailedRequests = surveyFailedRequests.filter { ids.contains($0.key) }
+
+        var pending: [(PhotoAsset, SurveyRequestKey)] = []
+        for photo in photos {
+            let key = SurveyRequestKey(photoID: photo.id, path: photo.path, edits: photo.edits)
+            if surveyRenderedEdits[photo.id] == photo.edits,
+               surveyRenderedPaths[photo.id] == photo.path,
+               surveyImages[photo.id] != nil { continue }
+            if surveyRequests[photo.id] == key || surveyFailedRequests[photo.id] == key { continue }
+            surveyImages.removeValue(forKey: photo.id)
+            surveyRenderedEdits.removeValue(forKey: photo.id)
+            surveyRenderedPaths.removeValue(forKey: photo.id)
+            surveyErrors.removeValue(forKey: photo.id)
+            surveyRequests[photo.id] = key
+            surveyLoadingIDs.insert(photo.id)
+            pending.append((photo, key))
+        }
+        guard !pending.isEmpty else { return }
         let generation = surveyGeneration
         let size = Self.surveyPixels
-        surveyQueue.async { [pipeline] in
-            for photo in stale {
-                guard DispatchQueue.main.sync(execute: { generation == self.surveyGeneration }) else { return }
-                let image = try? pipeline.renderPreview(url: photo.url, edits: photo.edits, maxPixel: size).image
+        surveyQueue.async { [pipeline, pending] in
+            for (photo, key) in pending {
+                guard DispatchQueue.main.sync(execute: {
+                    generation == self.surveyGeneration && self.surveyRequests[photo.id] == key
+                }) else { return }
+                let result = Result { try pipeline.renderPreview(url: photo.url, edits: photo.edits, maxPixel: size).image }
                 DispatchQueue.main.async {
-                    guard self.mode == .survey, let latest = self.photo(withID: photo.id), latest.edits == photo.edits,
-                          self.selectedPhotoIDs.contains(photo.id) else { return }
-                    self.surveyRenderedEdits[photo.id] = photo.edits
-                    if let image { self.surveyImages[photo.id] = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height)) }
+                    guard generation == self.surveyGeneration,
+                          self.mode == .survey,
+                          self.surveyRequests[photo.id] == key,
+                          self.surveyPhotos.contains(where: { $0.id == photo.id }),
+                          let latest = self.photo(withID: photo.id),
+                          latest.path == key.path, latest.edits == key.edits else { return }
+                    self.surveyRequests.removeValue(forKey: photo.id)
+                    self.surveyLoadingIDs.remove(photo.id)
+                    switch result {
+                    case .success(let image):
+                        self.surveyImages[photo.id] = NSImage(cgImage: image,
+                                                             size: NSSize(width: image.width, height: image.height))
+                        self.surveyRenderedEdits[photo.id] = key.edits
+                        self.surveyRenderedPaths[photo.id] = key.path
+                        self.surveyErrors.removeValue(forKey: photo.id)
+                        self.surveyFailedRequests.removeValue(forKey: photo.id)
+                    case .failure(let error):
+                        self.surveyErrors[photo.id] = error.localizedDescription
+                        self.surveyFailedRequests[photo.id] = key
+                    }
                 }
             }
         }
+    }
+
+    func retrySurveyImage(_ id: UUID) {
+        guard mode == .survey, surveyPhotos.contains(where: { $0.id == id }) else { return }
+        surveyErrors.removeValue(forKey: id)
+        surveyFailedRequests.removeValue(forKey: id)
+        surveyRequests.removeValue(forKey: id)
+        surveyLoadingIDs.remove(id)
+        requestSurveyImages()
+    }
+
+    func invalidateSurveyImages(clearAll: Bool = false) {
+        surveyGeneration += 1
+        surveyRequests.removeAll()
+        surveyLoadingIDs.removeAll()
+        surveyState = []
+        guard clearAll else { return }
+        surveyImages = [:]
+        surveyRenderedEdits = [:]
+        surveyRenderedPaths = [:]
+        surveyErrors = [:]
+        surveyFailedRequests = [:]
     }
 
     /// 여러 장 보기의 ←/→. 비교 중인 사진 안에서만 기준 사진을 옮긴다.

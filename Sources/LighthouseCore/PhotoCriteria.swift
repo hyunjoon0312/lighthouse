@@ -82,7 +82,10 @@ public struct PhotoCriteria: Codable, Equatable, Sendable {
     }
 
     private static func number(_ value: Double) -> String {
-        value.rounded() == value ? String(Int(value)) : String(format: "%.1f", value)
+        guard value.isFinite else { return "—" }
+        if value == 0 { return "0" }
+        if abs(value) >= 1e15 { return String(format: "%.1e", value) }
+        return value.rounded() == value ? String(format: "%.0f", value) : String(format: "%.1f", value)
     }
 
     private static func rangeText(_ lower: String?, _ upper: String?) -> String? {

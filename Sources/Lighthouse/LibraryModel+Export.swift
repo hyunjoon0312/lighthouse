@@ -14,6 +14,7 @@ extension LibraryModel {
     }
 
     func export(scope: ExportScope, options: ExportOptions, directory: URL, prepared: PreparedJPEGExport? = nil) {
+        guard !isImporting else { operationMessage = "가져오기가 끝난 뒤 내보내세요."; return }
         guard !isExporting, catalogLoaded, loadError == nil else { return }
         let targets = exportTargets(for: scope)
         guard !targets.isEmpty else { return }
@@ -66,6 +67,7 @@ extension LibraryModel {
     /// 바뀐 사진을 마지막 내보내기와 같은 설정·폴더·이름으로 다시 내보낸다. `trashPrevious`이면 이전 파일이
     /// 카탈로그 원본이 아니고 앱이 쓴 그대로일 때만 휴지통으로 옮긴다. 아니면 보존하고 새 파일에 번호를 붙인다.
     func reexport(_ targets: [PhotoAsset], trashPrevious: Bool) {
+        guard !isImporting else { operationMessage = "가져오기가 끝난 뒤 다시 내보내세요."; return }
         guard !isExporting, catalogLoaded, loadError == nil else { return }
         let work = targets.compactMap { photo in photo.lastExport.map { (photo, $0) } }
         guard !work.isEmpty else { return }

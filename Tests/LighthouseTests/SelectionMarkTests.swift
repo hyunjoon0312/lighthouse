@@ -75,4 +75,64 @@ final class SelectionMarkTests: XCTestCase {
         model.extendSelection(-5)
         XCTAssertEqual(model.selectedID, ids[0], "목록 끝에서 멈춘다")
     }
+
+    func testAggregateMarksToggleMixedAndUndoAsOneStep() async throws {
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 3)
+        let photos = model.visiblePhotos
+        model.select(photos[0])
+        model.setRating(2)
+        model.handleTileClick(photos[1], clickCount: 1, modifiers: .command)
+
+        XCTAssertEqual(model.markTargetPhotos.map(\.id), [photos[0].id, photos[1].id])
+        XCTAssertNil(model.commonMarkRating)
+        XCTAssertTrue(model.hasMixedMarks)
+        model.toggleMarkRating(2)
+        XCTAssertEqual(model.markTargetPhotos.map(\.rating), [2, 2])
+        XCTAssertEqual(model.commonMarkRating, 2)
+        model.toggleMarkRating(2)
+        XCTAssertEqual(model.markTargetPhotos.map(\.rating), [0, 0])
+        model.undo()
+        XCTAssertEqual(model.markTargetPhotos.map(\.rating), [2, 2], "한 번에 실행 취소한다")
+
+        model.setFlag(.pick)
+        XCTAssertTrue(model.canClearMarkFlags)
+        model.toggleMarkColorLabel(.red)
+        XCTAssertEqual(model.markTargetPhotos.map(\.colorLabel), [.red, .red])
+        model.toggleMarkColorLabel(.red)
+        XCTAssertEqual(model.markTargetPhotos.map(\.colorLabel), [nil, nil])
+
+        model.setMode(.edit)
+        XCTAssertEqual(model.markTargetPhotos.count, 1, "한 장 보기에서는 활성 사진만 대상이다")
+    }
+
+    func testEditedFilterReconcilesSelectionForEditAndGridUndo() async throws {
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 3)
+        let photos = model.photos
+        for photo in photos.prefix(2) {
+            model.focusPhoto(photo)
+            var edits = photo.edits
+            edits.exposure = 0.5
+            model.updateEdits(edits)
+        }
+        model.filter = .edited
+        model.setMode(.edit)
+        model.focusPhoto(photos[1])
+        model.undo()
+        XCTAssertEqual(model.selectedID, photos[0].id, "사진 보기에서는 남은 첫 사진을 선택한다")
+
+        model.undo()
+        XCTAssertTrue(model.visiblePhotos.isEmpty)
+        XCTAssertNil(model.selectedID, "남은 사진이 없으면 빈 편집 상태가 된다")
+
+        model.filter = .all
+        model.focusPhoto(photos[0])
+        var edits = photos[0].edits
+        edits.exposure = 0.25
+        model.updateEdits(edits)
+        model.filter = .edited
+        model.setMode(.grid)
+        model.undo()
+        XCTAssertTrue(model.visiblePhotos.isEmpty)
+        XCTAssertNil(model.selectedID, "그리드는 첫 사진을 강제로 선택하지 않는다")
+    }
 }

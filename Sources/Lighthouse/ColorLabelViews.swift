@@ -27,14 +27,14 @@ extension PhotoColorLabel {
 /// 오른쪽 패널의 색상 라벨 고르기. 붙어 있는 라벨을 다시 누르면 뗀다.
 struct ColorLabelRow: View {
     let current: PhotoColorLabel?
-    let choose: @MainActor (PhotoColorLabel?) -> Void
+    let choose: @MainActor (PhotoColorLabel) -> Void
 
     var body: some View {
         HStack(spacing: 7) {
             Text("라벨").font(.caption).foregroundStyle(.secondary)
             Spacer()
             ForEach(PhotoColorLabel.allCases, id: \.self) { label in
-                Button { choose(current == label ? nil : label) } label: {
+                Button { choose(label) } label: {
                     Circle().fill(label.color).frame(width: 16, height: 16)
                         .overlay(Circle().stroke(.white, lineWidth: current == label ? 2 : 0))
                         .opacity(current == nil || current == label ? 1 : 0.45)

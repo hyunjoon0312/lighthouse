@@ -57,7 +57,7 @@ struct ExportSheet: View {
         .onChange(of: model.isExporting) { _, exporting in if !exporting { changed = model.changedSinceExport } }
         .onReceive(model.driveUpload.$isBusy) { driveBusy = $0 }
         .onDisappear { previewModel.cancel() }
-        .onChange(of: scope) { _, _ in requestPreview() }
+        .onChange(of: representative) { _, _ in requestPreview() }
         .onChange(of: destination) { _, _ in requestPreview() }
         .onChange(of: driveContent) { _, _ in requestPreview() }
         .onChange(of: renderOptions) { _, _ in requestPreview() }
@@ -131,7 +131,7 @@ struct ExportSheet: View {
                 Text(directory?.path ?? "저장 폴더를 선택하세요").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
                 Button("폴더 선택…") { chooseDirectory() }
-                    .disabled(model.isExporting).accessibilityLabel("내보내기 저장 폴더 선택")
+                    .disabled(model.isImporting || model.isExporting).accessibilityLabel("내보내기 저장 폴더 선택")
             }
             if model.isExporting {
                 HStack {
@@ -156,12 +156,11 @@ struct ExportSheet: View {
                 Button(model.exportReport == nil ? "취소" : "닫기") { dismiss() }
                     .disabled(model.isExporting)
                 Button("내보내기") {
-                    guard let directory, let prepared = previewModel.preview else { return }
-                    model.export(scope: scope, options: options, directory: directory, prepared: prepared)
+                    guard let directory else { return }
+                    model.export(scope: scope, options: options, directory: directory, prepared: previewModel.preview)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(directory == nil || model.isExporting || targets.isEmpty ||
-                          previewModel.isPreparing || previewModel.error != nil || previewModel.preview == nil)
+                .disabled(!canStartLocalExport)
             }
         }
     }
@@ -177,7 +176,7 @@ struct ExportSheet: View {
                     .font(.caption)
                     .help("끄면 이전 파일을 두고 이름 뒤에 번호를 붙입니다. 켜도 그 뒤 편집한 파일은 옮기지 않습니다.")
                 Button("\(changed.count)장 다시 내보내기") { model.reexport(changed, trashPrevious: trashPrevious) }
-                    .disabled(model.isExporting)
+                    .disabled(model.isImporting || model.isExporting)
             }
             .padding(10)
             .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
@@ -191,7 +190,7 @@ struct ExportSheet: View {
             }
             .pickerStyle(.segmented)
             .disabled(model.isExporting || driveBusy)
-            if destination == .mac { reexportBox.disabled(model.isExporting) }
+            if destination == .mac { reexportBox.disabled(model.isImporting || model.isExporting) }
             Picker("대상", selection: $scope) {
                 Text("현재 사진").tag(ExportScope.current)
                 Text("선택한 사진 (\(model.selectedPhotos.count)장)").tag(ExportScope.selected)
@@ -346,6 +345,13 @@ struct ExportSheet: View {
                     Image(systemName: "exclamationmark.triangle")
                     Text("미리보기를 만들 수 없습니다")
                     Text(error).font(.caption).multilineTextAlignment(.center)
+                    if targets.count > 1 {
+                        Text("대표 사진의 미리보기를 만들 수 없습니다. 내보내면 각 사진을 처리하고 실패한 항목을 결과에 표시합니다.")
+                            .font(.caption).multilineTextAlignment(.center)
+                    }
+                    Button("미리보기 다시 시도") { requestPreview(debounce: false) }
+                        .disabled(model.isExporting || driveBusy)
+                        .accessibilityLabel("내보내기 미리보기 다시 시도")
                 }.foregroundStyle(.secondary).padding()
             } else if previewModel.isPreparing {
                 ProgressView("실제 파일로 저장해 확인 중…")
@@ -380,6 +386,12 @@ struct ExportSheet: View {
 
     private func requestPreview(debounce: Bool = true) {
         previewModel.request(photo: representative, options: options, debounce: debounce)
+    }
+
+    private var canStartLocalExport: Bool {
+        directory != nil && !model.isImporting && !model.isExporting && !targets.isEmpty &&
+            !previewModel.isPreparing &&
+            (previewModel.preview != nil || (targets.count > 1 && previewModel.error != nil))
     }
 
     private func savePreset() {

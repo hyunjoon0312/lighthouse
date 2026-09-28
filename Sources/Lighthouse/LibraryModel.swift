@@ -43,6 +43,12 @@ struct MaskRequestKey: Equatable {
     let cropAspect: Double?
 }
 
+struct SurveyRequestKey: Equatable {
+    let photoID: UUID
+    let path: String
+    let edits: EditSettings
+}
+
 struct BurstBadge: Equatable {
     var shot: Int
     var count: Int
@@ -240,7 +246,13 @@ final class LibraryModel: ObservableObject {
     @Published var isPickingWhiteBalance = false
     /// 여러 장 보기에서 사진마다 그린 모습과 그때의 보정.
     @Published var surveyImages: [UUID: NSImage] = [:]
+    @Published var surveyErrors: [UUID: String] = [:]
+    @Published var surveyLoadingIDs = Set<UUID>()
     var surveyRenderedEdits: [UUID: EditSettings] = [:]
+    var surveyRenderedPaths: [UUID: String] = [:]
+    var surveyRequests: [UUID: SurveyRequestKey] = [:]
+    var surveyFailedRequests: [UUID: SurveyRequestKey] = [:]
+    var surveyState: [SurveyRequestKey] = []
     var surveyGeneration = 0
     /// 사진만 크게 보는 보기(F). 패널을 숨기며, 그리드로 돌아가면 끝난다.
     @Published var isFocusView = false
@@ -362,6 +374,7 @@ final class LibraryModel: ObservableObject {
     /// Finder에서 파일을 선택해 보여 준다. 테스트는 부른 파일만 기록하도록 바꾼다.
     var revealInFinder: ([URL]) -> Void = { NSWorkspace.shared.activateFileViewerSelecting($0) }
     var importCancellation: CancellationFlag?
+    var importCompletionWaiters: [CheckedContinuation<Void, Never>] = []
     private(set) var visibleCache: [PhotoAsset]?
     private(set) var indexCache: [UUID: Int]?
     private(set) var countsCache: LibraryCounts?
@@ -661,7 +674,10 @@ final class LibraryModel: ObservableObject {
     /// Finder에서 끌어 놓은 파일·폴더를 가져온다. 지금 가져올 수 없으면 false.
     func importDropped(_ urls: [URL]) -> Bool {
         let files = urls.filter(\.isFileURL)
-        guard catalogLoaded, loadError == nil, !isImporting, !hasModalPresentation, !files.isEmpty else { return false }
+        guard catalogLoaded, loadError == nil, !isImporting, !isExporting, !hasModalPresentation, !files.isEmpty else {
+            if isImporting || isExporting { operationMessage = "현재 가져오기·내보내기 작업이 끝난 뒤 다시 시도하세요." }
+            return false
+        }
         importURLs(files)
         return true
     }
@@ -685,7 +701,7 @@ final class LibraryModel: ObservableObject {
         if case .collection(let id) = filter {
             members = photoFolders.first(where: { $0.id == id })?.photoIDs ?? []
         }
-        let search = search, filter = filter, minimumRating = minimumRating, criteria = criteria
+        let search = normalizedSearch, filter = filter, minimumRating = minimumRating, criteria = criteria
         let positions = filter == .bursts ? burstIndex.positions : [:]
         let missing = filter == .missing ? missingPaths : []
         let smartCriteria = smartFolderCriteria
@@ -846,7 +862,7 @@ final class LibraryModel: ObservableObject {
         selectionDidChange(previousActive: previous)
     }
 
-    func selectionDidChange(previousActive: UUID?, clearFocus: Bool = true) {
+    func selectionDidChange(previousActive: UUID?, clearFocus: Bool = true, requestRender shouldRender: Bool = true) {
         if clearFocus { NSApp.keyWindow?.makeFirstResponder(nil) }
         cancelDraft()
         guard previousActive != selectedID else { objectWillChange.send(); return }
@@ -858,7 +874,7 @@ final class LibraryModel: ObservableObject {
         isLocalEditing = false
         lutError = nil
         reconcileLocalSelection()
-        requestRender()
+        if shouldRender { requestRender() }
     }
 
     /// 보이는 사진만 선택에 남긴다. 사진·비교 보기에서 선택이 모두 빠지면 첫 사진을 골라 빈 화면이 되지 않게 한다.
@@ -1030,12 +1046,8 @@ final class LibraryModel: ObservableObject {
         cancelAutoMask()
         photos = updated
         let previous = selectedID
-        photoSelection.reconcile(with: visiblePhotos.map(\.id))
-        if previous != selectedID {
-            selectionGeneration += 1
-            isLocalEditing = false
-            lutError = nil
-        }
+        photoSelection.reconcile(with: visiblePhotos.map(\.id), selectFirstIfEmpty: showsSingleImage)
+        selectionDidChange(previousActive: previous, clearFocus: false, requestRender: false)
         reconcileLocalSelection()
         scheduleSave(debounce: debounce)
         requestRender(debounce: debounce)

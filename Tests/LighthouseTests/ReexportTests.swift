@@ -160,7 +160,7 @@ final class ReexportTests: XCTestCase {
         XCTAssertTrue(model.exportReport?.contains("카탈로그 원본 1장 보존") == true, model.exportReport ?? "")
     }
 
-    func testImportInProgressConservativelyPreservesPreviousExport() async throws {
+    func testReexportRejectsWhileImportingAndRetriesAfterImportFinishes() async throws {
         let (model, root, _) = try await TestSupport.startedModel(self, photos: 1)
         let exports = root.appendingPathComponent("blog", isDirectory: true)
         try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
@@ -168,18 +168,30 @@ final class ReexportTests: XCTestCase {
         try await TestSupport.wait("export") { !model.isExporting }
         let source = try XCTUnwrap(model.photos.first)
         let previous = try XCTUnwrap(source.lastExport)
+        let previousBytes = try Data(contentsOf: URL(fileURLWithPath: previous.path))
+        let previousList = model.lastExportedFiles
         model.focusPhoto(source)
         var edits = source.edits
         edits.exposure = 0.2
         model.updateEdits(edits)
         model.isImporting = true
         model.reexport([try XCTUnwrap(model.photo(withID: source.id))], trashPrevious: true)
-        try await TestSupport.wait("re-export while importing") { !model.isExporting }
-        model.isImporting = false
 
+        XCTAssertFalse(model.isExporting)
+        XCTAssertTrue(model.operationMessage?.contains("가져오기가 끝난 뒤 다시 내보내세요") == true)
+        XCTAssertEqual(model.photo(withID: source.id)?.lastExport, previous)
         XCTAssertTrue(FileManager.default.fileExists(atPath: previous.path))
-        XCTAssertNotEqual(model.photo(withID: source.id)?.lastExport?.path, previous.path)
-        XCTAssertTrue(model.exportReport?.contains("카탈로그 원본 1장 보존") == true, model.exportReport ?? "")
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: previous.path)), previousBytes)
+        XCTAssertEqual(model.lastExportedFiles, previousList)
+
+        model.isImporting = false
+        model.reexport([try XCTUnwrap(model.photo(withID: source.id))], trashPrevious: false)
+        try await TestSupport.wait("re-export after import") { !model.isExporting }
+        let replacement = try XCTUnwrap(model.photo(withID: source.id)?.lastExport)
+        XCTAssertNotEqual(replacement.path, previous.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: previous.path), "거부된 시도의 이전 파일은 보존한다")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: replacement.path))
+        XCTAssertEqual(model.lastExportedFiles, [URL(fileURLWithPath: replacement.path)])
     }
 
     func testCandidateWriteFailureLeavesPreviousFileAndNeverCallsTrash() async throws {

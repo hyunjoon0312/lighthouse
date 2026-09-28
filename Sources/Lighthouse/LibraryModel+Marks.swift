@@ -11,6 +11,25 @@ extension LibraryModel {
         return selectedID.map { [$0] } ?? []
     }
 
+    var markTargetPhotos: [PhotoAsset] { markTargetIDs.compactMap(photo(withID:)) }
+
+    var commonMarkRating: Int? { commonMarkValue(\.rating) }
+    var commonMarkFlag: PhotoFlag? { commonMarkValue(\.flag) }
+    var commonMarkColorLabel: PhotoColorLabel? { commonMarkValue(\.colorLabel) ?? nil }
+    var canClearMarkFlags: Bool { markTargetPhotos.contains { $0.flag != .none } }
+    var hasMixedMarks: Bool {
+        guard let first = markTargetPhotos.first else { return false }
+        return markTargetPhotos.dropFirst().contains {
+            $0.rating != first.rating || $0.flag != first.flag || $0.colorLabel != first.colorLabel
+        }
+    }
+
+    private func commonMarkValue<Value: Equatable>(_ keyPath: KeyPath<PhotoAsset, Value>) -> Value? {
+        guard let first = markTargetPhotos.first?[keyPath: keyPath],
+              markTargetPhotos.dropFirst().allSatisfy({ $0[keyPath: keyPath] == first }) else { return nil }
+        return first
+    }
+
     func setRating(_ rating: Int) {
         changeMarks(of: markTargetIDs) { $0.rating = rating }
     }
@@ -21,6 +40,20 @@ extension LibraryModel {
 
     func setColorLabel(_ label: PhotoColorLabel?) {
         changeMarks(of: markTargetIDs) { $0.colorLabel = label }
+    }
+
+    func toggleMarkRating(_ value: Int) {
+        let targets = markTargetPhotos
+        guard !targets.isEmpty else { return }
+        let replacement = targets.allSatisfy { $0.rating == value } ? 0 : value
+        changeMarks(of: targets.map(\.id)) { $0.rating = replacement }
+    }
+
+    func toggleMarkColorLabel(_ value: PhotoColorLabel) {
+        let targets = markTargetPhotos
+        guard !targets.isEmpty else { return }
+        let replacement: PhotoColorLabel? = targets.allSatisfy { $0.colorLabel == value } ? nil : value
+        changeMarks(of: targets.map(\.id)) { $0.colorLabel = replacement }
     }
 
     /// 키보드로 별점·표시·라벨을 바꾼다. 자동 다음 사진이 켜져 있으면 바꾸기 전에 정한 다음 사진으로 넘어가므로

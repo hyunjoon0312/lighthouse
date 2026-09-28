@@ -107,6 +107,30 @@ final class SmartFolderTests: XCTestCase {
         try await TestSupport.wait("second restart") { again.catalogLoaded }
         XCTAssertTrue(again.focalLengthBackfillPaths.isEmpty, "확인한 사진은 다음 실행에서 다시 읽지 않는다")
     }
+
+    func testNormalizedSearchAndTemporaryResetPreserveSmartFolder() async throws {
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 2)
+        model.search = "  photo-00\n"
+        XCTAssertEqual(model.normalizedSearch, "photo-00")
+        XCTAssertEqual(model.visiblePhotos.map(\.displayName), ["photo-00.jpg"])
+
+        model.search = "photo-00"
+        XCTAssertNil(model.saveSmartFolder(name: "보관 조건"))
+        let folder = try XCTUnwrap(model.smartFolders.first)
+        let savedCriteria = folder.criteria
+        model.search = "없는 검색어"
+        model.minimumRating = 5
+        model.criteria.lens = "없는 렌즈"
+        XCTAssertTrue(model.hasTemporaryFilters)
+
+        model.clearTemporaryFilters()
+
+        XCTAssertEqual(model.filter, .smart(folder.id))
+        XCTAssertEqual(model.smartFolders.first?.criteria, savedCriteria)
+        XCTAssertEqual(model.normalizedSearch, "")
+        XCTAssertEqual(model.minimumRating, 0)
+        XCTAssertTrue(model.criteria.isEmpty)
+    }
 }
 
 extension LibraryModel {

@@ -6,6 +6,16 @@ struct CriteriaPopover: View {
     @EnvironmentObject private var model: LibraryModel
     @State private var name = ""
     @State private var saveError: String?
+    @State private var minimumFocalLengthIsValid = true
+    @State private var maximumFocalLengthIsValid = true
+    @State private var minimumISOIsValid = true
+    @State private var maximumISOIsValid = true
+    @State private var numericResetID = 0
+
+    private var numericDraftsAreValid: Bool {
+        minimumFocalLengthIsValid && maximumFocalLengthIsValid &&
+            minimumISOIsValid && maximumISOIsValid
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -47,20 +57,30 @@ struct CriteriaPopover: View {
                 }
                 GridRow {
                     Text("초점거리")
-                    HStack {
-                        numberField("최소", value: $model.criteria.minimumFocalLength)
+                    HStack(alignment: .top) {
+                        CriteriaNumberField("최소", accessibilityLabel: "최소 초점거리",
+                                            value: $model.criteria.minimumFocalLength,
+                                            isValid: $minimumFocalLengthIsValid, resetID: numericResetID)
                         Text("–")
-                        numberField("최대", value: $model.criteria.maximumFocalLength)
-                        Text("mm").foregroundStyle(.secondary)
+                        CriteriaNumberField("최대", accessibilityLabel: "최대 초점거리",
+                                            value: $model.criteria.maximumFocalLength,
+                                            isValid: $maximumFocalLengthIsValid, resetID: numericResetID)
+                        Text("mm").foregroundStyle(.secondary).fixedSize()
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                 }
                 GridRow {
                     Text("ISO")
-                    HStack {
-                        numberField("최소", value: integer($model.criteria.minimumISO))
+                    HStack(alignment: .top) {
+                        CriteriaNumberField("최소", accessibilityLabel: "최소 ISO",
+                                            value: $model.criteria.minimumISO,
+                                            isValid: $minimumISOIsValid, resetID: numericResetID)
                         Text("–")
-                        numberField("최대", value: integer($model.criteria.maximumISO))
+                        CriteriaNumberField("최대", accessibilityLabel: "최대 ISO",
+                                            value: $model.criteria.maximumISO,
+                                            isValid: $maximumISOIsValid, resetID: numericResetID)
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                 }
                 GridRow {
                     Toggle("시작일", isOn: dayEnabled(\.firstDay, fallback: model.captureDateRange?.lowerBound))
@@ -75,8 +95,8 @@ struct CriteriaPopover: View {
             }
             .font(.callout)
             HStack {
-                Button("조건 지우기") { model.criteria = PhotoCriteria() }
-                    .disabled(model.criteria.isEmpty)
+                Button("조건 지우기", action: clearCriteria)
+                    .disabled(model.criteria.isEmpty && numericDraftsAreValid)
                 Spacer()
                 Text("범위 조건이 있으면 그 정보가 없는 사진은 빠집니다.").font(.caption2).foregroundStyle(.secondary)
             }
@@ -85,7 +105,8 @@ struct CriteriaPopover: View {
             HStack {
                 TextField("폴더 이름", text: $name).onSubmit(save)
                 Button("저장", action: save)
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || model.combinedCriteria.isEmpty)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty ||
+                              model.combinedCriteria.isEmpty || !numericDraftsAreValid)
             }
             if let saveError {
                 Text(saveError).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
@@ -98,29 +119,22 @@ struct CriteriaPopover: View {
     }
 
     private func save() {
+        guard numericDraftsAreValid else {
+            saveError = "숫자 조건을 확인하세요."
+            return
+        }
         saveError = model.saveSmartFolder(name: name)
         if saveError == nil { name = "" }
     }
 
-    /// 빈칸이면 조건 없음. 숫자가 아닌 글자는 무시한다.
-    private func numberField(_ title: String, value: Binding<Double?>) -> some View {
-        TextField(title, text: Binding(
-            get: {
-                guard let number = value.wrappedValue else { return "" }
-                return number.rounded() == number ? String(Int(number)) : String(number)
-            },
-            set: { text in
-                let trimmed = text.trimmingCharacters(in: .whitespaces)
-                value.wrappedValue = trimmed.isEmpty ? nil : Double(trimmed).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
-            }
-        ))
-        .frame(width: 70)
-        .accessibilityLabel(title)
-    }
-
-    private func integer(_ binding: Binding<Int?>) -> Binding<Double?> {
-        Binding(get: { binding.wrappedValue.map(Double.init) },
-                set: { binding.wrappedValue = $0.map { Int($0.rounded()) } })
+    private func clearCriteria() {
+        model.criteria = PhotoCriteria()
+        minimumFocalLengthIsValid = true
+        maximumFocalLengthIsValid = true
+        minimumISOIsValid = true
+        maximumISOIsValid = true
+        numericResetID &+= 1
+        saveError = nil
     }
 
     private func dayEnabled(_ keyPath: WritableKeyPath<PhotoCriteria, Date?>, fallback: Date?) -> Binding<Bool> {

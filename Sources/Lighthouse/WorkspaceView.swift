@@ -274,14 +274,14 @@ struct WorkspaceView: View {
             }
             .buttonStyle(.borderedProminent)
             .accessibilityLabel("사진 가져오기")
-            .disabled(!model.catalogLoaded || model.isImporting)
+            .disabled(!model.catalogLoaded || model.isImporting || model.isExporting)
             .padding(.horizontal, 16).padding(.top, 16)
             Button { model.showCardImport = true } label: {
                 Label("카드에서 복사…", systemImage: "sdcard").frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
             .accessibilityLabel("카드에서 복사해 가져오기")
-            .disabled(!model.catalogLoaded || model.isImporting)
+            .disabled(!model.catalogLoaded || model.isImporting || model.isExporting)
             .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 16)
         }
         .background(Palette.panel)
@@ -540,10 +540,9 @@ struct WorkspaceView: View {
 
     /// 목록에 사진이 없을 때의 안내. 검색어·조건이 걸려 있으면 그것을 바꾸라고 하고, 아니면 목록마다 채우는 방법을 알린다.
     private var emptyListState: some View {
-        let narrowed = !model.search.trimmingCharacters(in: .whitespaces).isEmpty || model.minimumRating > 0 ||
-            !model.criteria.isEmpty
-        if narrowed {
-            return emptyState("검색 결과가 없습니다", icon: "magnifyingglass", detail: "검색어나 별점·조건을 바꿔 보세요.")
+        if model.hasTemporaryFilters {
+            return emptyState("검색 결과가 없습니다", icon: "magnifyingglass", detail: "검색어나 별점·조건을 바꿔 보세요.",
+                              actionTitle: "검색·조건 지우기", action: model.clearTemporaryFilters)
         }
         let detail: String = switch model.filter {
         case .picks: "P 키나 오른쪽 패널의 선택 단추로 표시한 사진이 여기에 모입니다."
@@ -558,11 +557,15 @@ struct WorkspaceView: View {
         return emptyState("‘\(model.filterTitle)’에 사진이 없습니다", icon: "photo.on.rectangle", detail: detail)
     }
 
-    private func emptyState(_ title: String, icon: String, detail: String) -> some View {
+    private func emptyState(_ title: String, icon: String, detail: String,
+                            actionTitle: String? = nil, action: (() -> Void)? = nil) -> some View {
         VStack(spacing: 14) {
             Image(systemName: icon).font(.system(size: 50, weight: .ultraLight)).foregroundStyle(Palette.accent)
             Text(title).font(.title2.weight(.semibold))
             Text(detail).font(.subheadline).foregroundStyle(Palette.muted).multilineTextAlignment(.center).frame(maxWidth: 440)
+            if let actionTitle, let action {
+                Button(actionTitle, action: action).buttonStyle(.borderedProminent)
+            }
             if model.photos.isEmpty && model.loadError == nil {
                 Button("파일 또는 폴더 선택") { model.presentImport() }.buttonStyle(.borderedProminent).accessibilityLabel("파일 또는 폴더 가져오기").padding(.top, 8)
             }
@@ -822,7 +825,8 @@ struct WorkspaceView: View {
                             Button(model.isCancellingImport ? "중지하는 중…" : "중지") { model.cancelImport() }
                                 .disabled(model.isCancellingImport)
                                 .controlSize(.small)
-                                .accessibilityLabel("카드 복사 중지")
+                                .accessibilityLabel("가져오기 중지")
+                                .help("현재 파일은 끝까지 처리하고, 완료된 가져오기 항목은 유지한 뒤 나머지를 중지합니다.")
                         }
                     }
                     .padding(.horizontal, 16).padding(.top, 4)
@@ -1284,10 +1288,30 @@ private struct SurveyCell: View {
                     if let image = model.surveyImages[photo.id] ?? model.thumbnail(for: photo) {
                         Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
                     } else {
-                        ProgressView().controlSize(.small)
+                        Image(systemName: "photo").font(.title).foregroundStyle(Palette.muted)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if let error = model.surveyErrors[photo.id] {
+                    VStack(spacing: 7) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                        Text(error).font(.caption2).lineLimit(3).multilineTextAlignment(.center)
+                        HStack {
+                            Button("다시 시도") { model.retrySurveyImage(photo.id) }
+                            if model.isMissing(photo) {
+                                Button("위치 다시 찾기…") { model.presentRelocate(for: photo) }
+                            }
+                        }
+                        .controlSize(.small)
+                    }
+                    .padding(10)
+                    .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 7))
+                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if model.surveyLoadingIDs.contains(photo.id) {
+                    ProgressView().controlSize(.small).padding(8)
+                        .background(.black.opacity(0.55), in: Circle()).padding(8)
+                }
                 Button { model.togglePhotoSelection(photo) } label: {
                     Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.white, .black.opacity(0.6))
                 }
@@ -1314,7 +1338,7 @@ private struct SurveyCell: View {
         .onTapGesture(count: 2) { model.focusPhoto(photo); model.setMode(.edit) }
         .onTapGesture { model.focusPhoto(photo) }
         .contextMenu { PhotoContextMenu(photo: photo) }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("\(photo.displayName), 별점 \(photo.rating)\(active ? ", 기준 사진" : "")")
         .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
     }

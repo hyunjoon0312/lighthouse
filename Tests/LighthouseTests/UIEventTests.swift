@@ -3,6 +3,7 @@ import SwiftUI
 @testable import Lighthouse
 import LighthouseCore
 import ObjectiveC
+import UniformTypeIdentifiers
 import XCTest
 
 /// 합성한 클릭·트랙패드 핀치·끌기가 실제 창의 SwiftUI 화면에서 누른 위치에 작동하는지 본다.
@@ -165,9 +166,9 @@ final class UIEventTests: XCTestCase {
         XCTAssertLessThan(shifts[1], -300, "아래쪽(붉은 회색)을 누르면 차갑게")
     }
 
-    /// 그리드에서 사진을 끌면 이 앱 전용 형식 하나만 끌기 붙여넣기 보드에 올라가 다른 앱에는 글자·파일이 가지 않는다.
+    /// AppKit이 파일 약속 메타데이터를 더할 수 있지만 실제 내용은 앱 전용 사진 ID이고 원본 이미지·글자·파일 URL은 없어야 한다.
     /// 합성 이벤트로 시작한 끌기는 실제 마우스 떼기를 기다리므로 이 프로세스에만 마우스 떼기를 보내 끝낸다.
-    func testDraggingPhotosOffersOnlyTheAppType() async throws {
+    func testDraggingPhotosOnlyCarriesAppIDs() async throws {
         guard ProcessInfo.processInfo.environment["LIGHTHOUSE_UI_EVENTS"] != nil else {
             throw XCTSkip("LIGHTHOUSE_UI_EVENTS를 주면 창을 띄워 끌기를 확인한다.")
         }
@@ -192,8 +193,24 @@ final class UIEventTests: XCTestCase {
         }
         try await Task.sleep(nanoseconds: 400_000_000)
         XCTAssertGreaterThan(board.changeCount, before, "끌기가 시작된다")
-        XCTAssertEqual(board.types, [.init("com.rian.lighthouse.photos")])
+        let appType = NSPasteboard.PasteboardType(UTType.lighthousePhotos.identifier)
+        XCTAssertTrue(board.types?.contains(appType) == true)
+        let payload = try XCTUnwrap(board.data(forType: appType))
+        XCTAssertEqual(try JSONDecoder().decode(PhotoDragItem.self, from: payload).ids, [photos[1].id])
+
+        let publicTypes: [NSPasteboard.PasteboardType] = [.string, .fileURL, .URL, .png, .tiff]
+        XCTAssertNil(board.availableType(from: publicTypes))
+        XCTAssertNil(board.data(forType: .string))
+        XCTAssertNil(board.data(forType: .fileURL))
         XCTAssertNil(board.string(forType: .string))
+
+        let promisedContentType = NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-content-type")
+        if board.types?.contains(promisedContentType) == true {
+            XCTAssertEqual(board.propertyList(forType: promisedContentType) as? String,
+                           UTType.lighthousePhotos.identifier)
+        }
+        let promisedFileURL = NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url")
+        XCTAssertTrue(board.data(forType: promisedFileURL)?.isEmpty ?? true)
 
         let end = CGPoint(x: start.x + 96, y: start.y + 48)
         try moveCursor(window, end)

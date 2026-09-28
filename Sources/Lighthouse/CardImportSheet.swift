@@ -8,6 +8,7 @@ struct CardImportSheet: View {
     @AppStorage("cardImportOrganizeByDate") private var organizeByDate = true
     @State private var source: URL?
     @State private var foundCount: Int?
+    @State private var scanCancellation: CancellationFlag?
 
     static var defaultDestination: String {
         FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask)[0]
@@ -45,11 +46,12 @@ struct CardImportSheet: View {
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(source == nil || foundCount == nil || foundCount == 0 || model.isImporting)
+                .disabled(source == nil || foundCount == nil || foundCount == 0 || model.isImporting || model.isExporting)
             }
         }
         .padding(24)
         .frame(width: 560)
+        .onDisappear { scanCancellation?.cancel() }
     }
 
     private func row(_ title: String, value: String, choose: @escaping () -> Void) -> some View {
@@ -71,11 +73,16 @@ struct CardImportSheet: View {
         panel.prompt = "선택"
         panel.message = "메모리 카드나 사진이 있는 폴더를 선택하세요."
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        scanCancellation?.cancel()
+        let cancellation = CancellationFlag()
+        scanCancellation = cancellation
         source = url
         foundCount = nil
         Task.detached {
-            let count = LibraryModel.supportedFiles(in: [url]).count
-            await MainActor.run { if source == url { foundCount = count } }
+            let count = LibraryModel.supportedFiles(in: [url], cancellation: cancellation).count
+            await MainActor.run {
+                if source == url, scanCancellation === cancellation, !cancellation.isCancelled { foundCount = count }
+            }
         }
     }
 

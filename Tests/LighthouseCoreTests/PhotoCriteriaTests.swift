@@ -90,6 +90,21 @@ final class PhotoCriteriaTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(PhotoCriteria.self, from: JSONEncoder().encode(criteria)), criteria)
     }
 
+    func testSummarySafelyFormatsHugeAndNonfiniteFocalLengths() {
+        var criteria = PhotoCriteria()
+        criteria.minimumFocalLength = 1e20
+        criteria.maximumFocalLength = .greatestFiniteMagnitude
+        XCTAssertEqual(criteria.summary(), ["1.0e+20–1.8e+308mm"])
+
+        criteria.minimumFocalLength = .infinity
+        criteria.maximumFocalLength = nil
+        XCTAssertEqual(criteria.summary(), ["—~mm"])
+
+        criteria.minimumFocalLength = -.infinity
+        criteria.maximumFocalLength = .nan
+        XCTAssertEqual(criteria.summary(), ["—mm"])
+    }
+
     func testSmartFolderStoreRoundTripAndValidation() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
