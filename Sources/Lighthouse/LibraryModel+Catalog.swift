@@ -182,17 +182,27 @@ extension LibraryModel {
         NSWorkspace.shared.open(backup.directory)
     }
 
-    func flushSave() throws {
+    func flushSave(requireCompleteLibrary: Bool = false) throws {
         guard catalogLoaded, loadError == nil else { return }
+        let auxiliaryError = folderLoadError ?? presetLoadError ?? smartFolderLoadError ?? peopleLoadError
+        if requireCompleteLibrary,
+           let error = auxiliaryError ?? (!foldersLoaded || !peopleLoaded ? "라이브러리 보조 정보를 아직 모두 열지 못했습니다." : nil) {
+            throw NSError(domain: "Lighthouse.Library", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "라이브러리 보조 정보를 열지 못해 저장하지 않았습니다: \(error)"])
+        }
         saveDelay?.cancel()
         peopleSaveDelay?.cancel()
         peopleSaveScheduled = false
         let snapshot = photos
         let folderSnapshot = photoFolders
         let canSaveFolders = foldersLoaded && folderLoadError == nil
+        let canSavePresets = presetLoadError == nil
+        let canSaveSmartFolders = smartFolderLoadError == nil
         try saveQueue.sync {
             try catalog.save(snapshot)
             if canSaveFolders { try folderStore.save(folderSnapshot) }
+            if canSavePresets { try presetStore.save(presets) }
+            if canSaveSmartFolders { try smartFolderStore.save(smartFolders) }
         }
         if peopleLoaded, peopleLoadError == nil {
             peopleSaveRevision &+= 1

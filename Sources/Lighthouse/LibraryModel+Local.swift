@@ -123,7 +123,8 @@ extension LibraryModel {
                     let adjustment = LocalAdjustment(
                         name: background ? "자동 배경" : "자동 피사체",
                         baseMask: mask,
-                        isInverted: background
+                        isInverted: background,
+                        automaticMaskKind: background ? .background : .subject
                     )
                     edits.localAdjustments.append(adjustment)
                     self.selectedLocalID = adjustment.id

@@ -80,6 +80,12 @@ final class NoiseReductionService: @unchecked Sendable {
         let value: String
 
         init(url: URL, attributes: [FileAttributeKey: Any], edits: EditSettings, width: Int, height: Int) {
+            self.init(url: url, attributes: attributes, edits: edits, settings: edits.noiseReduction,
+                      cacheContext: "", width: width, height: height)
+        }
+
+        init(url: URL, attributes: [FileAttributeKey: Any], edits: EditSettings,
+             settings: NoiseReductionSettings, cacheContext: String, width: Int, height: Int) {
             let path = url.standardizedFileURL.resolvingSymlinksInPath().path
             let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
             let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate ?? 0
@@ -90,7 +96,8 @@ final class NoiseReductionService: @unchecked Sendable {
                 components += [String(describing: edits.rawDevelop), String(edits.exposure),
                                String(edits.temperatureShift), String(edits.tintShift)]
             }
-            components += [edits.noiseReduction.mode.rawValue, String(edits.noiseReduction.amount),
+            components += [String(describing: edits.flicker), cacheContext,
+                           settings.mode.rawValue, String(settings.amount),
                            "\(width)x\(height)"]
             value = components.joined(separator: "|")
         }
@@ -107,6 +114,12 @@ final class NoiseReductionService: @unchecked Sendable {
 
     func apply(to image: CIImage, url: URL, edits: EditSettings, context: CIContext,
                colorSpace: CGColorSpace) throws -> CIImage {
+        try apply(to: image, url: url, edits: edits, settings: edits.noiseReduction,
+                  context: context, colorSpace: colorSpace)
+    }
+
+    func apply(to image: CIImage, url: URL, edits: EditSettings, settings: NoiseReductionSettings,
+               cacheContext: String = "", context: CIContext, colorSpace: CGColorSpace) throws -> CIImage {
         try withLock {
             let extent = image.extent
             guard extent.origin.x.isFinite, extent.origin.y.isFinite,
@@ -125,10 +138,11 @@ final class NoiseReductionService: @unchecked Sendable {
                 throw NoiseReductionError.invalidImageSize
             }
             let attributes = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
-            let key = CacheKey(url: url, attributes: attributes, edits: edits, width: width, height: height)
+            let key = CacheKey(url: url, attributes: attributes, edits: edits, settings: settings,
+                               cacheContext: cacheContext, width: width, height: height)
             if let cached, cached.key == key { return cached.image }
             let result = try infer(image: image, width: width, height: height, context: context,
-                                   colorSpace: colorSpace, sigma: Float(edits.noiseReduction.amount * 75 / 255))
+                                   colorSpace: colorSpace, sigma: Float(settings.amount * 75 / 255))
             cached = (key, result)
             return result
         }

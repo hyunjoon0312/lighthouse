@@ -29,21 +29,7 @@ public extension ImagePipeline {
                                                    format: .L8, colorSpace: gray) else {
                 throw ImagePipelineError.subjectMaskFailed("마스크 렌더 실패")
             }
-            let encoded = NSMutableData()
-            guard let destination = CGImageDestinationCreateWithData(
-                encoded, UTType.png.identifier as CFString, 1, nil
-            ) else {
-                throw ImagePipelineError.subjectMaskFailed("PNG 인코더 생성 실패")
-            }
-            CGImageDestinationAddImage(destination, mask, nil)
-            guard CGImageDestinationFinalize(destination) else {
-                throw ImagePipelineError.subjectMaskFailed("PNG 인코딩 실패")
-            }
-            let data = encoded as Data
-            guard data.count <= Self.maximumMaskBytes else {
-                throw ImagePipelineError.invalidMaskData("마스크 데이터가 8 MiB를 초과합니다")
-            }
-            return RasterMask(width: mask.width, height: mask.height, pngData: data)
+            return try encodedRasterMask(mask)
         } catch let error as ImagePipelineError {
             throw error
         } catch {

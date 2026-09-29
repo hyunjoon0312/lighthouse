@@ -18,6 +18,8 @@ public enum ImagePipelineError: LocalizedError {
     case invalidJPEGQuality
     case invalidJPEGData
     case lutFailed(String)
+    case flickerFailed(String)
+    case rangeMaskFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -32,6 +34,8 @@ public enum ImagePipelineError: LocalizedError {
         case .invalidJPEGQuality: "JPEG 품질은 유한한 값이어야 합니다."
         case .invalidJPEGData: "내보낼 이미지 데이터가 올바르지 않습니다."
         case .lutFailed(let reason): "LUT를 적용할 수 없습니다: \(reason)"
+        case .flickerFailed(let reason): "플리커 보정을 처리할 수 없습니다: \(reason)"
+        case .rangeMaskFailed(let reason): "범위 마스크를 만들 수 없습니다: \(reason)"
         }
     }
 }
@@ -163,6 +167,31 @@ public final class ImagePipeline: @unchecked Sendable {
         return image
     }
 
+    /// 원본을 방향 적용한 중립 sRGB 16비트 TIFF로 줄여 카탈로그 스마트 미리보기에 저장한다.
+    public func makeSmartPreview(url: URL, maxPixel: Int = 2_560) throws -> Data {
+        let limit = max(1, maxPixel)
+        var image = try render(url: url, edits: .neutral, maxPixel: limit,
+                               format: .RGBA16, colorSpace: colorSpace)
+        guard let opaque = CGContext(data: nil, width: image.width, height: image.height,
+                                     bitsPerComponent: 16, bytesPerRow: 0, space: colorSpace,
+                                     bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else {
+            throw ImagePipelineError.renderFailed(url)
+        }
+        opaque.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard let rendered = opaque.makeImage() else { throw ImagePipelineError.renderFailed(url) }
+        image = rendered
+        let encoded = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            encoded, UTType.tiff.identifier as CFString, 1, nil
+        ) else { throw ImagePipelineError.exportFailed(url) }
+        CGImageDestinationAddImage(destination, image, [
+            kCGImagePropertyOrientation: 1,
+            kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFOrientation: 1],
+        ] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { throw ImagePipelineError.exportFailed(url) }
+        return encoded as Data
+    }
+
     /// RAW 파일에 든 카메라 미리보기만 읽는다. RAW가 아니거나 미리보기가 1024px보다 작거나 비율이 다르면 nil이다.
     public func embeddedPreview(for url: URL, maxPixel: Int) -> CGImage? {
         guard Self.isRAW(url), let source = CGImageSourceCreateWithURL(url as CFURL, nil),
@@ -215,7 +244,9 @@ public final class ImagePipeline: @unchecked Sendable {
     /// 일반 사진은 Core Image가 이미 줄여 읽어서 따로 줄이면 오히려 메모리를 더 쓴다(24MP JPEG 114MB→431MB).
     /// 필름 입자는 픽셀 단위 무늬라 해상도에 따라 보이는 세기가 불규칙하게 달라지므로, 입자가 있으면 원본 해상도로 현상한다.
     func decodeScale(url: URL, edits: EditSettings, maxPixel: Int?) -> Double {
-        guard Self.isRAW(url), !edits.noiseReduction.isActive, edits.grain.amount == 0, let maxPixel, maxPixel > 0,
+        guard Self.isRAW(url), !edits.noiseReduction.isActive, !edits.flicker.isActive,
+              !edits.localAdjustments.contains(where: { $0.isEnabled && $0.noiseReduction.isActive }),
+              edits.grain.amount == 0, let maxPixel, maxPixel > 0,
               let size = sourceSize(url: url) else { return 1 }
         // RAW 디코더가 딱 필요한 크기로 줄이면 원본을 줄인 것보다 눈에 띄게 부드러워서 여유를 둔다.
         // S9 2200px에서 0.59배가 되어 최대 메모리는 약 절반, 잔 디테일 차이는 약 20%였다.
@@ -323,8 +354,10 @@ public final class ImagePipeline: @unchecked Sendable {
 
     func composed(url: URL, edits: EditSettings, maxPixel: Int?, scale: Double,
                           allowApproximation: Bool) throws -> Composition {
+        let requiresExactDevelopment = edits.noiseReduction.isActive || edits.flicker.isActive
+            || edits.localAdjustments.contains { $0.isEnabled && $0.noiseReduction.isActive }
         let development = try developed(url: url, edits: edits, scale: scale,
-                                        allowApproximation: allowApproximation && !edits.noiseReduction.isActive)
+                                        allowApproximation: allowApproximation && !requiresExactDevelopment)
         let retouch = try RetouchProcessor.applyResolvingOffsets(to: development.image, strokes: edits.retouchStrokes,
                                                                  context: context, colorSpace: colorSpace)
         var image = retouch.image
@@ -335,7 +368,10 @@ public final class ImagePipeline: @unchecked Sendable {
         for adjustment in edits.localAdjustments where adjustment.isEnabled && adjustment.hasMask {
             if let baseMask = adjustment.baseMask { _ = try decodedMask(baseMask) }
             guard [adjustment.exposure, adjustment.contrast, adjustment.temperature, adjustment.saturation,
-                   adjustment.clarity].allSatisfy(\.isFinite), adjustment.hasEffect else { continue }
+                   adjustment.clarity].allSatisfy(\.isFinite) else { continue }
+            let hasColorEffect = adjustment.exposure != 0 || adjustment.contrast != 1
+                || adjustment.temperature != 0 || adjustment.saturation != 0 || adjustment.clarity != 0
+            guard hasColorEffect else { continue }
             let mask = try fittedMask(for: adjustment, extent: image.extent, scale: maskScale)
             var adjusted = image
             if adjustment.exposure != 0 {
@@ -542,7 +578,32 @@ public final class ImagePipeline: @unchecked Sendable {
         if let delta = source.delta {
             image = Self.approximated(image, by: delta)
         }
+        image = try applyFlicker(edits.flicker, to: image)
         image = try applyNoiseReduction(edits.noiseReduction, to: image, url: url, edits: edits)
+        let commonNoiseInput = image
+        for adjustment in edits.localAdjustments
+            where adjustment.isEnabled && adjustment.hasMask && adjustment.noiseReduction.mode != .off {
+            guard adjustment.noiseReduction.amount.isFinite,
+                  (0...1).contains(adjustment.noiseReduction.amount) else {
+                throw NoiseReductionError.invalidAmount
+            }
+            guard adjustment.noiseReduction.amount > 0 else { continue }
+            if let baseMask = adjustment.baseMask { _ = try decodedMask(baseMask) }
+            var mask = try fittedMask(for: adjustment, extent: commonNoiseInput.extent, scale: 1)
+            if commonNoiseInput.extent.origin != .zero {
+                mask = mask.transformed(by: CGAffineTransform(translationX: commonNoiseInput.extent.minX,
+                                                              y: commonNoiseInput.extent.minY))
+            }
+            let cacheContext = localNoiseCacheContext(url: url, edits: edits,
+                                                      settings: adjustment.noiseReduction)
+            let candidate = try applyNoiseReduction(adjustment.noiseReduction, to: commonNoiseInput,
+                                                    url: url, edits: edits, cacheContext: cacheContext)
+            let blend = CIFilter.blendWithMask()
+            blend.inputImage = candidate
+            blend.backgroundImage = image
+            blend.maskImage = mask
+            image = (blend.outputImage ?? image).cropped(to: image.extent)
+        }
         if !Self.isRAW(url) {
             if edits.exposure != 0 {
                 let filter = CIFilter.exposureAdjust()
@@ -595,7 +656,7 @@ public final class ImagePipeline: @unchecked Sendable {
     }
 
     private func applyNoiseReduction(_ settings: NoiseReductionSettings, to image: CIImage,
-                                     url: URL, edits: EditSettings) throws -> CIImage {
+                                     url: URL, edits: EditSettings, cacheContext: String = "") throws -> CIImage {
         guard settings.mode != .off else { return image }
         guard settings.amount.isFinite, (0...1).contains(settings.amount) else {
             throw NoiseReductionError.invalidAmount
@@ -611,9 +672,21 @@ public final class ImagePipeline: @unchecked Sendable {
             filter.sharpness = 0
             return (filter.outputImage ?? image).cropped(to: image.extent)
         case .ai:
-            return try NoiseReductionService.shared.apply(to: image, url: url, edits: edits,
+            return try NoiseReductionService.shared.apply(to: image, url: url, edits: edits, settings: settings,
+                                                          cacheContext: cacheContext,
                                                           context: context, colorSpace: colorSpace)
         }
+    }
+
+    private func localNoiseCacheContext(url: URL, edits: EditSettings,
+                                        settings: NoiseReductionSettings) -> String {
+        var components = ["local-nr-v1", String(describing: edits.flicker),
+                          String(describing: edits.noiseReduction), String(describing: settings)]
+        if Self.isRAW(url) {
+            components += [String(describing: edits.rawDevelop), String(edits.exposure),
+                           String(edits.temperatureShift), String(edits.tintShift)]
+        }
+        return components.joined(separator: "|")
     }
 
     /// RAW 현상 결과에 노출·색온도·틴트 차이를 덧씌운 근사. 색온도는 켈빈이 아니라 미레드(1/K) 차이로 옮긴다.

@@ -13,33 +13,42 @@ extension LibraryModel {
     /// 썸네일은 디스크에도 보관해 다음 실행 때 RAW를 다시 현상하지 않고, 원본이 없어도 마지막 모습을 보여 준다.
     func requestThumbnail(for photo: PhotoAsset) {
         let wanted: EditSettings? = photo.edits.isModified ? photo.edits : nil
+        let proxy = validatedPreviewSource(for: photo)
+        let renderURL = proxy?.url ?? photo.url
+        let renderEdits = proxy?.edits ?? wanted
+        var cachePhoto = photo
+        cachePhoto.path = renderURL.standardizedFileURL.resolvingSymlinksInPath().path
+        cachePhoto.edits = proxy?.edits ?? photo.edits
+        let diskCachePhoto = cachePhoto
         // 가상 사본은 같은 파일을 가리키므로 파일 경로가 아니라 항목 ID로 캐시한다.
         let cacheKey = photo.id.uuidString
         let entry = thumbnailCache.object(forKey: cacheKey as NSString)
         // 대신 보여 주던 마지막 썸네일은 원본이 없다고 확인된 동안만 그대로 둔다.
-        if let entry, entry.edits == wanted, !entry.isFallback || isMissing(photo) { return }
+        if let entry, entry.edits == wanted, (!entry.isFallback || isMissing(photo)) { return }
         if entry != nil, wanted != nil, photo.id == selectedID, showsSingleImage, !isOriginal { return }
         guard !loadingThumbnails.contains(cacheKey), !unavailableThumbnails.contains(photo.id) else { return }
         loadingThumbnails.insert(cacheKey)
         let size = Self.thumbnailPixels
+        let requestGeneration = thumbnailGeneration
         thumbnailQueue.async { [pipeline, thumbnailStore] in
             // 보정 여부와 관계없이 디스크에 보관한 썸네일을 먼저 쓰고, 없으면 만들어 보관한다.
             // 원본을 읽을 수 없으면 키를 만들 수 없으므로 마지막으로 보관한 썸네일을 보여 준다.
-            let key = ThumbnailStore.key(for: photo)
+            let key = ThumbnailStore.key(for: diskCachePhoto)
             var image = key.flatMap { thumbnailStore.load(photoID: photo.id, key: $0) }
-            if image == nil, let key {
-                if let wanted, let rendered = try? pipeline.renderPreview(url: photo.url, edits: wanted, maxPixel: size).image {
+            if image == nil {
+                if let renderEdits, let rendered = try? pipeline.renderPreview(url: renderURL, edits: renderEdits, maxPixel: size).image {
                     image = rendered
-                    thumbnailStore.store(rendered, photoID: photo.id, key: key)
-                } else if let plain = try? pipeline.thumbnail(for: photo.url, maxPixel: size) {
+                    if let key { thumbnailStore.store(rendered, photoID: photo.id, key: key) }
+                } else if let plain = try? pipeline.thumbnail(for: renderURL, maxPixel: size) {
                     image = plain
                     // 보정한 사진인데 보정 렌더에 실패해 보정 전 모습이면 보관하지 않는다.
-                    if wanted == nil { thumbnailStore.store(plain, photoID: photo.id, key: key) }
+                    if wanted == nil, let key { thumbnailStore.store(plain, photoID: photo.id, key: key) }
                 }
             }
             let fallback = image == nil && key == nil ? thumbnailStore.latest(photoID: photo.id) : nil
             let unavailable = image == nil && key == nil && fallback == nil
             DispatchQueue.main.async {
+                guard requestGeneration == self.thumbnailGeneration else { return }
                 self.loadingThumbnails.remove(cacheKey)
                 if let shown = image ?? fallback { self.storeThumbnail(shown, id: photo.id, edits: wanted, isFallback: fallback != nil) }
                 if unavailable { self.unavailableThumbnails.insert(photo.id) }
@@ -52,8 +61,16 @@ extension LibraryModel {
     }
 
     /// 원본이 돌아오거나 다시 연결된 사진은 대신 보여 주던 썸네일을 새로 만들고, 썸네일이 없던 사진은 다시 찾는다.
-    func missingOriginalsDidChange() {
+    func missingOriginalsDidChange(previous: Set<String>) {
         let returned = fallbackThumbnailIDs.union(unavailableThumbnails).compactMap(photo(withID:)).filter { !isMissing($0) }
+        let reconnected = photos.filter { previous.contains($0.path) && !missingPaths.contains($0.path) }
+        let becameMissing = photos.filter { !previous.contains($0.path) && missingPaths.contains($0.path) }
+        for photo in reconnected {
+            smartPreviewRecords.removeValue(forKey: photo.id)
+            smartPreviewURLs.removeValue(forKey: photo.id)
+        }
+        if !reconnected.isEmpty { refreshSmartPreviewRecords() }
+        if !reconnected.isEmpty || !becameMissing.isEmpty { invalidateWorkflowRenderCaches() }
         for photo in returned {
             unavailableThumbnails.remove(photo.id)
             requestThumbnail(for: photo)
@@ -93,7 +110,8 @@ extension LibraryModel {
         renderJob?.cancel()
         generation += 1
         let token = generation
-        let source = "\(selectedID?.uuidString ?? "none"):\(isOriginal):\(actualSize)"
+        let selectedSourceIdentity = selection.map { renderSourceIdentity(for: $0) } ?? "none"
+        let source = "\(selectedID?.uuidString ?? "none"):\(isOriginal):\(actualSize):\(selectedSourceIdentity)"
         if renderedSource != source {
             rendered = enlargedForActualSize(previousSource: renderedSource)
             imageError = nil
@@ -108,18 +126,27 @@ extension LibraryModel {
         requestMask()
         refreshRAWCapabilities()
         guard showsSingleImage, let photo = selection else { rendering = false; return }
-        let edits = isOriginal ? EditSettings.neutral : photo.edits
+        let proxy = validatedPreviewSource(for: photo)
+        let renderURL = proxy?.url ?? photo.url
+        let edits = isOriginal ? EditSettings.neutral : (proxy?.edits ?? photo.edits)
+        var thumbnailPhoto = photo
+        thumbnailPhoto.path = renderURL.standardizedFileURL.resolvingSymlinksInPath().path
+        thumbnailPhoto.edits = edits
+        let thumbnailCachePhoto = thumbnailPhoto
         let maxPixel: Int? = actualSize ? nil : 2200
         let compare = mode == .compare ? pinned : nil
-        let pinnedKey = compare.map { "\($0.id):\(maxPixel ?? 0)" }
-        let pinnedEdits = compare.map { compareShowsPinnedEdits ? $0.edits : EditSettings.neutral }
+        let compareProxy = compare.flatMap { validatedPreviewSource(for: $0) }
+        let pinnedKey = compare.map { "\($0.id):\(maxPixel ?? 0):\(renderSourceIdentity(for: $0))" }
+        let pinnedEdits = compare.map { compareShowsPinnedEdits ? (compareProxy?.edits ?? $0.edits) : EditSettings.neutral }
+        let pinnedURL = compareProxy?.url ?? compare?.url
         let reference = pinnedKey != pinnedSource || pinnedEdits != pinnedRenderedEdits ? compare : nil
         // 비교 보기에서 100%로 바꾸면 기준 사진도 원본 크기 그림이 올 때까지 늘려 보인다.
         if actualSize, let fixed = reference, let image = pinnedImage,
-           let enlarged = enlarged(image, url: fixed.url, edits: pinnedEdits ?? .neutral) {
+           let enlarged = enlarged(image, url: pinnedURL ?? fixed.url, edits: pinnedEdits ?? .neutral) {
             pinnedImage = enlarged
         }
-        let recentKey = actualSize ? nil : "\(photo.id):\(isOriginal)"
+        let sourceIdentity = renderSourceIdentity(for: photo)
+        let recentKey = actualSize ? nil : "\(photo.id):\(isOriginal):\(sourceIdentity)"
         let recent = recentKey.flatMap { key in recentRenders.last { $0.key == key } }
         let renderCurrent = recent?.edits != edits
         if let recent, let recentKey, !renderCurrent {
@@ -138,7 +165,7 @@ extension LibraryModel {
             if let recent {
                 rendered = recent.image
                 histogram = recent.histogram
-            } else if photo.isRAW, !actualSize, isOriginal || !photo.edits.isModified {
+            } else if proxy == nil, photo.isRAW, !actualSize, isOriginal || !photo.edits.isModified {
                 requestPlaceholder(for: photo, source: source)
             }
         }
@@ -151,7 +178,7 @@ extension LibraryModel {
         // 백그라운드 큐에서 돈다. @Sendable로 표시해 화면 상태를 여기서 건드리지 않는지 컴파일러가 검사하게 한다.
         let job = DispatchWorkItem { @Sendable [previewPipeline] in
             let preview = renderCurrent
-                ? Result { try previewPipeline.renderPreview(url: photo.url, edits: edits, maxPixel: maxPixel,
+                ? Result { try previewPipeline.renderPreview(url: renderURL, edits: edits, maxPixel: maxPixel,
                                                              allowApproximation: approximate, hdr: hdr) } : nil
             let current = preview.map { result in result.map(\.image) }
             let isApproximate = (try? preview?.get())?.isApproximate ?? false
@@ -160,8 +187,8 @@ extension LibraryModel {
             }
             let histogram = (try? current?.get()).flatMap { ImageHistogram.make(from: $0) }
             // 기준 사진도 편집 미리보기 파이프라인으로 그려 같은 사진을 편집하는 동안 현상을 재사용한다.
-            let referenceResult = reference.map { fixed in
-                Result { try previewPipeline.renderPreview(url: fixed.url, edits: pinnedEdits ?? .neutral,
+            let referenceResult = reference.map { _ in
+                Result { try previewPipeline.renderPreview(url: pinnedURL!, edits: pinnedEdits ?? .neutral,
                                                            maxPixel: maxPixel, allowApproximation: approximate) }
             }
             DispatchQueue.main.async {
@@ -204,10 +231,12 @@ extension LibraryModel {
                 case nil:
                     break
                 }
-                if let thumbnail, let latest = self.photo(withID: photo.id), latest.edits == edits {
-                    self.storeThumbnail(thumbnail, id: photo.id, edits: edits)
+                if let thumbnail, let latest = self.photo(withID: photo.id),
+                   (self.validatedPreviewSource(for: latest)?.edits ?? latest.edits) == edits,
+                   self.renderSourceIdentity(for: latest) == sourceIdentity {
+                    self.storeThumbnail(thumbnail, id: photo.id, edits: latest.edits)
                     self.thumbnailQueue.async { [thumbnailStore = self.thumbnailStore] in
-                        if let key = ThumbnailStore.key(for: latest) {
+                        if let key = ThumbnailStore.key(for: thumbnailCachePhoto) {
                             thumbnailStore.store(thumbnail, photoID: latest.id, key: key)
                         }
                     }
@@ -243,12 +272,11 @@ extension LibraryModel {
 
     /// 같은 사진의 중간 렌더는 순서대로 보여 주되, AI 설정이나 사진이 바뀐 뒤 끝난 결과는 버린다.
     func canDisplaySupersededRender(source: String, token: Int, edits: EditSettings) -> Bool {
-        let latestNoiseReduction = isOriginal
-            ? EditSettings.neutral.noiseReduction
-            : selection?.edits.noiseReduction
-        let includesAI = edits.noiseReduction.mode == .ai || latestNoiseReduction?.mode == .ai
-        return source == renderedSource && token > displayedToken &&
-            (!includesAI || latestNoiseReduction == edits.noiseReduction)
+        let latest = isOriginal ? EditSettings.neutral : selection?.edits
+        guard let latest else { return false }
+        let sensitiveChanged = latest.noiseReduction != edits.noiseReduction || latest.flicker != edits.flicker ||
+            latest.localAdjustments != edits.localAdjustments
+        return source == renderedSource && token > displayedToken && !sensitiveChanged
     }
 
     /// 나눠 보기의 보정 전 모습이 보여야 하는지.
@@ -270,11 +298,12 @@ extension LibraryModel {
             return
         }
         let before = EditSettings.neutral.merging(from: photo.edits, components: .geometry)
+        let renderURL = validatedPreviewSource(for: photo)?.url ?? photo.url
         if let state = splitBeforeState, state.id == photo.id, state.edits == before { return }
         splitBefore = nil
         splitBeforeState = (photo.id, before)
         splitQueue.async { [pipeline] in
-            let image = try? pipeline.renderPreview(url: photo.url, edits: before, maxPixel: 2200).image
+            let image = try? pipeline.renderPreview(url: renderURL, edits: before, maxPixel: 2200).image
             DispatchQueue.main.async {
                 guard let state = self.splitBeforeState, state.id == photo.id, state.edits == before else { return }
                 self.splitBefore = image.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
@@ -331,11 +360,15 @@ extension LibraryModel {
     /// 그 사이 사진이 사라지지 않고 보던 곳이 바로 100% 자리에 온다(S9는 0.3–0.8초).
     private func enlargedForActualSize(previousSource: String?) -> NSImage? {
         guard actualSize, let photo = selection else { return nil }
-        let edits = isOriginal ? EditSettings.neutral : photo.edits
-        let fit = previousSource == "\(photo.id.uuidString):\(isOriginal):false"
+        let proxy = validatedPreviewSource(for: photo)
+        let edits = isOriginal ? EditSettings.neutral : (proxy?.edits ?? photo.edits)
+        let renderURL = proxy?.url ?? photo.url
+        let sourceIdentity = renderSourceIdentity(for: photo)
+        let fitKey = "\(photo.id):\(isOriginal):\(sourceIdentity)"
+        let fit = previousSource == "\(photo.id.uuidString):\(isOriginal):false:\(sourceIdentity)"
             ? rendered
-            : recentRenders.last { $0.key == "\(photo.id):\(isOriginal)" && $0.edits == edits }?.image
-        return fit.flatMap { enlarged($0, url: photo.url, edits: edits) }
+            : recentRenders.last { $0.key == fitKey && $0.edits == edits }?.image
+        return fit.flatMap { enlarged($0, url: renderURL, edits: edits) }
     }
 
     /// 원본 크기보다 작은 그림을 원본 크기로 늘린 그림. 이미 원본 크기면 nil.
@@ -363,10 +396,14 @@ extension LibraryModel {
         guard let index = visible.firstIndex(where: { $0.id == current }),
               visible.indices.contains(index + moveDirection) else { return }
         let photo = visible[index + moveDirection]
+        guard !isMissing(photo) else { return }
         let originalView = isOriginal
         let edits = originalView ? EditSettings.neutral : photo.edits
-        guard edits.noiseReduction.mode != .ai || !edits.noiseReduction.isActive else { return }
-        let key = "\(photo.id):\(originalView)"
+        let hasAI = edits.noiseReduction.mode == .ai && edits.noiseReduction.isActive ||
+            edits.localAdjustments.contains { $0.isEnabled && $0.noiseReduction.mode == .ai && $0.noiseReduction.isActive }
+        guard !hasAI else { return }
+        let sourceIdentity = renderSourceIdentity(for: photo)
+        let key = "\(photo.id):\(originalView):\(sourceIdentity)"
         guard !prefetching.contains(key), !recentRenders.contains(where: { $0.key == key && $0.edits == edits }) else {
             return
         }
@@ -380,12 +417,16 @@ extension LibraryModel {
                       (originalView ? EditSettings.neutral : latest.edits) == edits else { return }
                 let image = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
                 self.rememberRender(image, key: key, edits: edits, histogram: histogram)
-                if self.renderedSource == "\(photo.id):\(originalView):false", self.displayedToken == 0,
+                if self.renderedSource == "\(photo.id):\(originalView):false:\(sourceIdentity)", self.displayedToken == 0,
                    self.rendering {
                     self.rendered = image
                     self.histogram = histogram
                 }
             }
         }
+    }
+
+    private func renderSourceIdentity(for photo: PhotoAsset) -> String {
+        (validatedPreviewSource(for: photo)?.url ?? photo.url).standardizedFileURL.resolvingSymlinksInPath().path
     }
 }

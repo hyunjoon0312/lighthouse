@@ -21,6 +21,7 @@ struct BatchEditSheet: View {
     @State private var copyGeometry = false
     @State private var copyLocal = false
     @State private var copyRetouch = false
+    @State private var reRecognizeAutomaticMasks = true
 
     private var components: EditComponents {
         var result: EditComponents = []
@@ -48,8 +49,13 @@ struct BatchEditSheet: View {
                     }
                     Toggle("회전·크롭", isOn: $copyGeometry)
                     Toggle("부분 보정 영역", isOn: $copyLocal)
+                    if copyLocal && snapshot.edits.localAdjustments.contains(where: { $0.automaticMaskKind != nil }) {
+                        Toggle("사진마다 피사체·배경 다시 인식", isOn: $reRecognizeAutomaticMasks)
+                        Text("대상마다 한 번 인식합니다. 실패한 사진은 전체 일괄 변경에서 제외됩니다. 브러시와 복구 위치는 자동으로 이동하지 않습니다.")
+                            .font(.caption2).foregroundStyle(.secondary).padding(.leading, 20)
+                    }
                     Toggle("복구 작업", isOn: $copyRetouch)
-                    Text("자동 마스크와 복구 위치는 대상 사진에서 다시 인식되지 않고 같은 정규화 위치에 복사됩니다.")
+                    Text("직접 그린 브러시 영역과 복구 위치는 대상 사진의 같은 정규화 좌표로 복사됩니다.")
                         .font(.caption2).foregroundStyle(.secondary).padding(.leading, 20)
                 }
                 .toggleStyle(.checkbox)
@@ -66,24 +72,50 @@ struct BatchEditSheet: View {
                 .frame(height: min(150, CGFloat(snapshot.targets.count) * 20))
                 Text("원본 파일, 별점과 선택·제외 표시는 바뀌지 않습니다.")
                     .font(.caption2).foregroundStyle(.secondary)
+                if model.isRunningWorkflow {
+                    ProgressView(value: model.workflowProgress)
+                }
+                if let report = model.batchWorkflowReport {
+                    Text("변경 \(report.changed)장 · 건너뜀 \(report.skipped)장 · 실패 \(report.failures.count)장")
+                        .font(.caption).foregroundStyle(report.failures.isEmpty ? Color.secondary : Color.orange)
+                    if report.cancelled {
+                        Text("일괄 적용을 취소했습니다. 변경 사항은 적용하지 않았습니다.")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                    if !report.failures.isEmpty {
+                        DisclosureGroup("실패한 사진 \(report.failures.count)장") {
+                            ForEach(report.failures) { failure in
+                                Text("\(failure.filename): \(failure.message)")
+                                    .font(.caption).foregroundStyle(.orange)
+                            }
+                        }
+                    }
+                }
                 HStack {
                     Spacer()
-                    Button("취소") { dismiss() }
+                    Button(model.isRunningWorkflow ? "처리 취소" : "취소") {
+                        if model.isRunningWorkflow { model.cancelWorkflow() } else { dismiss() }
+                    }
                     Button("선택한 \(snapshot.targets.count)장에 적용") {
-                        model.applyBatchEdits(source: snapshot.edits,
-                                              to: snapshot.targets.map(\.id), components: components)
-                        dismiss()
+                        model.applyBatchEditsWithAutomaticMasks(source: snapshot.edits,
+                                                                to: snapshot.targets.map(\.id), components: components,
+                                                                reRecognize: reRecognizeAutomaticMasks)
+                        if !reRecognizeAutomaticMasks || !copyLocal ||
+                            !snapshot.edits.localAdjustments.contains(where: { $0.automaticMaskKind != nil }) { dismiss() }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(components.isEmpty)
+                    .disabled(components.isEmpty || model.isRunningWorkflow)
                 }
             } else {
                 ProgressView()
             }
         }
         .padding(24).frame(width: 480)
+        .interactiveDismissDisabled(model.isRunningWorkflow)
         .onAppear {
             guard snapshot == nil, let source = model.selection else { return }
+            model.batchWorkflowReport = nil
+            model.workflowMessage = nil
             snapshot = BatchSnapshot(sourceName: source.filename, edits: source.edits,
                                      targets: model.selectedPhotos.map { BatchTarget(id: $0.id, filename: $0.filename) })
         }

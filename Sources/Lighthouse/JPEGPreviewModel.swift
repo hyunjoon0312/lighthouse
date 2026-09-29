@@ -8,10 +8,14 @@ final class JPEGPreviewModel: ObservableObject {
     @Published private(set) var isPreparing = false
     @Published private(set) var error: String?
 
-    private let pipeline = ImagePipeline()
+    private let pipeline: ImagePipeline
     private let queue = DispatchQueue(label: "com.rian.lighthouse.jpeg-preview", qos: .userInitiated)
     private var generation = 0
     private var workItem: DispatchWorkItem?
+
+    init(lutDirectory: URL = LUTStore.defaultDirectory) {
+        pipeline = ImagePipeline(lutDirectory: lutDirectory)
+    }
 
     func request(photo: PhotoAsset?, options: ExportOptions, debounce: Bool = true) {
         workItem?.cancel()

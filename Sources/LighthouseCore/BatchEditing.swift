@@ -32,6 +32,7 @@ public extension EditSettings {
             result.grain = source.grain
             result.rawDevelop = source.rawDevelop
             result.noiseReduction = source.noiseReduction
+            result.flicker = source.flicker
             result.vibrance = source.vibrance
             result.clarity = source.clarity
             result.vignette = source.vignette

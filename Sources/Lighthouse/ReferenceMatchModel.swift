@@ -19,15 +19,17 @@ final class ReferenceMatchModel: ObservableObject {
     @Published var successMessage: String?
 
     let source: PhotoAsset
-    private let matcher = ReferenceColorMatcher()
-    private let lutStore = LUTStore()
+    private let matcher: ReferenceColorMatcher
+    private let lutStore: LUTStore
     private let queue = DispatchQueue(label: "com.rian.lighthouse.reference-match", qos: .userInitiated)
     private var result: ReferenceMatchResult?
     private var analysisGeneration = 0
     private var previewGeneration = 0
 
-    init(source: PhotoAsset) {
+    init(source: PhotoAsset, lutDirectory: URL = LUTStore.defaultDirectory) {
         self.source = source
+        matcher = ReferenceColorMatcher(lutDirectory: lutDirectory)
+        lutStore = LUTStore(directory: lutDirectory)
     }
 
     var canWrite: Bool {

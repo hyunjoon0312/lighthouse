@@ -4,6 +4,7 @@ import LighthouseCore
 struct AdvancedColorControls: View {
     @EnvironmentObject private var model: LibraryModel
     let edits: EditSettings
+    var allowsFullResolutionEffects = true
     @State private var channel: CurveChannel = .master
     @State private var selectedPoint: Int?
     @State private var draggingPoint: Int?
@@ -59,8 +60,9 @@ struct AdvancedColorControls: View {
                 .accessibilityLabel("\(band.koreanName) HSL 초기화")
 
             Divider()
-            Text("필름 입자").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-            advancedSlider("양", value: edits.grain.amount * 100, range: 0...100, format: "%.0f%%",
+            Group {
+                Text("필름 입자").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                advancedSlider("양", value: edits.grain.amount * 100, range: 0...100, format: "%.0f%%",
                            defaultValue: GrainSettings().amount * 100) {
                 let value = $0 / 100
                 updateGrain(continuous: true) { $0.amount = value.isFinite ? min(1, max(0, value)) : 0 }
@@ -70,14 +72,15 @@ struct AdvancedColorControls: View {
                 let value = $0
                 updateGrain(continuous: true) { $0.size = value.isFinite ? min(8, max(0.5, value)) : 1.5 }
             }
-            HStack {
+                HStack {
                 Text("패턴 \(edits.grain.seed)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 Spacer()
                 Button("패턴 새로 만들기") {
                     updateGrain { $0.seed = UInt32.random(in: 1...UInt32.max) }
                 }
                 .accessibilityLabel("필름 입자 패턴 새로 만들기")
-            }
+                }
+            }.disabled(!allowsFullResolutionEffects)
         }
         .onChange(of: channel) { _, _ in selectedPoint = nil; draggingPoint = nil }
     }

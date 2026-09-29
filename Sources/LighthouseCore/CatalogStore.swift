@@ -9,6 +9,14 @@ public struct CatalogStore: Sendable {
         if let directory = ProcessInfo.processInfo.environment["LIGHTHOUSE_DATA_DIR"], !directory.isEmpty {
             return URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent("catalog.json")
         }
+        if let directory = UserDefaults.standard.string(forKey: "activeLibraryDirectory")?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !directory.isEmpty, NSString(string: directory).isAbsolutePath {
+            let url = URL(fileURLWithPath: directory, isDirectory: true)
+            if url.isFileURL {
+                return url.standardizedFileURL.appendingPathComponent("catalog.json")
+            }
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("Lighthouse", isDirectory: true).appendingPathComponent("catalog.json")
     }

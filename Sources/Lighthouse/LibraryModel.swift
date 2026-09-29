@@ -207,6 +207,23 @@ final class LibraryModel: ObservableObject {
     @Published var showCardImport = false
     @Published var showShortcuts = false
     @Published var showPeople = false
+    @Published var showSimilarPhotos = false
+    @Published var showSmartPreviews = false
+    @Published var showLibraryBackup = false
+    @Published var showLibraryRestore = false
+    @Published var rangeMaskRequest: RangeMaskSheetRequest?
+    @Published var isAnalyzingFlicker = false
+    @Published var flickerAnalysisMessage: String?
+    @Published var workflowProgress = 0.0
+    @Published var isRunningWorkflow = false
+    @Published var workflowMessage: String?
+    @Published var similarPhotoResult: SimilarPhotoResult?
+    @Published var smartPreviewRecords: [UUID: SmartPreviewRecord] = [:]
+    @Published var smartPreviewURLs: [UUID: URL] = [:]
+    @Published var smartPreviewFailures: [WorkflowFileFailure] = []
+    @Published var batchWorkflowReport: BatchWorkflowReport?
+    @Published var archiveSummary: LibraryArchiveSummary?
+    @Published var restoredLibraryDirectory: URL?
     @Published var peopleCatalog = PeopleCatalog() {
         didSet { visibleCache = nil; countsCache = nil }
     }
@@ -333,19 +350,21 @@ final class LibraryModel: ObservableObject {
         set { canvas.retouchCursor = newValue }
     }
 
-    let pipeline = ImagePipeline()
+    let dataDirectory: URL
+    let pipeline: ImagePipeline
     let driveUpload: GoogleDriveUploadModel
-    let previewPipeline = ImagePipeline(cachesDevelopment: true)
-    let thumbnailStore = ThumbnailStore()
-    let lutStore = LUTStore()
-    let catalog = CatalogStore(url: CatalogStore.defaultURL)
-    let folderStore = PhotoFolderStore(url: PhotoFolderStore.defaultURL)
-    let presetStore = EditPresetStore(url: EditPresetStore.defaultURL)
-    let smartFolderStore = SmartFolderStore(url: SmartFolderStore.defaultURL)
-    let backup = CatalogBackup(directory: CatalogBackup.defaultDirectory)
-    let peopleStore = PeopleStore(url: PeopleStore.defaultURL)
+    let previewPipeline: ImagePipeline
+    let thumbnailStore: ThumbnailStore
+    let lutStore: LUTStore
+    let catalog: CatalogStore
+    let folderStore: PhotoFolderStore
+    let presetStore: EditPresetStore
+    let smartFolderStore: SmartFolderStore
+    let backup: CatalogBackup
+    let peopleStore: PeopleStore
+    let smartPreviewStore: SmartPreviewStore
     let faceAnalyzer = FaceAnalyzer()
-    let facePipeline = ImagePipeline()
+    let facePipeline: ImagePipeline
     var backupFailureReported = false
     let previewQueue = DispatchQueue(label: "com.rian.lighthouse.preview", qos: .userInitiated)
     let thumbnailQueue = DispatchQueue(label: "com.rian.lighthouse.thumbnails", qos: .utility)
@@ -362,6 +381,7 @@ final class LibraryModel: ObservableObject {
     let autoAdjustQueue = DispatchQueue(label: "com.rian.lighthouse.auto", qos: .userInitiated)
     let sidecarQueue = DispatchQueue(label: "com.rian.lighthouse.sidecar", qos: .utility)
     let faceQueue = DispatchQueue(label: "com.rian.lighthouse.faces", qos: .utility)
+    var thumbnailGeneration = 0
     var pendingSidecarIDs = Set<UUID>()
     var dirtySidecarIDs = Set<UUID>()
     var sidecarVersions: [UUID: UInt64] = [:]
@@ -403,6 +423,12 @@ final class LibraryModel: ObservableObject {
     var faceCancellation: CancellationFlag?
     var faceCompletionWaiters: [CheckedContinuation<Void, Never>] = []
     var faceBatchGeneration = 0
+    var workflowCancellation: CancellationFlag?
+    var workflowGeneration = 0
+    var previewRefreshGeneration = 0
+    var workflowCompletionWaiters: [CheckedContinuation<Void, Never>] = []
+    var flickerGeneration = 0
+    var rangeMaskGeneration = 0
     var faceAnalyzeOverride: (@Sendable (URL) throws -> [DetectedFace])?
     private(set) var visibleCache: [PhotoAsset]?
     private(set) var indexCache: [UUID: Int]?
@@ -441,9 +467,10 @@ final class LibraryModel: ObservableObject {
     var draftPhotoID: UUID?
     var draftLocalID: UUID?
     private var started = false
+    private let allowsLaunchImport: Bool
     /// 마지막 확인에서 파일을 찾지 못한 원본 경로. 앱으로 돌아오거나 볼륨을 연결·해제하면 다시 확인한다.
     @Published var missingPaths: Set<String> = [] {
-        didSet { visibleCache = nil; countsCache = nil; missingOriginalsDidChange() }
+        didSet { visibleCache = nil; countsCache = nil; missingOriginalsDidChange(previous: oldValue) }
     }
     /// 원본이 없고 보관한 썸네일도 없는 사진. 원본이 돌아올 때까지 다시 찾지 않는다.
     var unavailableThumbnails = Set<UUID>()
@@ -460,11 +487,31 @@ final class LibraryModel: ObservableObject {
     private static let pasteComponents: EditComponents = [.global, .lut]
 
     init(
+        dataDirectory: URL? = nil,
         driveUpload: GoogleDriveUploadModel? = nil,
-        faceAnalyze: (@Sendable (URL) throws -> [DetectedFace])? = nil
+        faceAnalyze: (@Sendable (URL) throws -> [DetectedFace])? = nil,
+        allowsLaunchImport: Bool = true
     ) {
-        self.driveUpload = driveUpload ?? GoogleDriveUploadModel()
+        let root = (dataDirectory ?? CatalogStore.defaultURL.deletingLastPathComponent())
+            .standardizedFileURL
+        let lutDirectory = root.appendingPathComponent("LUTs", isDirectory: true)
+        let renderPipeline = ImagePipeline(lutDirectory: lutDirectory)
+        self.dataDirectory = root
+        self.pipeline = renderPipeline
+        self.previewPipeline = ImagePipeline(lutDirectory: lutDirectory, cachesDevelopment: true)
+        self.facePipeline = ImagePipeline(lutDirectory: lutDirectory)
+        self.thumbnailStore = ThumbnailStore(directory: root.appendingPathComponent("Thumbnails", isDirectory: true))
+        self.lutStore = LUTStore(directory: lutDirectory)
+        self.catalog = CatalogStore(url: root.appendingPathComponent("catalog.json"))
+        self.folderStore = PhotoFolderStore(url: root.appendingPathComponent("folders.json"))
+        self.presetStore = EditPresetStore(url: root.appendingPathComponent("presets.json"))
+        self.smartFolderStore = SmartFolderStore(url: root.appendingPathComponent("smart-folders.json"))
+        self.backup = CatalogBackup(directory: root.appendingPathComponent("Backups", isDirectory: true))
+        self.peopleStore = PeopleStore(url: root.appendingPathComponent("people.json"))
+        self.smartPreviewStore = SmartPreviewStore(directory: root.appendingPathComponent("SmartPreviews", isDirectory: true))
+        self.driveUpload = driveUpload ?? GoogleDriveUploadModel(pipeline: renderPipeline)
         self.faceAnalyzeOverride = faceAnalyze
+        self.allowsLaunchImport = allowsLaunchImport
         thumbnailCache.countLimit = 240
         thumbnailCache.totalCostLimit = 200 * 1024 * 1024
     }
@@ -493,7 +540,7 @@ final class LibraryModel: ObservableObject {
     var canRedo: Bool { editHistory.canRedo }
     var hasModalPresentation: Bool {
         showBatchEdit || showExport || showCardImport || showShortcuts || showPeople || presetSheet != nil || referenceMatchSource != nil || folderSheetRequest != nil ||
-            cropSource != nil || catalogRemoval != nil
+            cropSource != nil || catalogRemoval != nil || showSimilarPhotos || showSmartPreviews || showLibraryBackup || showLibraryRestore || rangeMaskRequest != nil
     }
     var selectedLocal: LocalAdjustment? { selection?.edits.localAdjustments.first { $0.id == selectedLocalID } }
     var canDrawLocal: Bool {
@@ -855,11 +902,12 @@ final class LibraryModel: ObservableObject {
                     self.thumbnailQueue.async { [thumbnailStore = self.thumbnailStore] in thumbnailStore.prune(keeping: kept) }
                     self.observeFileAvailability()
                     self.refreshMissingOriginals()
+                    self.refreshSmartPreviewRecords()
                     self.backfillFocalLengths()
                     self.refreshLUTLibrary()
                     self.requestRender()
                     let arguments = ProcessInfo.processInfo.arguments
-                    if let index = arguments.firstIndex(of: "--import"), arguments.indices.contains(index + 1) {
+                    if self.allowsLaunchImport, let index = arguments.firstIndex(of: "--import"), arguments.indices.contains(index + 1) {
                         self.importURLs([URL(fileURLWithPath: arguments[index + 1])])
                     }
                 case .failure(let error):
@@ -1092,7 +1140,7 @@ final class LibraryModel: ObservableObject {
         }
     }
 
-    private func applyEditChanges(_ changes: [PhotoEditChange], useAfter: Bool,
+    func applyEditChanges(_ changes: [PhotoEditChange], useAfter: Bool,
                                   record: Bool, continuous: Bool = false, debounce: Bool = false) {
         guard catalogLoaded, loadError == nil else { return }
         var updated = photos

@@ -12,7 +12,7 @@ struct ExportSheet: View {
     @EnvironmentObject private var model: LibraryModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.displayScale) private var displayScale
-    @StateObject private var previewModel = JPEGPreviewModel()
+    @StateObject private var previewModel: JPEGPreviewModel
     @State private var scope: ExportScope = .current
     @State private var destination: ExportDestination = .mac
     @State private var driveContent: GoogleDriveUploadContent = .edited
@@ -26,6 +26,10 @@ struct ExportSheet: View {
     /// 마지막으로 내보낸 뒤 바뀐 사진. 창을 열 때와 다시 내보낸 뒤에 센다.
     @State private var changed: [PhotoAsset] = []
     @AppStorage("reexportTrashesPrevious") private var trashPrevious = false
+
+    init(lutDirectory: URL = LUTStore.defaultDirectory) {
+        _previewModel = StateObject(wrappedValue: JPEGPreviewModel(lutDirectory: lutDirectory))
+    }
 
     private var targets: [PhotoAsset] { model.exportTargets(for: scope) }
     private var representative: PhotoAsset? { targets.first }
@@ -201,6 +205,11 @@ struct ExportSheet: View {
             if destination == .drive {
                 GoogleDriveExportPanel(upload: model.driveUpload, photos: targets,
                                        options: options, content: $driveContent)
+                    .disabled(targets.contains(where: model.isMissing))
+                if targets.contains(where: model.isMissing) {
+                    Text("원본이 없는 사진은 내보내거나 Drive에 업로드할 수 없습니다. 스마트 미리보기는 최종 파일로 사용하지 않습니다.")
+                        .font(.caption).foregroundStyle(.orange)
+                }
                 if driveContent.includesEdited {
                     Divider()
                     Text(driveContent == .both ? "보정본 설정" : "편집본 설정").font(.headline)
@@ -390,6 +399,7 @@ struct ExportSheet: View {
 
     private var canStartLocalExport: Bool {
         directory != nil && !model.isImporting && !model.isExporting && !targets.isEmpty &&
+            !targets.contains(where: model.isMissing) &&
             !previewModel.isPreparing &&
             (previewModel.preview != nil || (targets.count > 1 && previewModel.error != nil))
     }

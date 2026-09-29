@@ -39,6 +39,10 @@ struct InspectorView: View {
                     Text(photo.displayName).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 if model.isMissing(photo) { missingOriginal }
+                if model.selectionUsesSmartPreview {
+                    Label("스마트 미리보기 · 원본 없음 · 기본 보정 근사", systemImage: "bolt.horizontal.circle")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                }
                 HistogramView()
                 ratingRow
                 ColorLabelRow(current: model.commonMarkColorLabel) { model.toggleMarkColorLabel($0) }
@@ -84,7 +88,10 @@ struct InspectorView: View {
                 .padding(3).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
                 if model.adjustmentPanel == .global { globalControls }
                 else if model.adjustmentPanel == .local { localControls }
-                else { RetouchControls(photo: photo) }
+                else {
+                    RetouchControls(photo: photo).disabled(model.selectionUsesSmartPreview)
+                    if model.selectionUsesSmartPreview { Text("복구 작업에는 원본이 필요합니다.").font(.caption2).foregroundStyle(.orange) }
+                }
                 Divider()
                 EditHistoryPanel(photo: photo)
                 Divider()
@@ -154,11 +161,15 @@ struct InspectorView: View {
             adjustment("틴트", \.tintShift, range: -100...100, scale: 1)
             adjustment("생동감", \.vibrance, range: -1...1, scale: 100)
             adjustment("채도", \.saturation, range: 0...2, scale: 100)
-            AdvancedColorControls(edits: edits)
+            AdvancedColorControls(edits: edits, allowsFullResolutionEffects: !model.selectionUsesSmartPreview)
             Divider()
             section("디테일 및 구도")
-            adjustment("선명도", \.sharpness, range: 0...2, scale: 50)
-            NoiseReductionControls(edits: edits)
+            Group {
+                adjustment("선명도", \.sharpness, range: 0...2, scale: 50)
+                NoiseReductionControls(edits: edits)
+                flickerControls
+            }
+            .disabled(model.selectionUsesSmartPreview)
             adjustment("비네팅", \.vignette, range: -1...1, scale: 100)
             HStack {
                 Button { model.rotate(clockwise: false) } label: { Image(systemName: "rotate.left") }
@@ -176,7 +187,7 @@ struct InspectorView: View {
                 Text(String(format: "크롭 적용 · 수평 %+.1f°", edits.straightenDegrees))
                     .font(.caption2).foregroundStyle(.secondary)
             }
-            if photo.isRAW { rawDevelopControls }
+            if photo.isRAW { rawDevelopControls.disabled(model.selectionUsesSmartPreview) }
             Divider()
             presetControls
             Divider()
@@ -360,7 +371,12 @@ struct InspectorView: View {
                 Button("배경 선택") { model.addAutomaticLocal(background: true) }
                     .accessibilityLabel("자동 배경 마스크 만들기")
             }
-            .disabled(model.isAutoMasking)
+            .disabled(model.isAutoMasking || model.isMissing(photo))
+            HStack {
+                Button("밝기 범위") { model.presentRangeMask(.luminance) }
+                Button("색상 범위") { model.presentRangeMask(.color) }
+            }
+            .disabled(model.isMissing(photo) || model.isRunningWorkflow)
             if model.isAutoMasking {
                 HStack {
                     ProgressView().controlSize(.small)
@@ -455,6 +471,27 @@ struct InspectorView: View {
                                 defaultValue: 0) { value in
                         model.updateLocal(continuous: true) { $0.clarity = value / 100 }
                     }
+                    Group {
+                    Picker("영역 노이즈 감소", selection: Binding(
+                        get: { area.noiseReduction.mode },
+                        set: { mode in model.updateLocal { $0.noiseReduction.mode = mode } }
+                    )) {
+                        Text("끔").tag(NoiseReductionMode.off)
+                        Text("일반").tag(NoiseReductionMode.standard)
+                        Text("AI").tag(NoiseReductionMode.ai)
+                    }
+                    .pickerStyle(.segmented)
+                    if area.noiseReduction.mode != .off {
+                        localSlider("영역 노이즈 감소 강도", value: area.noiseReduction.amount * 100,
+                                    range: 0...100, format: "%.0f%%", defaultValue: 35) { value in
+                            model.updateLocal(continuous: true) { $0.noiseReduction.amount = value / 100 }
+                        }
+                    }
+                    }.disabled(model.selectionUsesSmartPreview)
+                    if let range = area.rangeSelection {
+                        Button("범위 다시 설정") { model.presentRangeMask(range.kind, reediting: area.id) }
+                            .disabled(model.isMissing(photo) || model.isRunningWorkflow)
+                    }
                     if let softness = area.gradient?.softness {
                         localSlider("원형 가장자리 부드럽게", value: softness * 100, range: 0...100, format: "%.0f",
                                     defaultValue: 50) { value in
@@ -486,6 +523,54 @@ struct InspectorView: View {
                     .accessibilityLabel("부분 보정 " + drawTitle)
                 }
             }
+        }
+    }
+
+    @ViewBuilder private var flickerControls: some View {
+        Divider()
+        HStack {
+            section("플리커 띠 보정")
+            Spacer()
+            Toggle("사용", isOn: Binding(
+                get: { edits.flicker.isEnabled },
+                set: { enabled in change { $0.flicker.isEnabled = enabled } }
+            )).labelsHidden().accessibilityLabel("LED 띠 감소 사용")
+        }
+        Picker("띠 방향", selection: Binding(
+            get: { edits.flicker.direction },
+            set: { value in change { $0.flicker.direction = value } }
+        )) {
+            Text("가로").tag(BandDirection.horizontal)
+            Text("세로").tag(BandDirection.vertical)
+        }.pickerStyle(.segmented)
+        localSlider("띠 감소 강도", value: edits.flicker.amount * 100, range: 0...100, format: "%.0f%%", defaultValue: 70) {
+            value in change(continuous: true) { $0.flicker.amount = value / 100 }
+        }
+        localSlider("띠 개수", value: edits.flicker.cycles, range: 1...128, format: "%.0f", defaultValue: 8) {
+            value in change(continuous: true) { $0.flicker.cycles = value }
+        }
+        localSlider("위상", value: edits.flicker.phase * 100, range: 0...100, format: "%.0f%%", defaultValue: 0) {
+            value in change(continuous: true) { $0.flicker.phase = value / 100 }
+        }
+        localSlider("밝기 진폭", value: edits.flicker.amplitudeEV, range: 0...2, format: "%.2f EV", defaultValue: 0.25) {
+            value in change(continuous: true) { $0.flicker.amplitudeEV = value }
+        }
+        localSlider("색 띠", value: edits.flicker.colorAmount * 100, range: 0...100, format: "%.0f%%", defaultValue: 0) {
+            value in change(continuous: true) { $0.flicker.colorAmount = value / 100 }
+        }
+        HStack {
+            Button("띠 자동 분석") { model.analyzeFlicker() }
+                .disabled(model.isAnalyzingFlicker || model.isMissing(photo))
+            if model.isAnalyzingFlicker {
+                ProgressView().controlSize(.small)
+                Button("취소") { model.cancelFlickerAnalysis() }
+            }
+        }
+        if let message = model.flickerAnalysisMessage { Text(message).font(.caption).foregroundStyle(.secondary) }
+        Text("자동 분석은 실제 무늬를 띠로 오인할 수 있으며 촬영 때 손실된 정보는 복원하지 못합니다.")
+            .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        if model.selectionUsesSmartPreview {
+            Text("LED 띠 분석과 보정에는 원본이 필요합니다.").font(.caption2).foregroundStyle(.orange)
         }
     }
 

@@ -63,12 +63,17 @@ public struct LocalAdjustment: Identifiable, Codable, Equatable, Sendable {
     public var temperature: Double
     public var saturation: Double
     public var clarity: Double
+    public var automaticMaskKind: AutomaticMaskKind?
+    public var rangeSelection: RangeSelection?
+    public var noiseReduction: NoiseReductionSettings
 
     public init(id: UUID = UUID(), name: String = "영역 1", isEnabled: Bool = true,
                 exposure: Double = 0, contrast: Double = 1, feather: Double = 0.01,
                 strokes: [MaskStroke] = [], baseMask: RasterMask? = nil,
                 isInverted: Bool = false, gradient: MaskGradient? = nil,
-                temperature: Double = 0, saturation: Double = 0, clarity: Double = 0) {
+                temperature: Double = 0, saturation: Double = 0, clarity: Double = 0,
+                automaticMaskKind: AutomaticMaskKind? = nil, rangeSelection: RangeSelection? = nil,
+                noiseReduction: NoiseReductionSettings = NoiseReductionSettings()) {
         self.id = id
         self.name = name
         self.isEnabled = isEnabled
@@ -82,11 +87,15 @@ public struct LocalAdjustment: Identifiable, Codable, Equatable, Sendable {
         self.temperature = temperature
         self.saturation = saturation
         self.clarity = clarity
+        self.automaticMaskKind = automaticMaskKind
+        self.rangeSelection = rangeSelection
+        self.noiseReduction = noiseReduction
     }
 
     /// 마스크 안에서 실제로 바꾸는 값이 있는지.
     public var hasEffect: Bool {
         exposure != 0 || contrast != 1 || temperature != 0 || saturation != 0 || clarity != 0
+            || noiseReduction.isActive
     }
 
     public var hasMask: Bool { baseMask != nil || gradient != nil || isInverted || !strokes.isEmpty }
@@ -99,7 +108,7 @@ public struct LocalAdjustment: Identifiable, Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, isEnabled, exposure, contrast, feather, strokes, baseMask, isInverted
-        case gradient, temperature, saturation, clarity
+        case gradient, temperature, saturation, clarity, automaticMaskKind, rangeSelection, noiseReduction
     }
 
     public init(from decoder: Decoder) throws {
@@ -118,6 +127,34 @@ public struct LocalAdjustment: Identifiable, Codable, Equatable, Sendable {
         temperature = try container.decodeIfPresent(Double.self, forKey: .temperature) ?? 0
         saturation = try container.decodeIfPresent(Double.self, forKey: .saturation) ?? 0
         clarity = try container.decodeIfPresent(Double.self, forKey: .clarity) ?? 0
+        automaticMaskKind = try container.contains(.automaticMaskKind)
+            ? container.decode(AutomaticMaskKind.self, forKey: .automaticMaskKind) : nil
+        rangeSelection = try container.contains(.rangeSelection)
+            ? container.decode(RangeSelection.self, forKey: .rangeSelection) : nil
+        noiseReduction = try container.contains(.noiseReduction)
+            ? container.decode(NoiseReductionSettings.self, forKey: .noiseReduction) : NoiseReductionSettings()
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(exposure, forKey: .exposure)
+        try container.encode(contrast, forKey: .contrast)
+        try container.encode(feather, forKey: .feather)
+        try container.encode(strokes, forKey: .strokes)
+        try container.encodeIfPresent(baseMask, forKey: .baseMask)
+        try container.encode(isInverted, forKey: .isInverted)
+        try container.encodeIfPresent(gradient, forKey: .gradient)
+        try container.encode(temperature, forKey: .temperature)
+        try container.encode(saturation, forKey: .saturation)
+        try container.encode(clarity, forKey: .clarity)
+        try container.encodeIfPresent(automaticMaskKind, forKey: .automaticMaskKind)
+        try container.encodeIfPresent(rangeSelection, forKey: .rangeSelection)
+        if noiseReduction != NoiseReductionSettings() {
+            try container.encode(noiseReduction, forKey: .noiseReduction)
+        }
     }
 }
 
@@ -164,6 +201,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
     public var retouchStrokes: [RetouchStroke]
     public var rawDevelop: RAWDevelopSettings
     public var noiseReduction: NoiseReductionSettings
+    public var flicker: FlickerSettings
     public var vibrance: Double
     public var clarity: Double
     public var vignette: Double
@@ -178,7 +216,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
                 colorRanges: [ColorRangeAdjustment] = [], grain: GrainSettings = GrainSettings(),
                 straightenDegrees: Double = 0, cropRect: NormalizedCrop? = nil,
                 retouchStrokes: [RetouchStroke] = [], rawDevelop: RAWDevelopSettings = RAWDevelopSettings(),
-                noiseReduction: NoiseReductionSettings = NoiseReductionSettings(),
+                noiseReduction: NoiseReductionSettings = NoiseReductionSettings(), flicker: FlickerSettings = FlickerSettings(),
                 vibrance: Double = 0, clarity: Double = 0, vignette: Double = 0, hdrAmount: Double = 0) {
         self.exposure = exposure
         self.contrast = contrast
@@ -200,6 +238,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
         self.retouchStrokes = retouchStrokes
         self.rawDevelop = rawDevelop
         self.noiseReduction = noiseReduction
+        self.flicker = flicker
         self.vibrance = vibrance
         self.clarity = clarity
         self.vignette = vignette
@@ -212,7 +251,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case exposure, contrast, saturation, temperatureShift, tintShift, highlights, shadows
         case sharpness, rotationQuarterTurns, cropAspect, localAdjustments, lut
-        case curves, colorRanges, grain, straightenDegrees, cropRect, retouchStrokes, rawDevelop, noiseReduction
+        case curves, colorRanges, grain, straightenDegrees, cropRect, retouchStrokes, rawDevelop, noiseReduction, flicker
         case vibrance, clarity, vignette, hdrAmount
     }
 
@@ -246,6 +285,8 @@ public struct EditSettings: Codable, Equatable, Sendable {
             ? container.decode(RAWDevelopSettings.self, forKey: .rawDevelop) : RAWDevelopSettings()
         noiseReduction = try container.contains(.noiseReduction)
             ? container.decode(NoiseReductionSettings.self, forKey: .noiseReduction) : NoiseReductionSettings()
+        flicker = try container.contains(.flicker)
+            ? container.decode(FlickerSettings.self, forKey: .flicker) : FlickerSettings()
         vibrance = try container.decodeIfPresent(Double.self, forKey: .vibrance) ?? 0
         clarity = try container.decodeIfPresent(Double.self, forKey: .clarity) ?? 0
         vignette = try container.decodeIfPresent(Double.self, forKey: .vignette) ?? 0
@@ -276,6 +317,9 @@ public struct EditSettings: Codable, Equatable, Sendable {
         try container.encode(rawDevelop, forKey: .rawDevelop)
         if noiseReduction != NoiseReductionSettings() {
             try container.encode(noiseReduction, forKey: .noiseReduction)
+        }
+        if flicker != FlickerSettings() {
+            try container.encode(flicker, forKey: .flicker)
         }
         try container.encode(vibrance, forKey: .vibrance)
         try container.encode(clarity, forKey: .clarity)

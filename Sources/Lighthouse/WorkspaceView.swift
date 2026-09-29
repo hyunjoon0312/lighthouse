@@ -53,13 +53,17 @@ struct WorkspaceView: View {
             if fullScreen.didExit(focused: model.isFocusView) { model.isFocusView = false }
             syncFullScreen()
         }
-        .sheet(isPresented: $model.showExport) { ExportSheet() }
+        .sheet(isPresented: $model.showExport) { ExportSheet(lutDirectory: model.lutStore.directory).id(model.dataDirectory) }
         .sheet(isPresented: $model.showBatchEdit) { BatchEditSheet() }
         .sheet(isPresented: $model.showCardImport) { CardImportSheet() }
         .sheet(isPresented: $model.showShortcuts) { ShortcutHelpSheet() }
         .sheet(isPresented: $model.showPeople) { PeopleSheet() }
         .sheet(item: $model.presetSheet) { request in PresetSheet(request: request) }
-        .sheet(item: $model.cropSource) { source in CropSheet(source: source) }
+        .sheet(item: $model.cropSource) { source in
+            let proxy = model.validatedPreviewSource(for: source)
+            CropSheet(source: source, lutDirectory: model.lutStore.directory,
+                      renderURL: proxy?.url, renderEdits: proxy?.edits)
+        }
         .confirmationDialog(removalTitle, isPresented: Binding(
             get: { model.catalogRemoval != nil },
             set: { if !$0 { model.catalogRemoval = nil } }
@@ -73,11 +77,16 @@ struct WorkspaceView: View {
             Text(removalMessage)
         }
         .sheet(item: $model.referenceMatchSource) { source in
-            ReferenceMatchSheet(source: source) { adjustment, apply in
+            ReferenceMatchSheet(source: source, lutDirectory: model.lutStore.directory) { adjustment, apply in
                 model.finishReferenceMatch(adjustment, apply: apply, source: source)
             }
         }
         .sheet(item: $model.folderSheetRequest) { request in PhotoFolderSheet(request: request) }
+        .sheet(item: $model.rangeMaskRequest) { request in RangeMaskSheet(request: request) }
+        .sheet(isPresented: $model.showSimilarPhotos) { SimilarPhotosSheet() }
+        .sheet(isPresented: $model.showSmartPreviews) { SmartPreviewSheet() }
+        .sheet(isPresented: $model.showLibraryBackup) { LibraryArchiveSheet(mode: .backup) }
+        .sheet(isPresented: $model.showLibraryRestore) { LibraryArchiveSheet(mode: .restore) }
         .alert("스마트 폴더 이름", isPresented: Binding(
             get: { smartRenameTarget != nil },
             set: { if !$0 { smartRenameTarget = nil } }
@@ -659,7 +668,7 @@ struct WorkspaceView: View {
                     Button(model.showsSplit ? "나눠 보기 끄기" : "전·후 나눠 보기") { model.toggleSplit() }
                         .help("왼쪽은 보정 전, 오른쪽은 보정 후 (Y). 선을 끌어 옮깁니다.")
                 }
-                Button(model.actualSize ? "화면 맞춤" : "100%") { model.toggleActualSize() }
+                Button(model.actualSize ? "화면 맞춤" : (model.selectionUsesSmartPreview ? "미리보기 확대" : "100%")) { model.toggleActualSize() }
                 Button(model.isOriginal ? "보정 보기" : "원본 보기") { model.toggleOriginal() }
             }
             // 단추 글자는 줄바꿈하지 않고, 좁으면 파일 이름·기준 이름·촬영 정보가 먼저 줄어든다.

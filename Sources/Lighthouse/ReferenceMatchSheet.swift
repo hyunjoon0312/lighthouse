@@ -7,8 +7,9 @@ struct ReferenceMatchSheet: View {
     @StateObject private var model: ReferenceMatchModel
     private let onStored: (LUTAdjustment, Bool) -> Void
 
-    init(source: PhotoAsset, onStored: @escaping (LUTAdjustment, Bool) -> Void) {
-        _model = StateObject(wrappedValue: ReferenceMatchModel(source: source))
+    init(source: PhotoAsset, lutDirectory: URL = LUTStore.defaultDirectory,
+         onStored: @escaping (LUTAdjustment, Bool) -> Void) {
+        _model = StateObject(wrappedValue: ReferenceMatchModel(source: source, lutDirectory: lutDirectory))
         self.onStored = onStored
     }
 

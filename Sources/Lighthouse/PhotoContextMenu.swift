@@ -38,6 +38,7 @@ struct PhotoContextMenu: View {
         Button("가상 사본 만들기") { focusOnly { model.createVirtualCopy() } }
         Button("Finder에서 원본 보기") { act { model.revealOriginals() } }
         Button("내보내기…") { act { model.showExport = true } }
+            .disabled(model.isMissing(photo))
         Divider()
         Button("카탈로그에서 빼기…", role: .destructive) { act { model.requestRemoveFromCatalog() } }
     }

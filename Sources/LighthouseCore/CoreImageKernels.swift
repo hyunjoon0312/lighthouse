@@ -67,6 +67,34 @@ enum CoreImageKernels {
         }
         """)
 
+    /// 방향 적용된 이미지의 좌상단 기준 위치에서 밴딩 보정 EV를 계산해 선형 RGB에 곱한다.
+    static let flickerCorrection = compile("""
+        [[stitchable]] float4 lighthouseFlickerCorrection(
+            coreimage::sample_t pixel, float direction, float cycles, float phase, float amount,
+            float colorAmount, float originX, float originY, float width, float height,
+            float4 redA, float4 redB, float4 greenA, float4 greenB, float4 blueA, float4 blueB,
+            coreimage::destination dest) {
+            float coordinate = direction < 0.5
+                ? (originY + height - dest.coord().y) / height
+                : (dest.coord().x - originX) / width;
+            float baseAngle = 6.28318530718 * (cycles * coordinate + phase);
+            float3 correction = float3(0.0);
+            correction.r = redA.x * sin(baseAngle) + redA.y * cos(baseAngle)
+                         + redA.z * sin(2.0 * baseAngle) + redA.w * cos(2.0 * baseAngle)
+                         + redB.x * sin(3.0 * baseAngle) + redB.y * cos(3.0 * baseAngle);
+            correction.g = greenA.x * sin(baseAngle) + greenA.y * cos(baseAngle)
+                         + greenA.z * sin(2.0 * baseAngle) + greenA.w * cos(2.0 * baseAngle)
+                         + greenB.x * sin(3.0 * baseAngle) + greenB.y * cos(3.0 * baseAngle);
+            correction.b = blueA.x * sin(baseAngle) + blueA.y * cos(baseAngle)
+                         + blueA.z * sin(2.0 * baseAngle) + blueA.w * cos(2.0 * baseAngle)
+                         + blueB.x * sin(3.0 * baseAngle) + blueB.y * cos(3.0 * baseAngle);
+            float luminance = dot(correction, float3(0.2126, 0.7152, 0.0722));
+            correction = mix(float3(luminance), correction, colorAmount);
+            float3 multiplier = exp2(-clamp(correction * amount, float3(-2.0), float3(2.0)));
+            return float4(pixel.rgb * multiplier, pixel.a);
+        }
+        """)
+
     private static func compile(_ body: String) -> CIColorKernel? {
         let source = """
             #include <metal_stdlib>

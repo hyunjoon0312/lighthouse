@@ -6,15 +6,21 @@ struct CropSheet: View {
     @EnvironmentObject private var model: LibraryModel
     @Environment(\.dismiss) private var dismiss
     let source: PhotoAsset
-    @StateObject private var preview = CropPreviewModel()
+    let renderURL: URL
+    let renderEdits: EditSettings
+    @StateObject private var preview: CropPreviewModel
     @State private var angle: Double
     @State private var crop: NormalizedCrop
     @State private var ratio: CropRatio = .free
     @State private var interaction: CropInteraction?
     @State private var interactionStart = NormalizedCrop.full
 
-    init(source: PhotoAsset) {
+    init(source: PhotoAsset, lutDirectory: URL = LUTStore.defaultDirectory,
+         renderURL: URL? = nil, renderEdits: EditSettings? = nil) {
         self.source = source
+        self.renderURL = renderURL ?? source.url
+        self.renderEdits = renderEdits ?? source.edits
+        _preview = StateObject(wrappedValue: CropPreviewModel(lutDirectory: lutDirectory))
         let geometry = PhotoGeometry(sourceWidth: Double(source.metadata.width),
                                      sourceHeight: Double(source.metadata.height), edits: source.edits)
         let canvas = geometry.canvasSize
@@ -81,11 +87,11 @@ struct CropSheet: View {
             }
         }
         .padding(20).frame(minWidth: 760, minHeight: 660)
-        .onAppear { preview.request(source: source, angle: angle) }
+        .onAppear { preview.request(source: source, url: renderURL, edits: renderEdits, angle: angle) }
         .onDisappear { preview.cancel() }
         .onChange(of: angle) { _, newValue in
             interaction = nil
-            preview.request(source: source, angle: newValue)
+            preview.request(source: source, url: renderURL, edits: renderEdits, angle: newValue)
         }
         .onChange(of: ratio) { _, newValue in applyRatio(newValue) }
     }
@@ -206,18 +212,20 @@ private final class CropPreviewModel: ObservableObject {
     @Published var isRendering = false
     @Published private var renderedAngle: Double?
     @Published var canvasAspect = 1.0
-    private let pipeline = ImagePipeline()
+    private let pipeline: ImagePipeline
     private let queue = DispatchQueue(label: "com.rian.lighthouse.crop-preview", qos: .userInitiated)
     private var generation = 0
     private var workItem: DispatchWorkItem?
 
-    func request(source: PhotoAsset, angle: Double) {
+    init(lutDirectory: URL) { pipeline = ImagePipeline(lutDirectory: lutDirectory) }
+
+    func request(source: PhotoAsset, url: URL, edits sourceEdits: EditSettings, angle: Double) {
         workItem?.cancel()
         generation += 1
         let token = generation
         isRendering = true
         error = nil
-        var edits = source.edits
+        var edits = sourceEdits
         edits.straightenDegrees = angle
         edits.cropRect = nil
         edits.cropAspect = nil
@@ -226,7 +234,7 @@ private final class CropPreviewModel: ObservableObject {
         canvasAspect = Double(geometry.canvasSize.width / max(1, geometry.canvasSize.height))
         // 백그라운드 큐에서 돈다. @Sendable로 표시해 화면 상태를 여기서 건드리지 않는지 컴파일러가 검사하게 한다.
         let job = DispatchWorkItem { @Sendable [weak self, pipeline, edits] in
-            let result = Result { try pipeline.renderPreview(url: source.url, edits: edits, maxPixel: 2200).image }
+            let result = Result { try pipeline.renderPreview(url: url, edits: edits, maxPixel: 2200).image }
             DispatchQueue.main.async { [weak self] in
                 guard let self, token == self.generation else { return }
                 self.isRendering = false

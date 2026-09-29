@@ -32,7 +32,7 @@ extension LibraryModel {
         surveyErrors = surveyErrors.filter { ids.contains($0.key) }
         surveyFailedRequests = surveyFailedRequests.filter { ids.contains($0.key) }
 
-        var pending: [(PhotoAsset, SurveyRequestKey)] = []
+        var pending: [(PhotoAsset, SurveyRequestKey, URL, EditSettings)] = []
         for photo in photos {
             let key = SurveyRequestKey(photoID: photo.id, path: photo.path, edits: photo.edits)
             if surveyRenderedEdits[photo.id] == photo.edits,
@@ -45,17 +45,18 @@ extension LibraryModel {
             surveyErrors.removeValue(forKey: photo.id)
             surveyRequests[photo.id] = key
             surveyLoadingIDs.insert(photo.id)
-            pending.append((photo, key))
+            let proxy = validatedPreviewSource(for: photo)
+            pending.append((photo, key, proxy?.url ?? photo.url, proxy?.edits ?? photo.edits))
         }
         guard !pending.isEmpty else { return }
         let generation = surveyGeneration
         let size = Self.surveyPixels
         surveyQueue.async { [pipeline, pending] in
-            for (photo, key) in pending {
+            for (photo, key, renderURL, renderEdits) in pending {
                 guard DispatchQueue.main.sync(execute: {
                     generation == self.surveyGeneration && self.surveyRequests[photo.id] == key
                 }) else { return }
-                let result = Result { try pipeline.renderPreview(url: photo.url, edits: photo.edits, maxPixel: size).image }
+                let result = Result { try pipeline.renderPreview(url: renderURL, edits: renderEdits, maxPixel: size).image }
                 DispatchQueue.main.async {
                     guard generation == self.surveyGeneration,
                           self.mode == .survey,

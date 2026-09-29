@@ -5,28 +5,45 @@ import LighthouseCore
 @main
 struct LighthouseApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @StateObject private var library = LibraryModel()
+    @StateObject private var session = LibrarySession()
+    private var library: LibraryModel { session.library }
 
     var body: some Scene {
         WindowGroup {
-            WorkspaceView()
-                .environmentObject(library)
+            ZStack {
+                WorkspaceView()
+                    .environmentObject(session.library)
+                    .environmentObject(session)
+                    .id(session.library.dataDirectory.path)
+                    .disabled(session.isSwitching)
+                if session.isSwitching {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    ProgressView("라이브러리를 여는 중…").padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+                .alert("라이브러리 오류", isPresented: Binding(
+                    get: { session.errorMessage != nil },
+                    set: { if !$0 { session.errorMessage = nil } }
+                )) { Button("확인") { session.errorMessage = nil } } message: {
+                    Text(session.errorMessage ?? "라이브러리를 열 수 없습니다.")
+                }
                 .frame(minWidth: 1100, minHeight: 720)
                 .preferredColorScheme(.dark)
                 .onAppear {
-                    delegate.library = library
-                    library.start()
+                    delegate.library = session.library
+                    session.library.start()
                 }
+                .onChange(of: session.library.dataDirectory) { _, _ in delegate.library = session.library }
         }
         .defaultSize(width: 1440, height: 900)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("사진 가져오기…") { library.presentImport() }
+                Button("사진 가져오기…") { session.library.presentImport() }
                     .keyboardShortcut("o", modifiers: .command)
-                    .disabled(library.isImporting || library.isExporting || library.hasModalPresentation)
-                Button("카드에서 복사해 가져오기…") { library.showCardImport = true }
+                    .disabled(session.library.isImporting || session.library.isExporting || session.library.hasModalPresentation)
+                Button("카드에서 복사해 가져오기…") { session.library.showCardImport = true }
                     .keyboardShortcut("o", modifiers: [.command, .shift])
-                    .disabled(!library.catalogLoaded || library.isImporting || library.isExporting || library.hasModalPresentation)
+                    .disabled(!session.library.catalogLoaded || session.library.isImporting || session.library.isExporting || session.library.hasModalPresentation)
                 Button("LUT 추가…") { library.presentLUTImport() }
                     .disabled(!library.catalogLoaded || library.isLUTImporting || library.isLUTLibraryLoading || library.hasModalPresentation)
                 Button("참조 사진 색감 맞추기…") { library.presentReferenceMatch() }
@@ -35,11 +52,18 @@ struct LighthouseApp: App {
             CommandGroup(after: .saveItem) {
                 Button("내보내기…") { library.showExport = true }
                     .keyboardShortcut("e", modifiers: [.command, .shift])
-                    .disabled(library.selection == nil || library.isExporting || library.hasModalPresentation)
+                    .disabled(library.selection == nil || library.selection.map(library.isMissing) == true || library.isExporting || library.hasModalPresentation)
                 Button("바뀐 사진 다시 내보내기…") { library.showExport = true }
                     .disabled(library.selection == nil || library.isExporting || library.hasModalPresentation)
                 Divider()
                 Button("카탈로그 보관본 보기") { library.revealBackups() }
+                Divider()
+                Button("라이브러리 백업…") { library.showLibraryBackup = true }
+                    .disabled(library.hasConflictingWorkflow || library.hasModalPresentation)
+                Button("라이브러리 복원…") { library.showLibraryRestore = true }
+                    .disabled(library.hasConflictingWorkflow || library.hasModalPresentation)
+                Button("라이브러리 열기…") { session.presentOpenLibrary() }
+                    .disabled(library.hasConflictingWorkflow || library.hasModalPresentation || session.isSwitching)
             }
             // 한 글자 단축키는 글자 칸 입력을 가로채지 않도록 메뉴에 등록하지 않고 이름에만 적는다.
             CommandGroup(before: .toolbar) {
@@ -56,7 +80,7 @@ struct LighthouseApp: App {
                     .disabled(library.selection == nil || library.hasModalPresentation)
                 Button(library.isOriginal ? "보정 보기 (\\)" : "원본 보기 (\\)") { library.toggleOriginal() }
                     .disabled(library.selection == nil || library.hasModalPresentation)
-                Button(library.actualSize ? "화면 맞춤 (Z)" : "100% 보기 (Z)") { library.toggleActualSize() }
+                Button(library.actualSize ? "화면 맞춤 (Z)" : (library.selectionUsesSmartPreview ? "미리보기 확대 (Z)" : "100% 보기 (Z)")) { library.toggleActualSize() }
                     .disabled(library.selection == nil || !library.showsSingleImage || library.hasModalPresentation)
                 Button(library.showsClipping ? "잘림 표시 끄기 (J)" : "하이라이트·섀도 잘림 표시 (J)") { library.showsClipping.toggle() }
                     .disabled(library.hasModalPresentation)
@@ -65,6 +89,11 @@ struct LighthouseApp: App {
                 Divider()
             }
             CommandMenu("사진") {
+                Button("중복·유사 사진 찾기…") { library.showSimilarPhotos = true }
+                    .disabled(!library.catalogLoaded || library.hasModalPresentation)
+                Button("스마트 미리보기 관리…") { library.showSmartPreviews = true }
+                    .disabled(library.selection == nil || library.hasModalPresentation)
+                Divider()
                 Button("얼굴 찾기 · 관리…") { library.showPeople = true }
                     .disabled(!library.catalogLoaded || library.hasModalPresentation)
                 Divider()
@@ -120,7 +149,9 @@ struct LighthouseApp: App {
                 Button("위치 다시 찾기…") { if let photo = library.selection { library.presentRelocate(for: photo) } }
                     .disabled(library.selection.map { !library.isMissing($0) } ?? true || library.hasModalPresentation)
                 Divider()
-                Toggle("별점·키워드를 XMP 사이드카로 쓰기", isOn: $library.writesXMPSidecars)
+                Toggle("별점·키워드를 XMP 사이드카로 쓰기", isOn: Binding(
+                    get: { library.writesXMPSidecars }, set: { library.writesXMPSidecars = $0 }
+                ))
                     .disabled(!library.catalogLoaded)
                 Button("RAW의 XMP 사이드카 모두 다시 쓰기") { library.writeAllSidecars() }
                     .disabled(!library.writesXMPSidecars || !library.catalogLoaded)
@@ -162,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminationPending { return .terminateLater }
-        if let library, library.driveUpload.isBusy || library.isExporting || library.isImporting || library.isAnalyzingFaces {
+        if let library, library.driveUpload.isBusy || library.isExporting || library.isImporting || library.isAnalyzingFaces || library.isRunningWorkflow || library.isAnalyzingFlicker {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "가져오기·내보내기 또는 얼굴 분석이 진행 중입니다"
@@ -174,12 +205,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             library.cancelImport()
             library.cancelFaceAnalysis()
             library.driveUpload.cancel()
+            library.cancelWorkflow()
+            library.cancelFlickerAnalysis()
             terminationPending = true
             Task { @MainActor [weak self] in
                 await library.driveUpload.cancelAndWait()
                 await library.cancelExportAndWait()
                 await library.cancelImportAndWait()
                 await library.cancelFaceAnalysisAndWait()
+                await library.cancelWorkflowAndWait()
                 let shouldTerminate = self?.flushBeforeTermination() ?? false
                 self?.terminationPending = false
                 sender.reply(toApplicationShouldTerminate: shouldTerminate)
