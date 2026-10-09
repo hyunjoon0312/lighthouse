@@ -296,6 +296,17 @@ final class CameraProfileTests: XCTestCase {
         }
         XCTAssertTrue(pipeline.cameraProfiles(for: URL(fileURLWithPath: "/tmp/photo.jpg")).allSatisfy(\.isCreative),
                       "JPEG에는 크리에이티브 프로필만 보인다")
+        if names.contains("Adaptive Color") {
+            func shadows(_ edits: EditSettings) throws -> Int {
+                let bytes = try rgba8(pipeline.render(url: raw, edits: edits, maxPixel: 300))
+                var lumas = stride(from: 0, to: bytes.count, by: 4).map { Int(bytes[$0 + 1]) }
+                lumas.sort()
+                return lumas[lumas.count / 10]
+            }
+            XCTAssertGreaterThan(try shadows(EditSettings(cameraProfile: "Adaptive Color")),
+                                 try shadows(EditSettings(cameraProfile: "Adaptive Color", profileAmount: 0)) + 3,
+                                 "Adaptive 근사는 그림자를 올린다")
+        }
     }
 
     // MARK: Adobe Raw 프로필
@@ -516,6 +527,54 @@ final class CameraProfileTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(EditSettings.self, from: JSONEncoder().encode(edits)), edits)
         XCTAssertNil(try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(EditSettings())) as? [String: Any])["profileAmount"])
         XCTAssertEqual(EditSettings(profileAmount: 0.5).changeSummary(from: EditSettings()), "카메라 프로필")
+    }
+
+    // MARK: Adaptive(Lighthouse 근사)
+
+    func testAdaptiveProfilesAreRAWOnlyAndParsedWithoutTables() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let creative = root.appendingPathComponent("Profiles", isDirectory: true)
+        try FileManager.default.createDirectory(at: creative.appendingPathComponent("Adaptive"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: creative.appendingPathComponent("Modern"), withIntermediateDirectories: true)
+        try creativeXMP(name: "Adaptive Color", rgbTable: nil, extra: #"crs:ProfileGainTableMap="100" crs:RGBTables="100""#)
+            .write(to: creative.appendingPathComponent("Adaptive/Adaptive Color.xmp"))
+        try creativeXMP(name: "Modern 01", rgbTable: nil, extra: "").write(to: creative.appendingPathComponent("Modern/Modern 01.xmp"))
+        let look = try AdobeLookProfile.load(url: creative.appendingPathComponent("Adaptive/Adaptive Color.xmp"))
+        XCTAssertTrue(look.isAdaptive)
+        XCTAssertTrue(look.supportsAmount)
+        XCTAssertFalse(try AdobeLookProfile.load(url: creative.appendingPathComponent("Modern/Modern 01.xmp")).isAdaptive)
+
+        let library = CameraProfileLibrary(adobeDirectory: root.appendingPathComponent("none"),
+                                           userDirectory: root.appendingPathComponent("none"),
+                                           lookDirectory: root.appendingPathComponent("none"), creativeDirectory: creative)
+        XCTAssertEqual(library.profiles(for: URL(fileURLWithPath: "/tmp/photo.RW2")).map(\.name), ["Adaptive Color", "Modern 01"])
+        XCTAssertEqual(library.profiles(for: URL(fileURLWithPath: "/tmp/photo.jpg")).map(\.name), ["Modern 01"],
+                       "Adaptive는 RAW에만 보인다")
+        XCTAssertNil(library.look(named: "Adaptive Color", url: URL(fileURLWithPath: "/tmp/photo.jpg")))
+        XCTAssertNil(library.outputFilter(name: "Adaptive Color", amount: 1))
+        XCTAssertTrue(LightroomPresetPayload.isDNGProfileName("Adaptive Color"))
+    }
+
+    func testAdaptiveToneLiftsDarkAndPullsDownBrightRegions() throws {
+        let pipeline = ImagePipeline()
+        let context = CIContext()
+        func output(_ value: Double, strength: Double) -> Double {
+            let linear = CGColorSpace(name: CGColorSpace.linearSRGB)!
+            let image = CIImage(color: CIColor(red: value, green: value, blue: value, colorSpace: linear)!)
+                .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+            var pixel = [Float](repeating: 0, count: 4)
+            context.render(pipeline.applyAdaptiveTone(strength: strength, to: image), toBitmap: &pixel, rowBytes: 16,
+                           bounds: CGRect(x: 32, y: 32, width: 1, height: 1), format: .RGBAf,
+                           colorSpace: CGColorSpace(name: CGColorSpace.linearSRGB)!)
+            return Double(pixel[0])
+        }
+        XCTAssertGreaterThan(output(0.02, strength: 0.35), 0.02 * 1.5, "어두운 영역은 올라간다")
+        XCTAssertLessThan(output(0.02, strength: 0.35), 0.02 * 4.01, "최대 +2 EV")
+        XCTAssertLessThan(output(0.8, strength: 0.35), 0.8 * 0.8, "밝은 영역은 내려간다")
+        XCTAssertGreaterThan(output(0.8, strength: 0.35), 0.8 * 0.49, "최대 -1 EV")
+        XCTAssertEqual(output(0.18, strength: 0.35), 0.18, accuracy: 0.002, "중간 회색은 그대로")
+        XCTAssertEqual(output(0.02, strength: 0), 0.02, accuracy: 0.001)
     }
 
     private func rgbTableData(divisions n: Int, kind: UInt32 = 1, maximumAmount: Double = 2,

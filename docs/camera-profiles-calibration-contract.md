@@ -1,4 +1,4 @@
-# Adobe 카메라 프로필(DCP)·캘리브레이션 계약 v1.2
+# Adobe 카메라 프로필(DCP)·캘리브레이션 계약 v1.3
 
 2026-10-09 사용자 요청("나머지도 다 구현해줘")에 따른 세 번째 하위 프로젝트다. 처음에는 가능성 확인(스파이크)부터 하기로 했고, 스파이크 결과를 바탕으로 이 세션의 Claude가 범위를 정했다. 성공 기준은 앞의 두 하위 프로젝트와 같다: 같은 프로필·값이 같은 방향과 역할로 보인다. Adobe 현상 엔진과 같은 픽셀은 보장하지 않는다.
 
@@ -15,7 +15,8 @@
 - **캘리브레이션(모든 사진):** Lightroom의 그림자 틴트, 빨강·초록·파랑 원색의 색조·채도.
 - **Adobe Raw 프로필(v1.1, RAW만):** Adobe Color·Landscape·Monochrome·Neutral·Portrait·Vivid. 아래 절을 따른다.
 - **크리에이티브 프로필(v1.2, 모든 사진):** Artistic·B&W·Modern·Vintage. 아래 절을 따른다.
-- 범위 밖: Adaptive 프로필(AI 게인 표), DCP 없이 Adobe 기본 톤 곡선을 재현하는 것.
+- **Adaptive 프로필(v1.3, RAW만):** Lighthouse 근사. 아래 절을 따른다.
+- 범위 밖: Adobe가 사진마다 AI 모델로 만드는 게인 표·RGB 표 자체, DCP 없이 Adobe 기본 톤 곡선을 재현하는 것.
 
 ## 모델과 저장
 
@@ -88,6 +89,17 @@
 - 메뉴: RAW는 Adobe Raw → Adobe Standard → 카메라 매칭 → 크리에이티브(그룹 이름순), JPEG 등은 macOS 기본과 크리에이티브만. 양을 지원하는 프로필이면 "프로필 양" 슬라이더를 보인다.
 - 프리셋: `CameraProfile`과 `crs:Look`(Name·Amount, XMP 중첩 Description과 lrtemplate `Look` table)을 읽는다. Look 이름이 있으면 그것을 쓰고 양은 0…2로 받는다. 크리에이티브 이름은 Artistic·B&W·Modern·Vintage 접두사로 알아본다.
 
+## Adaptive 프로필(v1.3, Lighthouse 근사)
+
+2026-10-09 사용자 요청("Adaptive 프로필도 구현해줘")과 선택("Lighthouse 방식으로 근사")에 따른다.
+
+- 확인한 사실: 설치본 `Adaptive/Adaptive Color.xmp`·`Adaptive B&W.xmp`에는 LookTable(각각 Adobe Color·Adobe Monochrome과 같은 표)과 `ProfileGainTableMap="100"`, `RGBTables="100"`(양)만 있다. 사진마다 쓰는 게인 표와 RGB 표는 Camera Raw가 별도로 내려받은 AI 모델(`~/Library/Application Support/Adobe/CameraRaw/ModelZoo`, 공개되지 않은 형식)로 렌더할 때 만든다. Lighthouse는 이 모델을 읽거나 흉내 내지 않는다.
+- Lighthouse 근사: 사진마다 밝기 분포를 보고 영역별 노출을 정하는 같은 역할을 직접 계산한다.
+  - 색: 크리에이티브 프로필과 같이 Adobe Standard DCP(있을 때) 위에 LookTable을 넣는다. Adaptive B&W는 흑백으로 그린다.
+  - 톤: 현상 직후 선형 값에서 밝기 Y를 짧은 변 512px 이하로 줄여 짧은 변 2% 반경으로 흐린 `Yb`를 만들고, `gain = clamp((max(Yb, 0.0001) / 0.18)^(-0.35·양), 0.5, 4)`를 RGB에 곱한다. 어두운 영역은 올리고(최대 +2 EV) 밝은 영역은 누르며(최대 -1 EV), 흐린 밝기로 정하므로 잔 대비는 남는다. 양은 "프로필 양"(0…200%)이다.
+- RAW만: Adobe 설치본도 `SupportsOutputReferred="False"`다. JPEG 등에는 목록에 보이지 않고, 프리셋으로 들어와도 적용하지 않는다(이 Mac에 없음 표시).
+- 메뉴 이름은 "Adaptive Color (Lighthouse 근사)"처럼 보이고, 저장 이름은 Adobe와 같은 "Adaptive Color"다. 프리셋의 Look 이름도 그대로 연결한다.
+
 ## 검증
 
 - DCP 파서: 테스트 안에서 만든 작은 DCP(일반 TIFF·`0x4352` 매직, 리틀·빅 엔디언), 잘못된 개수·크기·잘린 파일 거부.
@@ -96,5 +108,6 @@
 - 캘리브레이션: 0이면 단위 행렬, 흰색 보존, 색조 방향, 채도 방향, 그림자 틴트 방향, 미리보기·내보내기 일치.
 - 가져오기·앱: 키 범위, CameraProfile 매핑과 경고, 메뉴 선택 1단계 실행 취소.
 - 크리에이티브: RGB 표 디코드(차이 감기·순서), 양 0이면 무변화, 1 밖 값 보존, JPEG 적용, 프리셋 Look 이름·양, 실제 S9·JPEG에서 렌더가 바뀌고 B&W 프로필이 무채색.
+- Adaptive: 어두운 사진은 밝아지고 밝은 사진은 어두워짐, 양 0이면 톤 무변화, 게인 범위, JPEG에는 적용 안 함, 실제 S9에서 그림자 상승·하이라이트 유지.
 - Adobe Raw: 표 인코딩 왕복(테스트에서 만든 표), 잘못된 문자·길이·종류 거부, 곡선·조정값·흑백 읽기, 기준 DCP 없으면 사용 불가, 실제 S9에서 Adobe Color가 Adobe Standard와 다르고 Adobe Monochrome이 무채색.
 - 실제 S9 RW2와 설치된 DCP로 macOS 기본·Adobe Standard·Camera Vivid·Camera Monochrome·Camera Flat을 렌더해 방향(Vivid 채도↑, Monochrome 무채색, Flat 대비↓)을 보고 원본 SHA를 확인한다. DCP 파일은 Git에 넣지 않는다.

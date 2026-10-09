@@ -16,6 +16,8 @@ public struct CameraProfileInfo: Equatable, Sendable {
     public let supportsAmount: Bool
 
     public var isCreative: Bool { creativeGroup != nil }
+    /// Adaptive 프로필. Adobe AI 모델 대신 Lighthouse가 사진마다 톤을 정한다(RAW만).
+    public var isAdaptive: Bool { creativeGroup == CameraProfileLibrary.adaptiveGroup }
 
     public init(name: String, url: URL, isUserProfile: Bool, isLook: Bool = false, creativeGroup: String? = nil,
                 supportsAmount: Bool = false) {
@@ -38,8 +40,9 @@ public final class CameraProfileLibrary: @unchecked Sendable {
         fileURLWithPath: "/Library/Application Support/Adobe/CameraRaw/Settings/Adobe/Profiles/Adobe Raw")
     public static let defaultCreativeDirectory = URL(
         fileURLWithPath: "/Library/Application Support/Adobe/CameraRaw/Settings/Adobe/Profiles")
-    /// 크리에이티브 프로필 그룹(설치본 폴더 이름).
-    public static let creativeGroups = ["Artistic", "B&W", "Modern", "Vintage"]
+    /// 크리에이티브 프로필 그룹(설치본 폴더 이름). Adaptive는 RAW에만 쓰는 Lighthouse 근사다.
+    public static let creativeGroups = ["Adaptive", "Artistic", "B&W", "Modern", "Vintage"]
+    public static let adaptiveGroup = "Adaptive"
     public static let shared = CameraProfileLibrary()
 
     /// 큐브 격자 크기와 입력·출력 모양(0…4의 로그 곡선).
@@ -73,7 +76,7 @@ public final class CameraProfileLibrary: @unchecked Sendable {
     /// 이 사진에 쓸 수 있는 프로필. RAW는 카메라 프로필과 크리에이티브 프로필, 다른 사진은 크리에이티브 프로필뿐이다.
     public func profiles(for url: URL) -> [CameraProfileInfo] {
         let creative = creativeProfiles()
-        guard ImagePipeline.isRAW(url) else { return creative }
+        guard ImagePipeline.isRAW(url) else { return creative.filter { !$0.isAdaptive } }
         return profiles(forCamera: camera(for: url)) + creative
     }
 
@@ -226,7 +229,8 @@ public final class CameraProfileLibrary: @unchecked Sendable {
 
     /// RAW가 아닌 사진에 현상 직후 거는 크리에이티브 프로필 필터(DCP 없이 Look 표만). 크리에이티브가 아니면 nil이다.
     func outputFilter(name: String, amount: Double) -> CIFilter? {
-        guard let info = creativeProfiles().first(where: { $0.name == name }), let look = loadLook(info.url) else {
+        guard let info = creativeProfiles().first(where: { $0.name == name }), !info.isAdaptive,
+              let look = loadLook(info.url) else {
             return nil
         }
         let date = Self.modificationDate(info.url)?.timeIntervalSinceReferenceDate ?? 0
@@ -295,7 +299,9 @@ public final class CameraProfileLibrary: @unchecked Sendable {
 
     /// 사진에 고른 프로필이 Look(Adobe Raw·크리에이티브)이면 그 Look. 현상 단계의 곡선·조정값에 쓴다.
     func look(named name: String, url: URL) -> AdobeLookProfile? {
-        if let creative = creativeProfiles().first(where: { $0.name == name }) { return loadLook(creative.url) }
+        if let creative = creativeProfiles().first(where: { $0.name == name }) {
+            return creative.isAdaptive && !ImagePipeline.isRAW(url) ? nil : loadLook(creative.url)
+        }
         guard ImagePipeline.isRAW(url),
               let info = profiles(forCamera: camera(for: url)).first(where: { $0.name == name }), info.isLook else {
             return nil

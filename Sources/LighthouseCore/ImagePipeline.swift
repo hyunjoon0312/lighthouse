@@ -523,6 +523,36 @@ public final class ImagePipeline: @unchecked Sendable {
         return output
     }
 
+    /// Adaptive 프로필의 Lighthouse 근사. 흐린 밝기로 영역별 게인을 정해 그림자는 올리고 하이라이트는 누른다.
+    /// 밝기 지도는 짧은 변 512px 이하에서 구해 미리보기와 내보내기의 모양이 같다.
+    func applyAdaptiveTone(strength: Double, to image: CIImage) -> CIImage {
+        guard strength > 0, strength.isFinite, let luminance = CoreImageKernels.luminance,
+              let kernel = CoreImageKernels.adaptiveGain else { return image }
+        let shortSide = Double(min(image.extent.width, image.extent.height))
+        guard shortSide > 0 else { return image }
+        let factor = min(1, 512 / shortSide)
+        let reduce = CIFilter.lanczosScaleTransform()
+        reduce.inputImage = image
+        reduce.scale = Float(factor)
+        reduce.aspectRatio = 1
+        guard let small = reduce.outputImage,
+              let luma = luminance.apply(extent: small.extent, arguments: [small]) else { return image }
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = luma.clampedToExtent()
+        blur.radius = Float(shortSide * factor * 0.02)
+        guard let blurred = blur.outputImage?.cropped(to: luma.extent),
+              let guide = luminance.apply(extent: image.extent, arguments: [image]) else { return image }
+        // 가장자리를 지키며 키워 밝은 하늘과 어두운 건물 경계에 테두리(헤일로)가 덜 생기게 한다.
+        let upsample = CIFilter.edgePreserveUpsample()
+        upsample.inputImage = guide
+        upsample.smallImage = blurred
+        upsample.spatialSigma = 3
+        upsample.lumaSigma = 0.15
+        let map = (upsample.outputImage ?? blurred.samplingLinear()
+            .transformed(by: CGAffineTransform(scaleX: 1 / factor, y: 1 / factor))).cropped(to: image.extent)
+        return kernel.apply(extent: image.extent, arguments: [image, map, Float(strength)]) ?? image
+    }
+
     /// 어두운 채널로 안개 양을 어림해 걷어내거나(+) 회색 안개를 씌운다(-). 선형 작업 공간 값으로 계산한다.
     /// 어두운 채널은 짧은 변 512px 이하로 줄여 구하고 다시 키운다. 미리보기와 내보내기가 같은 크기에서 구하므로 모양이 같다.
     private func applyDehaze(_ amount: Double, to image: CIImage) -> CIImage {
@@ -759,6 +789,9 @@ public final class ImagePipeline: @unchecked Sendable {
            let filter = profileLibrary.outputFilter(name: name, amount: edits.profileAmount) {
             filter.setValue(image, forKey: kCIInputImageKey)
             image = (filter.outputImage ?? image).cropped(to: image.extent)
+        }
+        if let look, look.isAdaptive, Self.isRAW(url) {
+            image = applyAdaptiveTone(strength: 0.35 * lookAmount, to: image)
         }
         if let look {
             let curves = look.curves(amount: lookAmount)

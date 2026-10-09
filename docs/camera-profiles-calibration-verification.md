@@ -96,6 +96,29 @@
 - 원본 RW2와 Artistic 01·B&W Red Filter XMP의 SHA256은 렌더 전후 같다.
 - 기존 테스트의 "지원하지 않는 프로필" 예를 Artistic 01에서 Futuristic 05로 바꿨다. 이름 없는 `crs:Look`은 예전처럼 제외 경고를 낸다.
 
+## Adaptive 프로필(v1.3, Lighthouse 근사)
+
+2026-10-09 추가. 설치본 Adaptive XMP 2개에는 LookTable과 `ProfileGainTableMap="100"`, `RGBTables="100"`(양)만 있고, 사진별 표는 Camera Raw가 `ModelZoo`의 AI 모델로 만든다는 것을 확인했다. 사용자가 "Lighthouse 방식으로 근사"를 골랐다.
+
+| 범위 | 결과 |
+|---|---|
+| `swift test --filter CameraProfileTests` | 24개 통과(Adaptive 읽기·RAW 전용 목록·JPEG 미적용, 게인 방향·범위·중간 회색 유지, 실제 S9 그림자 상승) |
+| 기능을 끈 코드(RED 확인) | 파이프라인의 Adaptive 톤 호출을 빼면 실제 S9 검사가 실패(그림자 33 대 기준 36) |
+
+실제 S9 렌더(`.artifacts/adaptive-profiles-20261009/probe-2.log`, 1600px, 밝기 값 0~255): 결과 `ALL_OK`.
+
+| 케이스 | 어두운 10% | 중간 | 밝은 1% | 평균 |
+|---|---|---|---|---|
+| Adobe Color | 17.2 | 66.6 | 234.0 | 87.9 |
+| Adaptive Color(양 0 / 100% / 200%) | 22.7 / 28.0 / 32.9 | 70.1 / 83.3 / 99.1 | 228.1 / 196.0 / 184.9 | 89.5 / 92.0 / 97.6 |
+| 노출 -1.5: Adobe Color / Adaptive | 6.3 / 16.9 | 27.4 / 52.1 | 161.3 / 154.1 | 45.0 / 61.6 |
+| 노출 +1.2: Adobe Color / Adaptive | 38.2 / 43.9 | 121.6 / 119.9 | 254.2 / 211.8 | 132.2 / 121.1 |
+
+- 어두운 사진은 밝아지고, 밝은 사진은 하이라이트가 내려온다. Adaptive B&W는 무채색이고, JPEG에는 적용하지 않는다(픽셀 같음). 원본 RW2와 Adaptive Color XMP의 SHA256은 그대로다.
+- 처음 구현(가우시안으로 키운 밝기 지도)은 축소본에서 가로등·나무 경계 주변에 약한 테두리가 보였다. 가장자리를 지키는 확대(`CIEdgePreserveUpsample`)로 바꿨고, 원래 크기로 잘라 보면 테두리는 약했다. 완전히 없어지지는 않는다.
+- Adobe Adaptive 결과와의 비교는 하지 않았다(모델을 쓰지 않으므로 같을 수 없다).
+- 전체 `swift test`: 407개 중 7 skip, 실패 1(RAW 드래그 타이밍). 그 검사만 따로 세 번 돌리면 1번 실패·2번 통과(load 4~9)로, 앞 절과 같이 흔들리는 검사로 판단했다. release 빌드·codesign·`git diff --check` 통과.
+
 ## 검증하지 않은 것
 
 - Adobe Camera Raw/Lightroom 렌더와의 비교. 비교 자료가 없다. Adobe Raw 프로필의 곡선을 sRGB 값에 거는 것도 Adobe 처리 공간과 다를 수 있다.

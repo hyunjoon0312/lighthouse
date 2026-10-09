@@ -37,6 +37,8 @@ public struct AdobeLookProfile: Equatable, Sendable {
     /// Lighthouse가 쓰는 프로필 속 설정(Adobe 단위). 키는 `supportedSettingKeys`다.
     public var settings: [String: Double]
     public var isMonochrome: Bool
+    /// Adobe가 사진마다 AI로 게인 표·RGB 표를 만드는 Adaptive 프로필이다. Lighthouse는 자체 톤으로 근사한다.
+    public var isAdaptive: Bool = false
 
     public init(name: String, baseProfile: String?, lookTable: DNGProfile.HueSatTable?, rgbTable: RGBLookTable? = nil,
                 rgbTableAmount: Double = 1, supportsAmount: Bool = false, curves: ToneCurves = ToneCurves(),
@@ -90,7 +92,8 @@ public struct AdobeLookProfile: Equatable, Sendable {
         func table(_ key: String) -> String? { attributes[key].flatMap { attributes["Table_" + $0] } }
         let lookTable = try table("LookTable").map(decodeTable)
         let rgbTable = try table("RGBTable").map { try RGBLookTable.decode(decodeBlock($0)) }
-        guard lookTable != nil || rgbTable != nil else { throw AdobeLookProfileError.notLook }
+        let isAdaptive = attributes["ProfileGainTableMap"] != nil || attributes["RGBTables"] != nil
+        guard lookTable != nil || rgbTable != nil || isAdaptive else { throw AdobeLookProfileError.notLook }
         var settings: [String: Double] = [:]
         for key in supportedSettingKeys {
             guard let raw = attributes[key] else { continue }
@@ -115,12 +118,14 @@ public struct AdobeLookProfile: Equatable, Sendable {
             curves[keyPath: path] = points
         }
         do { try curves.validate() } catch { throw AdobeLookProfileError.unreadable }
-        return AdobeLookProfile(
+        var look = AdobeLookProfile(
             name: name, baseProfile: attributes["CameraProfile"], lookTable: lookTable, rgbTable: rgbTable,
             rgbTableAmount: rgbTableAmount,
             supportsAmount: attributes["SupportsAmount"]?.caseInsensitiveCompare("True") == .orderedSame,
             curves: curves, settings: settings,
             isMonochrome: attributes["ConvertToGrayscale"]?.caseInsensitiveCompare("True") == .orderedSame)
+        look.isAdaptive = isAdaptive
+        return look
     }
 
     /// 사용자 프로필 양(0…2)에서 RGB 표에 쓸 양. 표의 최소·최대 양으로 자른다.

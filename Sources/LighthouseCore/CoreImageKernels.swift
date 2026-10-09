@@ -22,6 +22,22 @@ enum CoreImageKernels {
         }
         """)
 
+    /// 밝기 Y(0 이상)를 회색으로 낸다(Adaptive 톤의 밝기 지도).
+    static let luminance = compile("""
+        [[stitchable]] float4 lighthouseLuminance(coreimage::sample_t pixel) {
+            float y = max(dot(pixel.rgb, float3(0.2126, 0.7152, 0.0722)), 0.0);
+            return float4(y, y, y, 1.0);
+        }
+        """)
+
+    /// Adaptive 톤. 흐린 밝기 `Yb`로 `clamp((Yb / 0.18)^(-strength), 0.5, 4)`를 정해 RGB에 곱한다(선형 값).
+    static let adaptiveGain = compile("""
+        [[stitchable]] float4 lighthouseAdaptiveGain(coreimage::sample_t pixel, coreimage::sample_t blurred, float strength) {
+            float gain = clamp(pow(max(blurred.r, 0.0001) / 0.18, -strength), 0.5, 4.0);
+            return float4(pixel.rgb * gain, pixel.a);
+        }
+        """)
+
     /// 디헤이즈. 양수는 대기광을 흰색으로 보고 `(I - 1) / t + 1`로 안개를 걷고, 음수는 회색(0.6) 안개를 섞는다.
     /// 0…1 안에서 계산하고 밖의 초과분은 그대로 더해 확장 범위를 보존한다.
     static let dehaze = compile("""

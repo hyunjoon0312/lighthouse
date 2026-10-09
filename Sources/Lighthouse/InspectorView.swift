@@ -711,7 +711,10 @@ struct InspectorView: View {
                     let members = profiles.filter { $0.creativeGroup == group }
                     if !members.isEmpty {
                         Section(group) {
-                            ForEach(members, id: \.name) { Text($0.name).tag(Optional($0.name)) }
+                            ForEach(members, id: \.name) { profile in
+                                Text(profile.isAdaptive ? "\(profile.name) (Lighthouse 근사)" : profile.name)
+                                    .tag(Optional(profile.name))
+                            }
                         }
                     }
                 }
@@ -721,8 +724,10 @@ struct InspectorView: View {
             .font(.caption)
             .help("Camera Raw가 이 Mac에 설치한 프로필을 읽어 Adobe 프로필의 색을 근사합니다. Adobe 결과와 다를 수 있습니다.")
             .accessibilityLabel("카메라 프로필")
-            if missing != nil {
-                Text("이 Mac에서 프로필을 찾을 수 없어 프로필 없이 보입니다.")
+            if let missing {
+                Text(missing.hasPrefix(CameraProfileLibrary.adaptiveGroup + " ") && !photo.isRAW
+                     ? "Adaptive 프로필은 RAW 사진에만 적용됩니다."
+                     : "이 Mac에서 프로필을 찾을 수 없어 프로필 없이 보입니다.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             if let name = edits.cameraProfile, profiles.first(where: { $0.name == name })?.supportsAmount == true {
