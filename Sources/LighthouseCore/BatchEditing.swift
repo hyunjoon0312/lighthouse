@@ -24,6 +24,7 @@ public extension EditSettings {
             result.saturation = source.saturation
             result.temperatureShift = source.temperatureShift
             result.tintShift = source.tintShift
+            result.whiteBalance = source.whiteBalance
             result.highlights = source.highlights
             result.shadows = source.shadows
             result.whites = source.whites
@@ -39,6 +40,8 @@ public extension EditSettings {
             result.flicker = source.flicker
             result.vibrance = source.vibrance
             result.clarity = source.clarity
+            result.texture = source.texture
+            result.dehaze = source.dehaze
             result.vignette = source.vignette
             result.hdrAmount = source.hdrAmount
         }

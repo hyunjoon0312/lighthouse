@@ -149,7 +149,9 @@ struct InspectorView: View {
             adjustment("섀도", \.shadows, range: -1...1, scale: 100)
             adjustment("흰색", \.whites, range: -1...1, scale: 100)
             adjustment("검정", \.blacks, range: -1...1, scale: 100)
+            adjustment("텍스처", \.texture, range: -1...1, scale: 100)
             adjustment("명료도", \.clarity, range: -1...1, scale: 100)
+            adjustment("디헤이즈", \.dehaze, range: -1...1, scale: 100)
             Divider()
             HStack {
                 section("색상")
@@ -171,6 +173,7 @@ struct InspectorView: View {
             .pickerStyle(.segmented)
             .help("기본 색상은 macOS RAW 현상을 기준으로 합니다. Adobe DCP나 카메라 전용 프로필과 색이 다를 수 있습니다.")
             .accessibilityLabel("기본 색상 프로필")
+            if photo.isRAW { whiteBalancePicker }
             adjustment("색온도 이동", \.temperatureShift, range: -2500...2500, format: "%.0f K")
             adjustment("틴트", \.tintShift, range: -100...100, scale: 1)
             adjustment("생동감", \.vibrance, range: -1...1, scale: 100)
@@ -686,6 +689,29 @@ struct InspectorView: View {
                          reset: { change { $0[keyPath: keyPath] = EditSettings.neutral[keyPath: keyPath] } })
     }
 
+    /// RAW 화이트밸런스 기준값. 목록에 없는 값(프리셋에서 가져온 켈빈)은 사용자 지정으로 보인다.
+    private var whiteBalancePicker: some View {
+        Picker("화이트밸런스", selection: Binding<WhiteBalancePreset?>(
+            get: { WhiteBalancePreset.matching(edits.whiteBalance) },
+            set: { preset in
+                guard let preset else { return }
+                model.updateEdits(preset.applied(to: edits))
+            }
+        )) {
+            ForEach(WhiteBalancePreset.allCases, id: \.self) { preset in
+                Text(preset.title).tag(Optional(preset))
+            }
+            if let custom = edits.whiteBalance, WhiteBalancePreset.matching(custom) == nil {
+                Text(String(format: "사용자 지정 (%.0f K, %+.0f)", custom.temperature, custom.tint))
+                    .tag(WhiteBalancePreset?.none)
+            }
+        }
+        .pickerStyle(.menu)
+        .font(.caption)
+        .help("RAW 화이트밸런스 기준값을 고릅니다. 고르면 색온도·틴트 이동이 0으로 돌아갑니다. Adobe 결과와 다를 수 있습니다.")
+        .accessibilityLabel("화이트밸런스")
+    }
+
     private func change(continuous: Bool = false, _ body: (inout EditSettings) -> Void) {
         var next = edits
         body(&next)
@@ -777,5 +803,19 @@ private struct DescriptionFields: View {
     private func addToSelection() {
         model.addKeywordsToSelection(addText)
         addText = ""
+    }
+}
+
+extension WhiteBalancePreset {
+    var title: String {
+        switch self {
+        case .asShot: "촬영 시"
+        case .daylight: "주광"
+        case .cloudy: "흐림"
+        case .shade: "그늘"
+        case .tungsten: "텅스텐"
+        case .fluorescent: "형광등"
+        case .flash: "플래시"
+        }
     }
 }

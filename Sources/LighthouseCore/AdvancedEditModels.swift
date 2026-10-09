@@ -270,6 +270,69 @@ public enum ColorGradeRegion: String, CaseIterable, Sendable {
     }
 }
 
+/// RAW 화이트밸런스 기준값. 색온도·틴트 이동은 이 값 위에 더한다. 없으면 촬영 시 값이 기준이다.
+public struct WhiteBalanceBase: Codable, Equatable, Sendable {
+    public static let temperatureRange: ClosedRange<Double> = 2000...50_000
+    public static let tintRange: ClosedRange<Double> = -150...150
+
+    public var temperature: Double
+    public var tint: Double
+
+    public init(temperature: Double, tint: Double) {
+        self.temperature = temperature
+        self.tint = tint
+    }
+
+    public var isValid: Bool {
+        temperature.isFinite && Self.temperatureRange.contains(temperature) && tint.isFinite && Self.tintRange.contains(tint)
+    }
+
+    private enum CodingKeys: String, CodingKey { case temperature, tint }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        temperature = try container.decode(Double.self, forKey: .temperature)
+        tint = try container.decode(Double.self, forKey: .tint)
+        guard isValid else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "White balance must be within 2000…50000 K and tint -150…150"
+            ))
+        }
+    }
+}
+
+/// Lightroom 기본 화이트밸런스 목록의 근삿값.
+public enum WhiteBalancePreset: String, CaseIterable, Sendable {
+    case asShot, daylight, cloudy, shade, tungsten, fluorescent, flash
+
+    public var base: WhiteBalanceBase? {
+        switch self {
+        case .asShot: nil
+        case .daylight: WhiteBalanceBase(temperature: 5500, tint: 10)
+        case .cloudy: WhiteBalanceBase(temperature: 6500, tint: 10)
+        case .shade: WhiteBalanceBase(temperature: 7500, tint: 10)
+        case .tungsten: WhiteBalanceBase(temperature: 2850, tint: 0)
+        case .fluorescent: WhiteBalanceBase(temperature: 3800, tint: 21)
+        case .flash: WhiteBalanceBase(temperature: 5500, tint: 0)
+        }
+    }
+
+    /// 이 항목을 고른 보정값. Lightroom처럼 고른 값에서 다시 시작하도록 색온도·틴트 이동을 0으로 둔다.
+    public func applied(to edits: EditSettings) -> EditSettings {
+        var result = edits
+        result.whiteBalance = base
+        result.temperatureShift = 0
+        result.tintShift = 0
+        return result
+    }
+
+    /// 기준값과 같은 목록 항목. 목록에 없으면(사용자 지정) nil이다. 주광과 플래시는 틴트로 구분한다.
+    public static func matching(_ base: WhiteBalanceBase?) -> WhiteBalancePreset? {
+        allCases.first { $0.base == base }
+    }
+}
+
 public struct NormalizedCrop: Codable, Equatable, Sendable {
     public var x: Double
     public var y: Double

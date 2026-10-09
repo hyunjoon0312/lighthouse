@@ -6,22 +6,28 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
     public var curves: [String: [CurvePoint]]
     public var warnings: [String]
     public var colorProfile: PhotoColorProfile?
+    /// Adobe `WhiteBalance` 이름(`whiteBalanceNames` 중 하나). 없으면 화이트밸런스 방식을 바꾸지 않는다.
+    public var whiteBalance: String?
 
     public init(format: String, scalars: [String: Double], curves: [String: [CurvePoint]], warnings: [String],
-                colorProfile: PhotoColorProfile? = nil) {
+                colorProfile: PhotoColorProfile? = nil, whiteBalance: String? = nil) {
         self.format = format
         self.scalars = scalars
         self.curves = curves
         self.warnings = warnings
         self.colorProfile = colorProfile
+        self.whiteBalance = whiteBalance
     }
 
     public func validate() throws {
         guard format == "xmp" || format == "lrtemplate" else {
             throw LightroomPresetPayloadError.invalidFormat(format)
         }
-        guard !scalars.isEmpty || !curves.isEmpty || colorProfile != nil else {
+        guard !scalars.isEmpty || !curves.isEmpty || colorProfile != nil || whiteBalance != nil else {
             throw LightroomPresetPayloadError.emptySettings
+        }
+        if let whiteBalance, !Self.whiteBalanceNames.contains(whiteBalance) {
+            throw LightroomPresetPayloadError.invalidScalar("WhiteBalance")
         }
         for (key, value) in scalars {
             guard let range = Self.scalarRanges[key] else {
@@ -52,7 +58,7 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case format, scalars, curves, warnings, colorProfile
+        case format, scalars, curves, warnings, colorProfile, whiteBalance
     }
 
     public init(from decoder: Decoder) throws {
@@ -63,6 +69,8 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
         warnings = try container.decode([String].self, forKey: .warnings)
         colorProfile = try container.contains(.colorProfile)
             ? container.decode(PhotoColorProfile.self, forKey: .colorProfile) : nil
+        whiteBalance = container.contains(.whiteBalance)
+            ? try container.decode(String.self, forKey: .whiteBalance) : nil
         do {
             try validate()
         } catch {
@@ -81,10 +89,15 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
         try container.encode(curves, forKey: .curves)
         try container.encode(warnings, forKey: .warnings)
         try container.encodeIfPresent(colorProfile, forKey: .colorProfile)
+        try container.encodeIfPresent(whiteBalance, forKey: .whiteBalance)
     }
 
-    func applying(to edits: EditSettings) -> EditSettings {
+    /// `isRAW`에 따라 화이트밸런스를 다르게 적용한다. RAW는 켈빈 기준값, 다른 파일은 Incremental 이동량을 쓴다.
+    func applying(to edits: EditSettings, isRAW: Bool) -> EditSettings {
         var result = edits
+        applyWhiteBalance(to: &result, isRAW: isRAW)
+        if let value = scalars["Texture"] { result.texture = value / 100 }
+        if let value = scalars["Dehaze"] { result.dehaze = value / 100 }
         if let value = preferred(modern: "Exposure2012", legacy: "Exposure") {
             result.exposure = min(4, max(-4, value))
         }
@@ -149,6 +162,43 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
         return result
     }
 
+    private func applyWhiteBalance(to result: inout EditSettings, isRAW: Bool) {
+        if isRAW {
+            switch whiteBalance {
+            case "As Shot":
+                result.whiteBalance = nil
+            case "Auto":
+                return
+            default:
+                if let temperature = scalars["Temperature"] {
+                    result.whiteBalance = WhiteBalanceBase(temperature: temperature, tint: scalars["Tint"] ?? 0)
+                } else if let name = whiteBalance, let preset = Self.whiteBalancePresets[name] {
+                    result.whiteBalance = preset.base
+                } else {
+                    return
+                }
+            }
+            result.temperatureShift = 0
+            result.tintShift = 0
+        } else {
+            if whiteBalance == "As Shot" {
+                result.temperatureShift = 0
+                result.tintShift = 0
+            }
+            if let value = scalars["IncrementalTemperature"] { result.temperatureShift = min(2500, max(-2500, value * 25)) }
+            if let value = scalars["IncrementalTint"] { result.tintShift = value }
+        }
+    }
+
+    /// Adobe `WhiteBalance` 값. 가져올 때 대소문자를 무시하고 이 이름으로 맞춘다.
+    static let whiteBalanceNames: [String] = ["As Shot", "Auto", "Custom", "Daylight", "Cloudy", "Shade",
+                                              "Tungsten", "Fluorescent", "Flash"]
+    static let whiteBalancePresets: [String: WhiteBalancePreset] = [
+        "Daylight": .daylight, "Cloudy": .cloudy, "Shade": .shade, "Tungsten": .tungsten,
+        "Fluorescent": .fluorescent, "Flash": .flash,
+    ]
+    static let whiteBalanceKeys: Set<String> = ["Temperature", "Tint", "IncrementalTemperature", "IncrementalTint"]
+
     private func preferred(modern: String, legacy: String) -> Double? {
         scalars[modern] ?? scalars[legacy]
     }
@@ -176,7 +226,10 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
             "Highlights2012": -100...100, "Shadows2012": -100...100,
             "Whites2012": -100...100, "Blacks2012": -100...100,
             "Sharpness": 0...150, "PostCropVignetteAmount": -100...100,
-            "GrainAmount": 0...100, "GrainSize": 0...100, "GrainFrequency": 0...100
+            "GrainAmount": 0...100, "GrainSize": 0...100, "GrainFrequency": 0...100,
+            "Texture": -100...100, "Dehaze": -100...100,
+            "Temperature": WhiteBalanceBase.temperatureRange, "Tint": WhiteBalanceBase.tintRange,
+            "IncrementalTemperature": -100...100, "IncrementalTint": -100...100,
         ]
         for band in ColorBand.allCases {
             let suffix = band.adobeSuffix

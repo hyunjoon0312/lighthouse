@@ -63,7 +63,7 @@ extension LibraryModel {
                 }
                 do {
                     var photo = PhotoAsset(url: url, metadata: try pipeline.metadata(for: url))
-                    if let preset { photo.edits = preset.applied(to: photo.edits) }
+                    if let preset { photo.edits = preset.applied(to: photo.edits, isRAW: photo.isRAW) }
                     added.append(photo)
                 }
                 catch {
@@ -173,7 +173,7 @@ extension LibraryModel {
         guard !targets.isEmpty else { return }
         let changes = photos.compactMap { photo -> PhotoEditChange? in
             guard targets.contains(photo.id) else { return nil }
-            let after = preset.applied(to: photo.edits)
+            let after = preset.applied(to: photo.edits, isRAW: photo.isRAW)
             return after == photo.edits ? nil : PhotoEditChange(id: photo.id, before: photo.edits, after: after)
         }
         applyEditChanges(changes, useAfter: true, record: true)
@@ -206,7 +206,7 @@ extension LibraryModel {
                     let destination = result.url.standardizedFileURL.resolvingSymlinksInPath()
                     if seen.insert(destination.path).inserted {
                         var photo = PhotoAsset(url: destination, metadata: try pipeline.metadata(for: destination))
-                        if let preset { photo.edits = preset.applied(to: photo.edits) }
+                        if let preset { photo.edits = preset.applied(to: photo.edits, isRAW: photo.isRAW) }
                         added.append(photo)
                     } else {
                         duplicates += 1

@@ -217,6 +217,12 @@ public struct EditSettings: Codable, Equatable, Sendable {
     public var hdrAmount: Double
     /// 그림자·중간톤·하이라이트·전체 컬러 그레이딩. 중립이면 저장하지 않는다.
     public var colorGrading: ColorGrading
+    /// 잔 디테일 대비(-1…1). 0이면 저장하지 않는다.
+    public var texture: Double
+    /// 안개 제거(+)·추가(-) (-1…1). 0이면 저장하지 않는다.
+    public var dehaze: Double
+    /// RAW 화이트밸런스 기준값. nil이면 촬영 시 값이고 저장하지 않는다. RAW가 아닌 파일에는 쓰지 않는다.
+    public var whiteBalance: WhiteBalanceBase?
 
     public init(exposure: Double = 0, contrast: Double = 1, saturation: Double = 1,
                 temperatureShift: Double = 0, tintShift: Double = 0, highlights: Double = 1,
@@ -230,7 +236,8 @@ public struct EditSettings: Codable, Equatable, Sendable {
                 retouchStrokes: [RetouchStroke] = [], rawDevelop: RAWDevelopSettings = RAWDevelopSettings(),
                 noiseReduction: NoiseReductionSettings = NoiseReductionSettings(), flicker: FlickerSettings = FlickerSettings(),
                 vibrance: Double = 0, clarity: Double = 0, vignette: Double = 0, hdrAmount: Double = 0,
-                colorGrading: ColorGrading = .neutral) {
+                colorGrading: ColorGrading = .neutral, texture: Double = 0, dehaze: Double = 0,
+                whiteBalance: WhiteBalanceBase? = nil) {
         self.exposure = exposure
         self.contrast = contrast
         self.saturation = saturation
@@ -260,6 +267,9 @@ public struct EditSettings: Codable, Equatable, Sendable {
         self.vignette = vignette
         self.hdrAmount = hdrAmount
         self.colorGrading = colorGrading
+        self.texture = texture
+        self.dehaze = dehaze
+        self.whiteBalance = whiteBalance
     }
 
     public static let neutral = EditSettings()
@@ -270,7 +280,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
         case colorProfile
         case sharpness, rotationQuarterTurns, cropAspect, localAdjustments, lut
         case curves, colorRanges, grain, straightenDegrees, cropRect, retouchStrokes, rawDevelop, noiseReduction, flicker
-        case vibrance, clarity, vignette, hdrAmount, colorGrading
+        case vibrance, clarity, vignette, hdrAmount, colorGrading, texture, dehaze, whiteBalance
     }
 
     public init(from decoder: Decoder) throws {
@@ -324,6 +334,16 @@ public struct EditSettings: Codable, Equatable, Sendable {
         hdrAmount = try container.decodeIfPresent(Double.self, forKey: .hdrAmount) ?? 0
         colorGrading = try container.contains(.colorGrading)
             ? container.decode(ColorGrading.self, forKey: .colorGrading) : .neutral
+        texture = try container.contains(.texture) ? container.decode(Double.self, forKey: .texture) : 0
+        dehaze = try container.contains(.dehaze) ? container.decode(Double.self, forKey: .dehaze) : 0
+        guard texture.isFinite, (-1...1).contains(texture), dehaze.isFinite, (-1...1).contains(dehaze) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Texture and dehaze must be finite and within -1…1"
+            ))
+        }
+        whiteBalance = try container.contains(.whiteBalance)
+            ? container.decode(WhiteBalanceBase.self, forKey: .whiteBalance) : nil
     }
 
     /// HDR 하이라이트는 쓸 때만 적는다. 쓰지 않는 사진의 카탈로그와 썸네일 키가 예전과 같게 남는다.
@@ -362,6 +382,9 @@ public struct EditSettings: Codable, Equatable, Sendable {
         try container.encode(vignette, forKey: .vignette)
         if hdrAmount != 0 { try container.encode(hdrAmount, forKey: .hdrAmount) }
         if colorGrading != .neutral { try container.encode(colorGrading, forKey: .colorGrading) }
+        if texture != 0 { try container.encode(texture, forKey: .texture) }
+        if dehaze != 0 { try container.encode(dehaze, forKey: .dehaze) }
+        try container.encodeIfPresent(whiteBalance, forKey: .whiteBalance)
     }
 }
 

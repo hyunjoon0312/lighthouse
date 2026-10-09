@@ -77,14 +77,14 @@ final class LightroomPresetTests: XCTestCase {
                          crs:Whites2012="35" crs:Blacks2012="-40" crs:GrainFrequency="75"/>
         """)
         let payload = try XCTUnwrap(LightroomPresetImporter.parse(data: data, fileName: "tone.xmp").lightroom)
-        let applied = payload.applying(to: .neutral)
+        let applied = payload.applying(to: .neutral, isRAW: false)
         XCTAssertEqual(applied.highlights, 1.2)
         XCTAssertEqual(applied.shadows, -0.2)
         XCTAssertEqual(applied.whites, 0.35)
         XCTAssertEqual(applied.blacks, -0.4)
         XCTAssertEqual(applied.grain.roughness, 0.75)
 
-        let unsupported = xmp("<rdf:Description crs:Temperature=\"5000\"/>")
+        let unsupported = xmp("<rdf:Description crs:LensProfileEnable=\"1\"/>")
         XCTAssertThrowsError(try LightroomPresetImporter.parse(data: unsupported, fileName: "empty.xmp")) {
             XCTAssertEqual($0 as? LightroomPresetImportError, .emptyPreset)
         }
@@ -178,7 +178,7 @@ final class LightroomPresetTests: XCTestCase {
         target.cropRect = NormalizedCrop(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
         target.lut = LUTAdjustment(id: String(repeating: "a", count: 64), name: "Keep")
         target.localAdjustments = [LocalAdjustment(exposure: 1)]
-        let applied = preset.applied(to: target)
+        let applied = preset.applied(to: target, isRAW: false)
         XCTAssertEqual(applied.exposure, 0)
         XCTAssertEqual(applied.contrast, target.contrast)
         XCTAssertEqual(applied.temperatureShift, target.temperatureShift)

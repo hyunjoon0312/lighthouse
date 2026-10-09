@@ -14,6 +14,31 @@ enum CoreImageKernels {
         }
         """)
 
+    /// 세 채널 중 가장 작은 값(0…1로 자름)을 회색으로 낸다(디헤이즈의 어두운 채널).
+    static let minimumChannel = compile("""
+        [[stitchable]] float4 lighthouseMinimumChannel(coreimage::sample_t pixel) {
+            float m = clamp(min(min(pixel.r, pixel.g), pixel.b), 0.0, 1.0);
+            return float4(m, m, m, 1.0);
+        }
+        """)
+
+    /// 디헤이즈. 양수는 대기광을 흰색으로 보고 `(I - 1) / t + 1`로 안개를 걷고, 음수는 회색(0.6) 안개를 섞는다.
+    /// 0…1 안에서 계산하고 밖의 초과분은 그대로 더해 확장 범위를 보존한다.
+    static let dehaze = compile("""
+        [[stitchable]] float4 lighthouseDehaze(coreimage::sample_t pixel, coreimage::sample_t dark, float amount) {
+            float3 original = pixel.rgb;
+            float3 base = clamp(original, 0.0, 1.0);
+            float3 changed;
+            if (amount > 0.0) {
+                float t = max(0.3, 1.0 - 0.7 * amount * clamp(dark.r, 0.0, 1.0));
+                changed = (base - 1.0) / t + 1.0;
+            } else {
+                changed = mix(base, float3(0.6), -0.25 * amount);
+            }
+            return float4(original + (clamp(changed, 0.0, 1.0) - base), pixel.a);
+        }
+        """)
+
     /// sRGB 값에 0과 1을 그대로 두는 3차 S자 곡선을 건다(대비). 가운데(0.5)의 기울기는 `1 + strength / 4`이고,
     /// strength가 -2…2(대비 0.5…1.5)이면 곡선이 단조 증가한다. 0…1 밖의 값은 바꾸지 않는다.
     static let contrast = compile("""

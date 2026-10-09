@@ -95,6 +95,7 @@ final class NoiseReductionService: @unchecked Sendable {
             if ImagePipeline.isRAW(url) {
                 components += [String(describing: edits.rawDevelop), String(edits.exposure),
                                String(edits.temperatureShift), String(edits.tintShift)]
+                if let whiteBalance = edits.whiteBalance { components.append(String(describing: whiteBalance)) }
             }
             components += [String(describing: edits.flicker), cacheContext,
                            settings.mode.rawValue, String(settings.amount),

@@ -479,20 +479,63 @@ public final class ImagePipeline: @unchecked Sendable {
     }
 
     private func applyClarity(_ amount: Double, to image: CIImage) -> CIImage {
+        applyBandContrast(amount, gain: 0.5, to: image, fineRadius: 0.0015, coarseRadius: 0.015)
+    }
+
+    /// 명료도보다 열 배 작은 반경의 대비(텍스처). 음수는 잔 디테일을 부드럽게 한다.
+    private func applyTexture(_ amount: Double, to image: CIImage) -> CIImage {
+        applyBandContrast(amount, gain: 0.8, to: image, fineRadius: 0.0004, coarseRadius: 0.004)
+    }
+
+    /// 짧은 변에 비례한 두 반경 사이의 대비를 중간 톤 위주로 더한다. `amount`(-1…1)에 `gain`을 곱한 만큼 더한다.
+    private func applyBandContrast(_ amount: Double, gain: Double, to image: CIImage, fineRadius: Double,
+                                   coarseRadius: Double) -> CIImage {
         guard amount != 0, amount.isFinite, let kernel = CoreImageKernels.clarity else { return image }
-        let shortSide = min(image.extent.width, image.extent.height)
+        let shortSide = Double(min(image.extent.width, image.extent.height))
         let small = CIFilter.gaussianBlur()
         small.inputImage = image.clampedToExtent()
-        small.radius = Float(shortSide * 0.0015)
+        small.radius = Float(shortSide * fineRadius)
         let large = CIFilter.gaussianBlur()
         large.inputImage = image.clampedToExtent()
-        large.radius = Float(shortSide * 0.015)
+        large.radius = Float(shortSide * coarseRadius)
         guard let fine = small.outputImage, let coarse = large.outputImage,
               let output = kernel.apply(extent: image.extent,
-                                        arguments: [image, fine, coarse, Float(min(1, max(-1, amount)) * 0.5)]) else {
+                                        arguments: [image, fine, coarse, Float(min(1, max(-1, amount)) * gain)]) else {
             return image
         }
         return output
+    }
+
+    /// 어두운 채널로 안개 양을 어림해 걷어내거나(+) 회색 안개를 씌운다(-). 선형 작업 공간 값으로 계산한다.
+    /// 어두운 채널은 짧은 변 512px 이하로 줄여 구하고 다시 키운다. 미리보기와 내보내기가 같은 크기에서 구하므로 모양이 같다.
+    private func applyDehaze(_ amount: Double, to image: CIImage) -> CIImage {
+        guard amount != 0, amount.isFinite, let minimum = CoreImageKernels.minimumChannel,
+              let kernel = CoreImageKernels.dehaze else { return image }
+        let clamped = min(1, max(-1, amount))
+        var dark = image
+        if clamped > 0 {
+            let shortSide = Double(min(image.extent.width, image.extent.height))
+            guard shortSide > 0 else { return image }
+            let factor = min(1, 512 / shortSide)
+            let reduce = CIFilter.lanczosScaleTransform()
+            reduce.inputImage = image
+            reduce.scale = Float(factor)
+            reduce.aspectRatio = 1
+            guard let small = reduce.outputImage,
+                  let channel = minimum.apply(extent: small.extent, arguments: [small]) else { return image }
+            let smallSide = shortSide * factor
+            let spread = CIFilter.morphologyMinimum()
+            spread.inputImage = channel.clampedToExtent()
+            spread.radius = Float(smallSide * 0.004)
+            let blur = CIFilter.gaussianBlur()
+            blur.inputImage = spread.outputImage?.clampedToExtent()
+            blur.radius = Float(smallSide * 0.01)
+            guard let smooth = blur.outputImage else { return image }
+            dark = smooth.samplingLinear()
+                .transformed(by: CGAffineTransform(scaleX: 1 / factor, y: 1 / factor))
+                .cropped(to: image.extent)
+        }
+        return kernel.apply(extent: image.extent, arguments: [image, dark, Float(clamped)]) ?? image
     }
 
     /// `extendedRange`는 RAW 디코더의 확장 범위 출력(0…2)이다. 0이 아니면 따로 기억한다.
@@ -504,7 +547,7 @@ public final class ImagePipeline: @unchecked Sendable {
         var base = "\(Self.fileIdentity(url))|\(scale)|\(extendedRange)"
         var key = base
         if Self.isRAW(url) {
-            base += "|\(edits.rawDevelop)"
+            base += "|\(edits.rawDevelop)|\(String(describing: edits.whiteBalance))"
             key = base + "|\(edits.exposure)|\(edits.temperatureShift)|\(edits.tintShift)"
         }
         developmentLock.lock()
@@ -544,11 +587,11 @@ public final class ImagePipeline: @unchecked Sendable {
             if scale < 1 { raw.scaleFactor = Float(scale) }
             if extendedRange > 0 { raw.extendedDynamicRangeAmount = Float(extendedRange) }
             let originalExposure = raw.exposure
-            let originalTemperature = raw.neutralTemperature
-            let originalTint = raw.neutralTint
             raw.exposure = originalExposure + Float(edits.exposure)
-            raw.neutralTemperature = min(50_000, max(2_000, originalTemperature + Float(edits.temperatureShift)))
-            raw.neutralTint = min(150, max(-150, originalTint + Float(edits.tintShift)))
+            let neutral = Self.rawNeutral(asShotTemperature: raw.neutralTemperature, asShotTint: raw.neutralTint,
+                                          edits: edits)
+            raw.neutralTemperature = neutral.temperature
+            raw.neutralTint = neutral.tint
             let develop = edits.rawDevelop
             if raw.isLuminanceNoiseReductionSupported, let amount = develop.luminanceNoiseReduction, amount.isFinite {
                 raw.luminanceNoiseReductionAmount = Float(min(1, max(0, amount)))
@@ -569,6 +612,14 @@ public final class ImagePipeline: @unchecked Sendable {
             throw ImagePipelineError.unreadable(url)
         }
         return (source, nil)
+    }
+
+    /// RAW 현상에 쓸 중립 색온도·틴트. 화이트밸런스 기준값이 있으면 그 값, 없으면 촬영 시 값에 이동량을 더한다.
+    static func rawNeutral(asShotTemperature: Float, asShotTint: Float,
+                           edits: EditSettings) -> (temperature: Float, tint: Float) {
+        let base = edits.whiteBalance.map { (Float($0.temperature), Float($0.tint)) } ?? (asShotTemperature, asShotTint)
+        return (min(50_000, max(2_000, base.0 + Float(edits.temperatureShift))),
+                min(150, max(-150, base.1 + Float(edits.tintShift))))
     }
 
     private func developed(url: URL, edits: EditSettings, scale: Double, allowApproximation: Bool)
@@ -621,6 +672,8 @@ public final class ImagePipeline: @unchecked Sendable {
             }
         }
 
+        image = applyDehaze(edits.dehaze, to: image)
+
         if edits.colorProfile == .monochrome {
             let filter = CIFilter.colorControls()
             filter.inputImage = image
@@ -659,6 +712,7 @@ public final class ImagePipeline: @unchecked Sendable {
             image = filter.outputImage ?? image
         }
         image = applyClarity(edits.clarity, to: image)
+        image = applyTexture(edits.texture, to: image)
         if edits.sharpness != 0 {
             let filter = CIFilter.sharpenLuminance()
             filter.inputImage = image
@@ -702,6 +756,7 @@ public final class ImagePipeline: @unchecked Sendable {
         if Self.isRAW(url) {
             components += [String(describing: edits.rawDevelop), String(edits.exposure),
                            String(edits.temperatureShift), String(edits.tintShift)]
+            if let whiteBalance = edits.whiteBalance { components.append(String(describing: whiteBalance)) }
         }
         return components.joined(separator: "|")
     }

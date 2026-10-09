@@ -240,7 +240,7 @@ final class ColorGradingTests: XCTestCase {
             global: ColorGradeZone(hue: 30, saturation: 0.08, luminance: -0.04),
             blending: 0.7, balance: -0.3
         )
-        XCTAssertEqual(preset.applied(to: EditSettings()).colorGrading, expected)
+        XCTAssertEqual(preset.applied(to: EditSettings(), isRAW: false).colorGrading, expected)
         let payload = try XCTUnwrap(preset.lightroom)
         XCTAssertEqual(payload.scalars.count, 14)
         XCTAssertFalse(payload.warnings.contains { $0.contains("제외: SplitToning") || $0.contains("제외: ColorGrade") })
@@ -254,7 +254,7 @@ final class ColorGradingTests: XCTestCase {
           <crs:ColorGradeBlending>80</crs:ColorGradeBlending>
         </rdf:Description>
         """), fileName: "elements.xmp")
-        let fromElements = elements.applied(to: EditSettings()).colorGrading
+        let fromElements = elements.applied(to: EditSettings(), isRAW: false).colorGrading
         XCTAssertEqual(fromElements.shadows.hue, 200)
         XCTAssertEqual(fromElements.blending, 0.8)
 
@@ -263,7 +263,7 @@ final class ColorGradingTests: XCTestCase {
           SplitToningHighlightHue = 40, SplitToningHighlightSaturation = 30, ColorGradeGlobalLum = 10,
         } } }
         """.utf8), fileName: "grade.lrtemplate")
-        let fromTemplate = template.applied(to: EditSettings()).colorGrading
+        let fromTemplate = template.applied(to: EditSettings(), isRAW: false).colorGrading
         XCTAssertEqual(fromTemplate.highlights, ColorGradeZone(hue: 40, saturation: 0.3))
         XCTAssertEqual(fromTemplate.global.luminance, 0.1)
         XCTAssertTrue(try XCTUnwrap(template.lightroom).warnings.contains(gradingWarning))
@@ -299,12 +299,12 @@ final class ColorGradingTests: XCTestCase {
         ))
         var expected = target.colorGrading
         expected.shadows.hue = 200
-        XCTAssertEqual(hueOnly.applied(to: target).colorGrading, expected)
+        XCTAssertEqual(hueOnly.applied(to: target, isRAW: false).colorGrading, expected)
 
         let zeroBlend = EditPreset(name: "Zero", lightroom: LightroomPresetPayload(
             format: "xmp", scalars: ["ColorGradeBlending": 0], curves: [:], warnings: []
         ))
-        XCTAssertEqual(zeroBlend.applied(to: target).colorGrading.blending, 0, "명시한 0은 적용한다")
+        XCTAssertEqual(zeroBlend.applied(to: target, isRAW: false).colorGrading.blending, 0, "명시한 0은 적용한다")
     }
 
     func testNeutralSlowFilmStyleKeysLeaveGradingNeutral() throws {
@@ -315,7 +315,7 @@ final class ColorGradingTests: XCTestCase {
           crs:ColorGradeMidtoneLum="0" crs:ColorGradeHighlightLum="0" crs:ColorGradeBlending="50"
           crs:ColorGradeGlobalHue="0" crs:ColorGradeGlobalSat="0" crs:ColorGradeGlobalLum="0"/>
         """), fileName: "slow.xmp")
-        XCTAssertEqual(preset.applied(to: EditSettings()).colorGrading, .neutral)
+        XCTAssertEqual(preset.applied(to: EditSettings(), isRAW: false).colorGrading, .neutral)
     }
 
     // MARK: 도우미

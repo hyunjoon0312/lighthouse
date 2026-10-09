@@ -25,7 +25,7 @@ final class EditPresetTests: XCTestCase {
 
         var target = EditSettings(contrast: 1.2)
         target.cropRect = NormalizedCrop(x: 0.2, y: 0.2, width: 0.6, height: 0.6)
-        let applied = preset.applied(to: target)
+        let applied = preset.applied(to: target, isRAW: false)
         XCTAssertEqual(applied.exposure, 0.7)
         XCTAssertEqual(applied.contrast, 1)
         XCTAssertEqual(applied.vibrance, 0.3)

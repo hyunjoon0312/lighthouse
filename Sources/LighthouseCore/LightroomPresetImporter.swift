@@ -125,6 +125,11 @@ public enum LightroomPresetImporter {
                     throw LightroomPresetImportError.invalidValue(key)
                 }
                 scalars[key] = profile
+            } else if key == "WhiteBalance" {
+                guard let name = value.stringValue else {
+                    throw LightroomPresetImportError.invalidValue(key)
+                }
+                scalars[key] = name
             } else if key == "ConvertToGrayscale" {
                 guard let enabled = value.booleanValue else {
                     throw LightroomPresetImportError.invalidValue(key)
@@ -183,6 +188,18 @@ public enum LightroomPresetImporter {
                 warnings.append("지원하지 않아 제외: CameraProfile (\(raw))")
             }
         }
+        var whiteBalance: String?
+        if let raw = rawScalars["WhiteBalance"] {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            whiteBalance = LightroomPresetPayload.whiteBalanceNames.first {
+                $0.caseInsensitiveCompare(trimmed) == .orderedSame
+            }
+            if whiteBalance == nil { warnings.append("지원하지 않아 제외: WhiteBalance (\(raw))") }
+            if whiteBalance == "Auto" { warnings.append("자동 화이트밸런스는 적용하지 않습니다.") }
+        }
+        if whiteBalance != nil || scalars.keys.contains(where: LightroomPresetPayload.whiteBalanceKeys.contains) {
+            warnings.append("화이트밸런스는 macOS RAW 현상의 색온도로 근사하며 Adobe 결과와 다를 수 있습니다.")
+        }
         if let raw = rawScalars["ConvertToGrayscale"] {
             switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
             case "true":
@@ -215,7 +232,8 @@ public enum LightroomPresetImporter {
         var uniqueWarnings: [String] = []
         for warning in warnings where !uniqueWarnings.contains(warning) { uniqueWarnings.append(warning) }
         let payload = LightroomPresetPayload(format: format, scalars: scalars, curves: curves,
-                                              warnings: uniqueWarnings, colorProfile: colorProfile)
+                                              warnings: uniqueWarnings, colorProfile: colorProfile,
+                                              whiteBalance: whiteBalance)
         do { try payload.validate() } catch LightroomPresetPayloadError.emptySettings {
             throw LightroomPresetImportError.emptyPreset
         }
@@ -370,7 +388,8 @@ private final class XMPDelegate: NSObject, XMLParserDelegate {
             } else if elementName == "Name" {
                 nameDepth = stack.count
             } else if LightroomPresetPayload.scalarRanges[elementName] != nil || elementName == "PresetType"
-                        || elementName == "CameraProfile" || elementName == "ConvertToGrayscale" {
+                        || elementName == "CameraProfile" || elementName == "ConvertToGrayscale"
+                        || elementName == "WhiteBalance" {
                 scalarCapture = (elementName, stack.count, "")
             } else if !LightroomPresetImporter.isMetadataKey(elementName) {
                 unsupportedKeys.insert(elementName)
@@ -442,7 +461,7 @@ private final class XMPDelegate: NSObject, XMLParserDelegate {
         } else if LightroomPresetPayload.scalarRanges[key] != nil {
             if let current = scalars[key], !equalNumeric(current, raw) { fail(.conflictingValue(key), parser: parser) }
             else { scalars[key] = raw }
-        } else if key == "CameraProfile" || key == "ConvertToGrayscale" {
+        } else if key == "CameraProfile" || key == "ConvertToGrayscale" || key == "WhiteBalance" {
             if let current = scalars[key], current.trimmingCharacters(in: .whitespacesAndNewlines)
                 .caseInsensitiveCompare(raw.trimmingCharacters(in: .whitespacesAndNewlines)) != .orderedSame {
                 fail(.conflictingValue(key), parser: parser)

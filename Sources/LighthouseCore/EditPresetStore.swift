@@ -28,9 +28,10 @@ public struct EditPreset: Identifiable, Codable, Equatable, Sendable {
         self.lightroom = lightroom
     }
 
-    public func applied(to edits: EditSettings) -> EditSettings {
+    /// Lightroom 화이트밸런스는 RAW 여부에 따라 다르게 적용하므로 사진마다 `isRAW`를 받는다.
+    public func applied(to edits: EditSettings, isRAW: Bool) -> EditSettings {
         if let lightroom {
-            return lightroom.applying(to: edits)
+            return lightroom.applying(to: edits, isRAW: isRAW)
         }
         return edits.merging(from: settings, components: components)
     }
