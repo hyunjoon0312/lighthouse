@@ -48,4 +48,32 @@ final class CameraProfileFlowTests: XCTestCase {
         XCTAssertNil(model.photos[0].edits.cameraProfile)
         XCTAssertEqual(SHA256.hash(data: try Data(contentsOf: raw)).description, originalHash, "원본 bytes를 바꾸지 않는다")
     }
+
+    /// JPEG에 설치된 크리에이티브 프로필을 고르고 양을 바꿔 그려 본다. 설치본이 없으면 건너뛴다.
+    func testCreativeProfileOnJPEGRendersAndAmountIsOneUndoStep() async throws {
+        let (model, _, urls) = try await TestSupport.startedModel(self, photos: 1)
+        guard model.pipeline.cameraProfiles(for: urls[0]).contains(where: { $0.name == "Vintage 02" }) else {
+            throw XCTSkip("이 Mac에 크리에이티브 프로필이 없습니다.")
+        }
+        model.focusPhoto(model.photos[0])
+        model.setMode(.edit)
+        try await TestSupport.wait("first render") { !model.rendering && model.rendered != nil }
+        let before = model.rendered?.tiffRepresentation
+        var edits = model.photos[0].edits
+        edits.cameraProfile = "Vintage 02"
+        model.updateEdits(edits)
+        try await TestSupport.wait("creative render") {
+            !model.rendering && model.rendered != nil && model.rendered?.tiffRepresentation != before
+        }
+        let chosen = model.photos[0].edits
+        for amount in [1.2, 1.5, 1.8] {
+            var next = model.photos[0].edits
+            next.profileAmount = amount
+            model.updateEdits(next, continuous: true)
+        }
+        model.endContinuousEdit()
+        XCTAssertEqual(model.photos[0].edits.profileAmount, 1.8)
+        model.undo()
+        XCTAssertEqual(model.photos[0].edits, chosen, "양 드래그는 실행 취소 1단계")
+    }
 }

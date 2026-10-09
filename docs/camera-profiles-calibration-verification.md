@@ -68,8 +68,37 @@
 - 전체 `swift test`: 400개 중 7 skip, 실패는 `PreviewResponsivenessTests.testRAWDragShowsFramesAndSettlesExactly` 1건(드래그 중 프레임 0장). 같은 시각 load가 15~41이었고, 이번 변경을 잠시 빼고(`git stash`) 이전 커밋으로 같은 검사를 3번 돌려도 2번 실패했다. 부하에 흔들리는 검사로 보고 고치지 않았다. release 빌드·codesign은 통과했다.
 - 기존 테스트의 "지원하지 않는 프로필" 예를 Adobe Color에서 Artistic 01로 바꿨다. 기존 찾기 테스트는 실제 설치 폴더를 읽지 않도록 빈 Look 폴더를 넘긴다.
 
+## 크리에이티브 프로필(v1.2)
+
+2026-10-09 추가. 설치본 50개(Artistic 8·B&W 22·Modern 10·Vintage 10)의 키를 모두 훑고, RGBTable을 Python으로 풀어 형식(32³, Adobe RGB·감마 2.2, 항등값 차이 저장)과 축 순서(r 바깥·b 안쪽: 이 순서일 때만 값이 단조 증가)를 확인한 뒤 구현했다.
+
+| 범위 | 결과 |
+|---|---|
+| `swift test --filter CameraProfileTests` | 22개 통과(RGB 표 디코드·축 순서·감기·양, 목록·그룹·양 지원, 흑백 믹서, JPEG 렌더와 양 0, 프리셋 Look 이름·양) |
+| 기능을 끈 코드(RED 확인) | JPEG 큐브 적용·RGB 표 단계·흑백 믹서를 잠시 끄면 3개 검사 실패 |
+| `swift test --filter CameraProfileFlowTests` | 3개 통과(JPEG에 Vintage 02, 양 드래그 1단계 실행 취소) |
+| 전체 `swift test` | 405개 중 7 skip, 실패 1(RAW 드래그 타이밍, load 21) — 앞 절과 같은 부하 문제 |
+| release 빌드·codesign·`git diff --check` | 통과 |
+
+실제 렌더(`probe.log`, 디버그 빌드, 장변 1600px) 결과는 `ALL_OK`이다.
+
+| 케이스 | 평균 RGB | 채도 | 밝기 표준편차 |
+|---|---|---|---|
+| RAW 기본 | 91.6 88.5 86.8 | 10.28 | 63.31 |
+| RAW Artistic 01 / 양 0 / 양 200% | 94.3 83.8 106.5 / 93.4 88.7 85.7 / 94.9 78.9 126.3 | 27.94 / 16.03 / 49.45 | 62.83 / 62.90 / 62.37 |
+| RAW Vintage 02 | 94.3 98.1 103.5 | 16.33 | 56.93 |
+| RAW Modern 03 | 84.8 80.9 74.8 | 13.46 | 65.77 |
+| RAW B&W 01 / Red Filter / Blue Filter | 112.9 / 89.9 / 88.2 (무채색) | 0.00 | 65.11 / 67.05 / 66.77 |
+| JPEG 기본 / Artistic 01 / Vintage 02 / B&W 01 | 91.8 88.5 87.1 / 92.4 85.0 101.0 / 89.7 92.0 95.8 / 111.7 무채색 | 10.29 / 19.03 / 10.23 / 0.01 | — |
+
+- 양이 클수록 더 바뀌고, 흑백 필터 프로필끼리 결과가 다르며, JPEG에도 적용된다. JPEG를 눈으로 보면 Artistic 01은 보라 쪽, Vintage 02는 바랜 청록 쪽, B&W 01은 깔끔한 흑백이었다.
+- release 빌드 시간(`timing-release.log`, 1600px): RAW 프로필 목록 처음 0.47초, RAW 기본 1.35초(첫 렌더), Adobe Color 0.89초, Artistic 01 0.96초(다시 0.81초), B&W Red Filter 0.85초, JPEG Vintage 02 0.11초.
+- 원본 RW2와 Artistic 01·B&W Red Filter XMP의 SHA256은 렌더 전후 같다.
+- 기존 테스트의 "지원하지 않는 프로필" 예를 Artistic 01에서 Futuristic 05로 바꿨다. 이름 없는 `crs:Look`은 예전처럼 제외 경고를 낸다.
+
 ## 검증하지 않은 것
 
 - Adobe Camera Raw/Lightroom 렌더와의 비교. 비교 자료가 없다. Adobe Raw 프로필의 곡선을 sRGB 값에 거는 것도 Adobe 처리 공간과 다를 수 있다.
 - 다른 제조사 카메라의 DCP 찾기(이름 맞추기 규칙은 단위 테스트로만 확인했다).
 - Camera 계열 프로필에서 HDR 하이라이트의 효과.
+- 크리에이티브 프로필의 파라메트릭 곡선·증분 색온도·틴트(적용하지 않음)와 Adobe 렌더와의 비교.

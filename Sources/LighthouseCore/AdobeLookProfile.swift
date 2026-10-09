@@ -18,22 +18,52 @@ public enum AdobeLookProfileError: LocalizedError, Equatable, Sendable {
     }
 }
 
-/// Camera Raw의 "Adobe Raw" 프로필(Adobe Color 등). 기준 DCP 위에 색 표·톤 곡선·기본 조정을 더한 Look XMP다.
-/// 계약: docs/camera-profiles-calibration-contract.md "Adobe Raw 프로필"
+/// Camera Raw의 Look XMP 프로필. "Adobe Raw"(Adobe Color 등)와 크리에이티브 프로필(Artistic 등)이 같은 형식이다.
+/// 색 표(LookTable·RGBTable)·톤 곡선·기본 조정을 담는다.
+/// 계약: docs/camera-profiles-calibration-contract.md "Adobe Raw 프로필", "크리에이티브 프로필"
 public struct AdobeLookProfile: Equatable, Sendable {
     public static let maximumFileSize = 4 * 1024 * 1024
 
     public var name: String
-    /// 기준 DCP 이름. 설치본은 모두 "Adobe Standard"다.
-    public var baseProfile: String
-    public var lookTable: DNGProfile.HueSatTable
+    /// 기준 DCP 이름. Adobe Raw 프로필은 "Adobe Standard"이고 크리에이티브 프로필은 없다.
+    public var baseProfile: String?
+    public var lookTable: DNGProfile.HueSatTable?
+    public var rgbTable: RGBLookTable?
+    /// 프로필이 정한 RGB 표 양. 사용자 "프로필 양"을 곱해 쓴다.
+    public var rgbTableAmount: Double
+    public var supportsAmount: Bool
     /// 현상 직후 sRGB 인코딩 값에 거는 곡선(0…1).
     public var curves: ToneCurves
-    /// Adobe 단위(-100…100). 사용자 값에 더한다.
-    public var clarity: Double
-    public var highlights: Double
-    public var shadows: Double
+    /// Lighthouse가 쓰는 프로필 속 설정(Adobe 단위). 키는 `supportedSettingKeys`다.
+    public var settings: [String: Double]
     public var isMonochrome: Bool
+
+    public init(name: String, baseProfile: String?, lookTable: DNGProfile.HueSatTable?, rgbTable: RGBLookTable? = nil,
+                rgbTableAmount: Double = 1, supportsAmount: Bool = false, curves: ToneCurves = ToneCurves(),
+                settings: [String: Double] = [:], isMonochrome: Bool = false) {
+        self.name = name
+        self.baseProfile = baseProfile
+        self.lookTable = lookTable
+        self.rgbTable = rgbTable
+        self.rgbTableAmount = rgbTableAmount
+        self.supportsAmount = supportsAmount
+        self.curves = curves
+        self.settings = settings
+        self.isMonochrome = isMonochrome
+    }
+
+    /// 프로필 속 설정 중 Lighthouse가 반영하는 것. 나머지(파라메트릭 곡선 등)는 적용하지 않는다.
+    static let supportedSettingKeys: Set<String> = {
+        var keys: Set<String> = ["Exposure2012", "Contrast2012", "Highlights2012", "Shadows2012", "Whites2012",
+                                 "Blacks2012", "Clarity2012", "Saturation", "Vibrance", "PostCropVignetteAmount",
+                                 "SplitToningShadowHue", "SplitToningShadowSaturation", "SplitToningHighlightHue",
+                                 "SplitToningHighlightSaturation", "SplitToningBalance"]
+        for band in ["Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta"] {
+            keys.formUnion(["HueAdjustment\(band)", "SaturationAdjustment\(band)", "LuminanceAdjustment\(band)",
+                            "GrayMixer\(band)"])
+        }
+        return keys
+    }()
 
     public static func load(url: URL) throws -> AdobeLookProfile {
         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
@@ -54,15 +84,27 @@ public struct AdobeLookProfile: Equatable, Sendable {
         guard parser.parse() else { throw AdobeLookProfileError.unreadable }
         let attributes = delegate.attributes
         guard attributes["PresetType"]?.caseInsensitiveCompare("Look") == .orderedSame,
-              let name = delegate.name ?? attributes["Name"], !name.isEmpty,
-              let tableKey = attributes["LookTable"], let encoded = attributes["Table_" + tableKey] else {
+              let name = delegate.name ?? attributes["Name"], !name.isEmpty else {
             throw AdobeLookProfileError.notLook
         }
-        func number(_ key: String) throws -> Double {
-            guard let raw = attributes[key] else { return 0 }
-            guard let value = Double(raw.trimmingCharacters(in: .whitespaces)), value.isFinite,
-                  (-100...100).contains(value) else { throw AdobeLookProfileError.unreadable }
-            return value
+        func table(_ key: String) -> String? { attributes[key].flatMap { attributes["Table_" + $0] } }
+        let lookTable = try table("LookTable").map(decodeTable)
+        let rgbTable = try table("RGBTable").map { try RGBLookTable.decode(decodeBlock($0)) }
+        guard lookTable != nil || rgbTable != nil else { throw AdobeLookProfileError.notLook }
+        var settings: [String: Double] = [:]
+        for key in supportedSettingKeys {
+            guard let raw = attributes[key] else { continue }
+            let limit: ClosedRange<Double> = key == "Exposure2012" ? -5...5 : key.hasSuffix("Hue") && key.hasPrefix("Split")
+                ? 0...360 : -100...100
+            guard let value = Double(raw.trimmingCharacters(in: .whitespaces)), value.isFinite, limit.contains(value) else {
+                throw AdobeLookProfileError.unreadable
+            }
+            settings[key] = value
+        }
+        var rgbTableAmount = 1.0
+        if let raw = attributes["RGBTableAmount"] {
+            guard let value = Double(raw), value.isFinite, (0...4).contains(value) else { throw AdobeLookProfileError.unreadable }
+            rgbTableAmount = value
         }
         var curves = ToneCurves()
         for (key, path) in [("ToneCurvePV2012", \ToneCurves.master), ("ToneCurvePV2012Red", \ToneCurves.red),
@@ -74,25 +116,33 @@ public struct AdobeLookProfile: Equatable, Sendable {
         }
         do { try curves.validate() } catch { throw AdobeLookProfileError.unreadable }
         return AdobeLookProfile(
-            name: name, baseProfile: attributes["CameraProfile"] ?? "Adobe Standard",
-            lookTable: try decodeTable(encoded), curves: curves, clarity: try number("Clarity2012"),
-            highlights: try number("Highlights2012"), shadows: try number("Shadows2012"),
+            name: name, baseProfile: attributes["CameraProfile"], lookTable: lookTable, rgbTable: rgbTable,
+            rgbTableAmount: rgbTableAmount,
+            supportsAmount: attributes["SupportsAmount"]?.caseInsensitiveCompare("True") == .orderedSame,
+            curves: curves, settings: settings,
             isMonochrome: attributes["ConvertToGrayscale"]?.caseInsensitiveCompare("True") == .orderedSame)
+    }
+
+    /// 사용자 프로필 양(0…2)에서 RGB 표에 쓸 양. 표의 최소·최대 양으로 자른다.
+    func rgbAmount(profileAmount: Double) -> Double {
+        guard let rgbTable else { return 0 }
+        let amount = rgbTableAmount * (supportsAmount ? min(2, max(0, profileAmount)) : 1)
+        return min(rgbTable.maximumAmount, max(rgbTable.minimumAmount, amount))
+    }
+
+    /// 곡선을 항등선과 섞는다(프로필 양).
+    func curves(amount: Double) -> ToneCurves {
+        guard amount != 1 else { return curves }
+        func blend(_ points: [CurvePoint]) -> [CurvePoint] {
+            points.map { CurvePoint(x: $0.x, y: min(1, max(0, $0.x + amount * ($0.y - $0.x)))) }
+        }
+        return ToneCurves(master: blend(curves.master), red: blend(curves.red), green: blend(curves.green),
+                          blue: blend(curves.blue))
     }
 
     /// DNG SDK의 큰 표 문자열: 85문자 인코딩 → (압축 전 길이 4바이트 + zlib) → 리틀 엔디언 LookTable.
     static func decodeTable(_ encoded: String) throws -> DNGProfile.HueSatTable {
-        let bytes = try decode85(encoded)
-        guard bytes.count > 6 else { throw AdobeLookProfileError.invalidTable }
-        let expected = Int(bytes[0]) | Int(bytes[1]) << 8 | Int(bytes[2]) << 16 | Int(bytes[3]) << 24
-        // zlib 머리(2바이트)와 꼬리(Adler-32, 4바이트)를 떼고 deflate만 푼다.
-        guard expected > 0, expected <= 16 * 1024 * 1024, bytes[4] & 0x0F == 8, bytes[5] & 0x20 == 0, bytes.count > 10 else {
-            throw AdobeLookProfileError.invalidTable
-        }
-        let deflate = Data(bytes[6..<(bytes.count - 4)])
-        guard let raw = try? (deflate as NSData).decompressed(using: .zlib) as Data, raw.count == expected else {
-            throw AdobeLookProfileError.invalidTable
-        }
+        let raw = try decodeBlock(encoded)
         func u32(_ offset: Int) -> UInt32 {
             (0..<4).reduce(UInt32(0)) { $0 | UInt32(raw[raw.startIndex + offset + $1]) << (8 * UInt32($1)) }
         }
@@ -108,6 +158,22 @@ public struct AdobeLookProfile: Equatable, Sendable {
         guard deltas.allSatisfy(\.isFinite) else { throw AdobeLookProfileError.invalidTable }
         return DNGProfile.HueSatTable(hueDivisions: hue, saturationDivisions: saturation, valueDivisions: value,
                                       deltas: deltas, isSRGBEncoded: u32(20 + count * 4) == 1)
+    }
+
+    /// 표 문자열을 풀어 표 바이트를 낸다.
+    static func decodeBlock(_ encoded: String) throws -> Data {
+        let bytes = try decode85(encoded)
+        guard bytes.count > 6 else { throw AdobeLookProfileError.invalidTable }
+        let expected = Int(bytes[0]) | Int(bytes[1]) << 8 | Int(bytes[2]) << 16 | Int(bytes[3]) << 24
+        // zlib 머리(2바이트)와 꼬리(Adler-32, 4바이트)를 떼고 deflate만 푼다.
+        guard expected > 0, expected <= 16 * 1024 * 1024, bytes[4] & 0x0F == 8, bytes[5] & 0x20 == 0, bytes.count > 10 else {
+            throw AdobeLookProfileError.invalidTable
+        }
+        let deflate = Data(bytes[6..<(bytes.count - 4)])
+        guard let raw = try? (deflate as NSData).decompressed(using: .zlib) as Data, raw.count == expected else {
+            throw AdobeLookProfileError.invalidTable
+        }
+        return raw
     }
 
     static let encodingAlphabet = Array("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?`'|()[]{}@%$#")

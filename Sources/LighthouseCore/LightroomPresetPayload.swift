@@ -10,9 +10,12 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
     public var whiteBalance: String?
     /// DCP 프로필 이름("Adobe Standard", "Camera …"). 없으면 카메라 프로필을 바꾸지 않는다.
     public var cameraProfile: String?
+    /// 크리에이티브 프로필 양(0…2). 없으면 1로 적용한다.
+    public var profileAmount: Double?
 
     public init(format: String, scalars: [String: Double], curves: [String: [CurvePoint]], warnings: [String],
-                colorProfile: PhotoColorProfile? = nil, whiteBalance: String? = nil, cameraProfile: String? = nil) {
+                colorProfile: PhotoColorProfile? = nil, whiteBalance: String? = nil, cameraProfile: String? = nil,
+                profileAmount: Double? = nil) {
         self.format = format
         self.scalars = scalars
         self.curves = curves
@@ -20,6 +23,7 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
         self.colorProfile = colorProfile
         self.whiteBalance = whiteBalance
         self.cameraProfile = cameraProfile
+        self.profileAmount = profileAmount
     }
 
     public func validate() throws {
@@ -35,6 +39,9 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
         }
         if let cameraProfile, !Self.isDNGProfileName(cameraProfile) || cameraProfile.count > 128 {
             throw LightroomPresetPayloadError.invalidScalar("CameraProfile")
+        }
+        if let profileAmount, !profileAmount.isFinite || !(0...2).contains(profileAmount) || cameraProfile == nil {
+            throw LightroomPresetPayloadError.invalidScalar("Look")
         }
         for (key, value) in scalars {
             guard let range = Self.scalarRanges[key] else {
@@ -65,7 +72,7 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case format, scalars, curves, warnings, colorProfile, whiteBalance, cameraProfile
+        case format, scalars, curves, warnings, colorProfile, whiteBalance, cameraProfile, profileAmount
     }
 
     public init(from decoder: Decoder) throws {
@@ -80,6 +87,8 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
             ? try container.decode(String.self, forKey: .whiteBalance) : nil
         cameraProfile = container.contains(.cameraProfile)
             ? try container.decode(String.self, forKey: .cameraProfile) : nil
+        profileAmount = container.contains(.profileAmount)
+            ? try container.decode(Double.self, forKey: .profileAmount) : nil
         do {
             try validate()
         } catch {
@@ -100,6 +109,7 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
         try container.encodeIfPresent(colorProfile, forKey: .colorProfile)
         try container.encodeIfPresent(whiteBalance, forKey: .whiteBalance)
         try container.encodeIfPresent(cameraProfile, forKey: .cameraProfile)
+        try container.encodeIfPresent(profileAmount, forKey: .profileAmount)
     }
 
     /// `isRAW`에 따라 화이트밸런스를 다르게 적용한다. RAW는 켈빈 기준값, 다른 파일은 Incremental 이동량을 쓴다.
@@ -108,7 +118,10 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
         applyWhiteBalance(to: &result, isRAW: isRAW)
         if let value = scalars["Texture"] { result.texture = value / 100 }
         if let value = scalars["Dehaze"] { result.dehaze = value / 100 }
-        if let cameraProfile { result.cameraProfile = cameraProfile }
+        if let cameraProfile {
+            result.cameraProfile = cameraProfile
+            result.profileAmount = profileAmount ?? 1
+        }
         for (key, path) in Self.calibrationKeys {
             if let value = scalars[key] { result.calibration[keyPath: path] = value / 100 }
         }
@@ -214,6 +227,12 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
     /// Lighthouse가 이 Mac에 설치된 DCP·Adobe Raw 프로필로 찾는 이름.
     static func isDNGProfileName(_ name: String) -> Bool {
         name == "Adobe Standard" || adobeRawProfileNames.contains(name) || (name.hasPrefix("Camera ") && name.count > 7)
+            || isCreativeProfileName(name)
+    }
+
+    /// Camera Raw 크리에이티브 프로필(Artistic·B&W·Modern·Vintage 그룹)의 이름.
+    static func isCreativeProfileName(_ name: String) -> Bool {
+        CameraProfileLibrary.creativeGroups.contains { name.hasPrefix($0 + " ") && name.count > $0.count + 1 }
     }
 
     /// Camera Raw가 설치하는 Adobe Raw 프로필(Look XMP). 같은 이름으로 설치본을 찾는다.

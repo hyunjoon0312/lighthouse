@@ -225,6 +225,8 @@ public struct EditSettings: Codable, Equatable, Sendable {
     public var whiteBalance: WhiteBalanceBase?
     /// RAW에 쓸 DCP 프로필 이름("Adobe Standard" 등). nil이면 macOS 기본 현상이고 저장하지 않는다.
     public var cameraProfile: String?
+    /// 크리에이티브 프로필의 양(0…2). 1이면 저장하지 않는다.
+    public var profileAmount: Double
     /// 그림자 틴트와 원색 색조·채도. 중립이면 저장하지 않는다.
     public var calibration: CalibrationSettings
 
@@ -242,7 +244,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
                 vibrance: Double = 0, clarity: Double = 0, vignette: Double = 0, hdrAmount: Double = 0,
                 colorGrading: ColorGrading = .neutral, texture: Double = 0, dehaze: Double = 0,
                 whiteBalance: WhiteBalanceBase? = nil, cameraProfile: String? = nil,
-                calibration: CalibrationSettings = .neutral) {
+                calibration: CalibrationSettings = .neutral, profileAmount: Double = 1) {
         self.exposure = exposure
         self.contrast = contrast
         self.saturation = saturation
@@ -277,6 +279,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
         self.whiteBalance = whiteBalance
         self.cameraProfile = cameraProfile
         self.calibration = calibration
+        self.profileAmount = profileAmount
     }
 
     public static let neutral = EditSettings()
@@ -288,7 +291,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
         case sharpness, rotationQuarterTurns, cropAspect, localAdjustments, lut
         case curves, colorRanges, grain, straightenDegrees, cropRect, retouchStrokes, rawDevelop, noiseReduction, flicker
         case vibrance, clarity, vignette, hdrAmount, colorGrading, texture, dehaze, whiteBalance
-        case cameraProfile, calibration
+        case cameraProfile, calibration, profileAmount
     }
 
     public init(from decoder: Decoder) throws {
@@ -360,6 +363,11 @@ public struct EditSettings: Codable, Equatable, Sendable {
         }
         calibration = try container.contains(.calibration)
             ? container.decode(CalibrationSettings.self, forKey: .calibration) : .neutral
+        profileAmount = try container.contains(.profileAmount) ? container.decode(Double.self, forKey: .profileAmount) : 1
+        guard profileAmount.isFinite, (0...2).contains(profileAmount) else {
+            throw DecodingError.dataCorruptedError(forKey: .profileAmount, in: container,
+                                                   debugDescription: "Profile amount must be within 0…2")
+        }
     }
 
     /// HDR 하이라이트는 쓸 때만 적는다. 쓰지 않는 사진의 카탈로그와 썸네일 키가 예전과 같게 남는다.
@@ -403,6 +411,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
         try container.encodeIfPresent(whiteBalance, forKey: .whiteBalance)
         try container.encodeIfPresent(cameraProfile, forKey: .cameraProfile)
         if calibration != .neutral { try container.encode(calibration, forKey: .calibration) }
+        if profileAmount != 1 { try container.encode(profileAmount, forKey: .profileAmount) }
     }
 }
 

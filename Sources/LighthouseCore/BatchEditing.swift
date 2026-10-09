@@ -26,6 +26,7 @@ public extension EditSettings {
             result.tintShift = source.tintShift
             result.whiteBalance = source.whiteBalance
             result.cameraProfile = source.cameraProfile
+            result.profileAmount = source.profileAmount
             result.calibration = source.calibration
             result.highlights = source.highlights
             result.shadows = source.shadows

@@ -93,15 +93,18 @@ public final class ImagePipeline: @unchecked Sendable {
         self.profileLibrary = profileLibrary
     }
 
-    /// 이 사진에 저장된 DCP 프로필을 이 Mac에서 찾을 수 있는지. 찾지 못하면 macOS 기본 현상으로 그린다.
+    /// 이 사진에 저장된 프로필을 이 Mac에서 찾을 수 있는지. 찾지 못하면 프로필 없이 그린다.
     public func cameraProfileIsAvailable(_ name: String, for url: URL) -> Bool {
-        profileLibrary.profiles(forCamera: profileLibrary.camera(for: url)).contains { $0.name == name }
+        profileLibrary.profiles(for: url).contains { $0.name == name }
     }
 
-    /// 이 사진 카메라에 쓸 수 있는 DCP 프로필 이름. RAW가 아니면 비어 있다.
+    /// 이 사진에 쓸 수 있는 프로필. RAW는 카메라 프로필과 크리에이티브, 다른 사진은 크리에이티브뿐이다.
+    public func cameraProfiles(for url: URL) -> [CameraProfileInfo] {
+        profileLibrary.profiles(for: url)
+    }
+
     public func cameraProfileNames(for url: URL) -> [String] {
-        guard Self.isRAW(url) else { return [] }
-        return profileLibrary.profiles(forCamera: profileLibrary.camera(for: url)).map(\.name)
+        cameraProfiles(for: url).map(\.name)
     }
 
     public func metadata(for url: URL) throws -> PhotoMetadata {
@@ -425,7 +428,7 @@ public final class ImagePipeline: @unchecked Sendable {
         image = try AdvancedColorProcessor.applyGrain(to: image, settings: edits.grain)
         let baseExtent = image.extent
         image = transformedForDisplay(image, edits: edits, maxPixel: maxPixel)
-        image = applyVignette(edits.vignette, to: image)
+        image = applyVignette(lookVignette(url: url, edits: edits), to: image)
         return Composition(image: image, isApproximate: development.isApproximate, source: development.source,
                            offset: development.offset, baseExtent: baseExtent, retouchStrokes: retouch.strokes)
     }
@@ -563,7 +566,7 @@ public final class ImagePipeline: @unchecked Sendable {
         if Self.isRAW(url) {
             base += "|\(edits.rawDevelop)|\(String(describing: edits.whiteBalance))"
             if let name = edits.cameraProfile {
-                base += "|profile:\(name)|\(profileLibrary.identity(name: name, camera: profileLibrary.camera(for: url)))"
+                base += "|profile:\(name)|\(profileLibrary.identity(name: name, url: url))|\(edits.profileAmount)"
             }
             key = base + "|\(edits.exposure)|\(edits.temperatureShift)|\(edits.tintShift)"
         }
@@ -610,7 +613,8 @@ public final class ImagePipeline: @unchecked Sendable {
             raw.neutralTemperature = neutral.temperature
             raw.neutralTint = neutral.tint
             if let name = edits.cameraProfile,
-               let profile = profileLibrary.linearFilter(name: name, rawURL: url, temperature: Double(neutral.temperature)) {
+               let profile = profileLibrary.linearFilter(name: name, rawURL: url, temperature: Double(neutral.temperature),
+                                                         amount: edits.profileAmount) {
                 raw.linearSpaceFilter = profile.filter
                 if profile.hasToneCurve { raw.boostAmount = 0 }
             }
@@ -636,16 +640,58 @@ public final class ImagePipeline: @unchecked Sendable {
         return (source, nil)
     }
 
-    /// Adobe Raw 프로필에 든 명료도·하이라이트·섀도(Adobe 단위)를 사용자 값에 더하고, 흑백 프로필이면 흑백으로 그린다.
-    /// 사진에 저장된 값은 바꾸지 않고 이번 렌더에만 쓴다.
-    static func applyingLookAdjustments(_ look: AdobeLookProfile?, to edits: EditSettings) -> EditSettings {
+    /// Look 프로필에 든 노출·대비·톤·명료도·채도(Adobe 단위)에 프로필 양을 곱해 사용자 값에 더하고,
+    /// 흑백 프로필이면 흑백으로 그린다. 사진에 저장된 값은 바꾸지 않고 이번 렌더에만 쓴다.
+    static func applyingLookAdjustments(_ look: AdobeLookProfile?, amount: Double = 1,
+                                        to edits: EditSettings) -> EditSettings {
         guard let look else { return edits }
+        func add(_ key: String, _ scale: Double) -> Double { (look.settings[key] ?? 0) * amount / scale }
         var result = edits
-        result.clarity = min(1, max(-1, edits.clarity + look.clarity / 100))
-        result.highlights = min(2, max(0, edits.highlights + look.highlights / 100))
-        result.shadows = min(1, max(-1, edits.shadows + look.shadows / 100))
+        result.exposure = min(4, max(-4, edits.exposure + add("Exposure2012", 1)))
+        result.contrast = min(1.5, max(0.5, edits.contrast + add("Contrast2012", 200)))
+        result.highlights = min(2, max(0, edits.highlights + add("Highlights2012", 100)))
+        result.shadows = min(1, max(-1, edits.shadows + add("Shadows2012", 100)))
+        result.whites = min(1, max(-1, edits.whites + add("Whites2012", 100)))
+        result.blacks = min(1, max(-1, edits.blacks + add("Blacks2012", 100)))
+        result.clarity = min(1, max(-1, edits.clarity + add("Clarity2012", 100)))
+        result.saturation = min(2, max(0, edits.saturation + add("Saturation", 100)))
+        result.vibrance = min(1, max(-1, edits.vibrance + add("Vibrance", 100)))
+        result.vignette = min(1, max(-1, edits.vignette + add("PostCropVignetteAmount", 100)))
         if look.isMonochrome { result.colorProfile = .monochrome }
         return result
+    }
+
+    /// 비네팅은 구도를 적용한 뒤에 걸므로 현상 단계 밖에서 Look 양을 더한다.
+    private func lookVignette(url: URL, edits: EditSettings) -> Double {
+        guard let look = edits.cameraProfile.flatMap({ profileLibrary.look(named: $0, url: url) }) else { return edits.vignette }
+        let amount = look.supportsAmount ? min(2, max(0, edits.profileAmount)) : 1
+        return Self.applyingLookAdjustments(look, amount: amount, to: edits).vignette
+    }
+
+    /// Look의 HSL과 흑백 믹서(흑백일 때)를 Lighthouse 색 범위로 옮긴다. 흑백 믹서는 같은 범위의 명도로 근사한다.
+    static func lookRanges(_ look: AdobeLookProfile, amount: Double) -> [ColorRangeAdjustment] {
+        ColorBand.allCases.compactMap { band in
+            let suffix = band.rawValue.prefix(1).uppercased() + band.rawValue.dropFirst()
+            let hue = (look.settings["HueAdjustment\(suffix)"] ?? 0) * 0.3 * amount
+            let saturation = (look.settings["SaturationAdjustment\(suffix)"] ?? 0) / 100 * amount
+            var lightness = (look.settings["LuminanceAdjustment\(suffix)"] ?? 0) / 100 * amount
+            if look.isMonochrome { lightness += (look.settings["GrayMixer\(suffix)"] ?? 0) / 100 * amount }
+            guard hue != 0 || saturation != 0 || lightness != 0 else { return nil }
+            return ColorRangeAdjustment(band: band, hue: min(30, max(-30, hue)), saturation: min(1, max(-1, saturation)),
+                                        lightness: min(1, max(-1, lightness)))
+        }
+    }
+
+    /// Look의 분할 톤을 컬러 그레이딩으로 옮긴다. 흑백 변환 뒤에 적용한다.
+    static func lookGrading(_ look: AdobeLookProfile, amount: Double) -> ColorGrading {
+        var grading = ColorGrading.neutral
+        let s = look.settings
+        grading.shadows = ColorGradeZone(hue: (s["SplitToningShadowHue"] ?? 0).truncatingRemainder(dividingBy: 360),
+                                         saturation: min(1, max(0, (s["SplitToningShadowSaturation"] ?? 0) / 100 * amount)))
+        grading.highlights = ColorGradeZone(hue: (s["SplitToningHighlightHue"] ?? 0).truncatingRemainder(dividingBy: 360),
+                                            saturation: min(1, max(0, (s["SplitToningHighlightSaturation"] ?? 0) / 100 * amount)))
+        grading.balance = min(1, max(-1, (s["SplitToningBalance"] ?? 0) / 100))
+        return grading
     }
 
     /// RAW 현상에 쓸 중립 색온도·틴트. 화이트밸런스 기준값이 있으면 그 값, 없으면 촬영 시 값에 이동량을 더한다.
@@ -658,8 +704,9 @@ public final class ImagePipeline: @unchecked Sendable {
 
     private func developed(url: URL, edits requested: EditSettings, scale: Double, allowApproximation: Bool)
         throws -> (image: CIImage, isApproximate: Bool, source: CIImage, offset: CGPoint) {
-        let look = Self.isRAW(url) ? requested.cameraProfile.flatMap { profileLibrary.look(named: $0, rawURL: url) } : nil
-        let edits = Self.applyingLookAdjustments(look, to: requested)
+        let look = requested.cameraProfile.flatMap { profileLibrary.look(named: $0, url: url) }
+        let lookAmount = look?.supportsAmount == true ? min(2, max(0, requested.profileAmount)) : 1
+        let edits = Self.applyingLookAdjustments(look, amount: lookAmount, to: requested)
         let source = try developedSource(url: url, edits: edits, scale: scale, allowApproximation: allowApproximation)
         var image = source.image
         if let delta = source.delta {
@@ -708,8 +755,17 @@ public final class ImagePipeline: @unchecked Sendable {
             }
         }
 
-        if let look, !look.curves.isIdentity {
-            image = try AdvancedColorProcessor.applyColor(to: image, curves: look.curves, ranges: [])
+        if !Self.isRAW(url), let name = edits.cameraProfile,
+           let filter = profileLibrary.outputFilter(name: name, amount: edits.profileAmount) {
+            filter.setValue(image, forKey: kCIInputImageKey)
+            image = (filter.outputImage ?? image).cropped(to: image.extent)
+        }
+        if let look {
+            let curves = look.curves(amount: lookAmount)
+            let ranges = Self.lookRanges(look, amount: lookAmount)
+            if !curves.isIdentity || !ranges.isEmpty {
+                image = try AdvancedColorProcessor.applyColor(to: image, curves: curves, ranges: ranges)
+            }
         }
         image = CalibrationProcessor.apply(edits.calibration, to: image)
         image = applyDehaze(edits.dehaze, to: image)
@@ -720,6 +776,9 @@ public final class ImagePipeline: @unchecked Sendable {
             filter.saturation = 0
             guard let output = filter.outputImage else { throw ImagePipelineError.renderFailed(url) }
             image = output
+        }
+        if let look, case let grading = Self.lookGrading(look, amount: lookAmount), !grading.isNeutral {
+            image = try AdvancedColorProcessor.applyColor(to: image, curves: .identity, ranges: [], grading: grading)
         }
 
         image = applyContrast(edits.contrast, to: image)
@@ -798,7 +857,7 @@ public final class ImagePipeline: @unchecked Sendable {
                            String(edits.temperatureShift), String(edits.tintShift)]
             if let whiteBalance = edits.whiteBalance { components.append(String(describing: whiteBalance)) }
             if let name = edits.cameraProfile {
-                components.append(name + "|" + profileLibrary.identity(name: name, camera: profileLibrary.camera(for: url)))
+                components.append(name + "|" + profileLibrary.identity(name: name, url: url) + "|\(edits.profileAmount)")
             }
         }
         return components.joined(separator: "|")

@@ -231,6 +231,9 @@ struct DNGProfileTransform: Sendable {
                                                 0.2880402, 0.7118741, 0.0000857,
                                                 0, 0, 0.8252100])
 
+    static let sRGBToProPhoto = proPhotoToXYZ.inverse! * sRGBToXYZ
+    static let proPhotoToSRGB = sRGBToProPhoto.inverse!
+
     let toProPhoto: Matrix3
     let toSRGB: Matrix3
     let hueSatMap: DNGProfile.HueSatTable?
@@ -238,14 +241,17 @@ struct DNGProfileTransform: Sendable {
     let lookTable: DNGProfile.HueSatTable?
     /// Adobe Raw 프로필(Adobe Color 등)의 색 표. DCP LookTable 다음에 적용한다.
     let additionalLook: DNGProfile.HueSatTable?
+    /// 크리에이티브 프로필의 RGB 표와 양. 추가 Look 다음에 적용한다.
+    let rgbTable: (table: RGBLookTable, amount: Double)?
     let toneCurve: [SIMD2<Double>]?
 
     /// `reference`는 같은 카메라의 Adobe Standard다. macOS 현상 결과를 그 프로필의 색 측정 결과로 보고 카메라 RGB를 되돌린다.
-    init(profile: DNGProfile, reference: DNGProfile?, temperature: Double,
-         additionalLook: DNGProfile.HueSatTable? = nil) {
-        let weight = profile.illuminantWeight(temperature: temperature)
+    /// `profile`이 nil이면 DCP 없이 추가 Look과 RGB 표만 적용한다(크리에이티브 프로필의 JPEG 등).
+    init(profile: DNGProfile?, reference: DNGProfile?, temperature: Double,
+         additionalLook: DNGProfile.HueSatTable? = nil, rgbTable: (table: RGBLookTable, amount: Double)? = nil) {
+        let weight = profile?.illuminantWeight(temperature: temperature) ?? 1
         var difference = Matrix3.identity
-        if let forward = profile.forwardMatrix(weight: weight),
+        if let profile, let forward = profile.forwardMatrix(weight: weight),
            let base = (reference ?? profile).forwardMatrix(weight: (reference ?? profile).illuminantWeight(temperature: temperature)),
            let baseInverse = base.inverse {
             difference = forward * baseInverse
@@ -253,11 +259,12 @@ struct DNGProfileTransform: Sendable {
         let xyzToProPhoto = Self.proPhotoToXYZ.inverse!
         toProPhoto = xyzToProPhoto * difference * Self.sRGBToXYZ
         toSRGB = Self.sRGBToXYZ.inverse! * Self.proPhotoToXYZ
-        hueSatMap = profile.hueSatMap(weight: weight)
-        exposureScale = pow(2, profile.baselineExposureOffset)
-        lookTable = profile.lookTable
+        hueSatMap = profile?.hueSatMap(weight: weight)
+        exposureScale = pow(2, profile?.baselineExposureOffset ?? 0)
+        lookTable = profile?.lookTable
         self.additionalLook = additionalLook
-        toneCurve = profile.toneCurve
+        self.rgbTable = rgbTable.flatMap { $0.amount == 0 ? nil : $0 }
+        toneCurve = profile?.toneCurve
     }
 
     func apply(_ rgb: SIMD3<Double>) -> SIMD3<Double> {
@@ -267,6 +274,10 @@ struct DNGProfileTransform: Sendable {
         value *= exposureScale
         if let lookTable { value = Self.applying(lookTable, to: value) }
         if let additionalLook { value = Self.applying(additionalLook, to: value) }
+        if let rgbTable {
+            let linear = rgbTable.table.apply(Self.proPhotoToSRGB.apply(value), amount: rgbTable.amount)
+            value = Self.sRGBToProPhoto.apply(linear)
+        }
         if let toneCurve { value = Self.applyingTone(toneCurve, to: value) }
         return toSRGB.apply(value)
     }

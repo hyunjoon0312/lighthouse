@@ -3,19 +3,28 @@ import CoreImage.CIFilterBuiltins
 import Foundation
 import ImageIO
 
-/// 이 Mac에 설치된 DCP 하나.
+/// 이 Mac에 설치된 프로필 하나(DCP, Adobe Raw Look, 크리에이티브 Look).
 public struct CameraProfileInfo: Equatable, Sendable {
     public let name: String
     public let url: URL
     public let isUserProfile: Bool
     /// Adobe Raw 프로필(Adobe Color 등, Look XMP)이다. 기준 DCP는 같은 카메라의 Adobe Standard다.
     public let isLook: Bool
+    /// 크리에이티브 프로필의 그룹(Artistic·B&W·Modern·Vintage). 다른 프로필은 nil이다.
+    public let creativeGroup: String?
+    /// "프로필 양"을 쓸 수 있다.
+    public let supportsAmount: Bool
 
-    public init(name: String, url: URL, isUserProfile: Bool, isLook: Bool = false) {
+    public var isCreative: Bool { creativeGroup != nil }
+
+    public init(name: String, url: URL, isUserProfile: Bool, isLook: Bool = false, creativeGroup: String? = nil,
+                supportsAmount: Bool = false) {
         self.name = name
         self.url = url
         self.isUserProfile = isUserProfile
         self.isLook = isLook
+        self.creativeGroup = creativeGroup
+        self.supportsAmount = supportsAmount
     }
 }
 
@@ -27,6 +36,10 @@ public final class CameraProfileLibrary: @unchecked Sendable {
         .appendingPathComponent("Library/Application Support/Adobe/CameraRaw/CameraProfiles")
     public static let defaultLookDirectory = URL(
         fileURLWithPath: "/Library/Application Support/Adobe/CameraRaw/Settings/Adobe/Profiles/Adobe Raw")
+    public static let defaultCreativeDirectory = URL(
+        fileURLWithPath: "/Library/Application Support/Adobe/CameraRaw/Settings/Adobe/Profiles")
+    /// 크리에이티브 프로필 그룹(설치본 폴더 이름).
+    public static let creativeGroups = ["Artistic", "B&W", "Modern", "Vintage"]
     public static let shared = CameraProfileLibrary()
 
     /// 큐브 격자 크기와 입력·출력 모양(0…4의 로그 곡선).
@@ -37,6 +50,8 @@ public final class CameraProfileLibrary: @unchecked Sendable {
     private let adobeDirectory: URL
     private let userDirectory: URL
     private let lookDirectory: URL
+    private let creativeDirectory: URL
+    private var creativeListing: (stamp: String, profiles: [CameraProfileInfo])?
     private let lock = NSLock()
     private var listings: [String: (stamp: String, profiles: [CameraProfileInfo])] = [:]
     private var parsed: [String: (stamp: Date?, profile: DNGProfile?)] = [:]
@@ -47,10 +62,62 @@ public final class CameraProfileLibrary: @unchecked Sendable {
 
     public init(adobeDirectory: URL = CameraProfileLibrary.defaultAdobeDirectory,
                 userDirectory: URL = CameraProfileLibrary.defaultUserDirectory,
-                lookDirectory: URL = CameraProfileLibrary.defaultLookDirectory) {
+                lookDirectory: URL = CameraProfileLibrary.defaultLookDirectory,
+                creativeDirectory: URL = CameraProfileLibrary.defaultCreativeDirectory) {
         self.adobeDirectory = adobeDirectory
         self.userDirectory = userDirectory
         self.lookDirectory = lookDirectory
+        self.creativeDirectory = creativeDirectory
+    }
+
+    /// 이 사진에 쓸 수 있는 프로필. RAW는 카메라 프로필과 크리에이티브 프로필, 다른 사진은 크리에이티브 프로필뿐이다.
+    public func profiles(for url: URL) -> [CameraProfileInfo] {
+        let creative = creativeProfiles()
+        guard ImagePipeline.isRAW(url) else { return creative }
+        return profiles(forCamera: camera(for: url)) + creative
+    }
+
+    /// 크리에이티브 프로필(그룹 순서, 그룹 안은 이름순). 목록은 파일 이름과 앞부분만 읽고 표는 쓸 때 푼다.
+    public func creativeProfiles() -> [CameraProfileInfo] {
+        let folders = Self.creativeGroups.map { creativeDirectory.appendingPathComponent($0, isDirectory: true) }
+        let stamp = folders.map { Self.modificationDate($0).map { String($0.timeIntervalSinceReferenceDate) } ?? "-" }
+            .joined(separator: "|")
+        lock.lock()
+        if let cached = creativeListing, cached.stamp == stamp {
+            lock.unlock()
+            return cached.profiles
+        }
+        lock.unlock()
+        var found: [CameraProfileInfo] = []
+        for (group, folder) in zip(Self.creativeGroups, folders) {
+            let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+            for url in files where url.pathExtension.lowercased() == "xmp" {
+                guard let header = Self.header(of: url), header.contains("crs:PresetType=\"Look\"") else { continue }
+                let name = url.deletingPathExtension().lastPathComponent
+                guard !found.contains(where: { $0.name == name }) else { continue }
+                found.append(CameraProfileInfo(name: name, url: url, isUserProfile: false, isLook: true,
+                                               creativeGroup: group,
+                                               supportsAmount: header.contains("crs:SupportsAmount=\"True\"")))
+            }
+        }
+        found.sort { lhs, rhs in
+            let left = Self.creativeGroups.firstIndex(of: lhs.creativeGroup ?? "") ?? 0
+            let right = Self.creativeGroups.firstIndex(of: rhs.creativeGroup ?? "") ?? 0
+            if left != right { return left < right }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+        lock.lock()
+        creativeListing = (stamp, found)
+        lock.unlock()
+        return found
+    }
+
+    /// 파일 앞 8 KiB. 크리에이티브 프로필 목록에서 종류와 양 지원 여부만 본다.
+    private static func header(of url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 8192) else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// 카메라 이름이 DCP의 UniqueCameraModel과 같거나, 카메라 이름이 DCP 이름의 모델 부분(제조사 다음)으로 끝나면
@@ -106,6 +173,16 @@ public final class CameraProfileLibrary: @unchecked Sendable {
         return found
     }
 
+    /// 현상 캐시 키에 넣을 프로필 식별값. 크리에이티브 프로필은 RAW의 기준 DCP도 넣는다. 찾지 못하면 "missing"이다.
+    func identity(name: String, url: URL) -> String {
+        guard let info = creativeProfiles().first(where: { $0.name == name }) else {
+            return identity(name: name, camera: camera(for: url))
+        }
+        let date = Self.modificationDate(info.url)?.timeIntervalSinceReferenceDate ?? 0
+        let base = ImagePipeline.isRAW(url) ? identity(name: "Adobe Standard", camera: camera(for: url)) : "-"
+        return "\(info.url.path)|\(date)|\(base)"
+    }
+
     /// 현상 캐시 키에 넣을 프로필 파일 식별값. 찾지 못하면 "missing"이다.
     func identity(name: String, camera: String?) -> String {
         let available = profiles(forCamera: camera)
@@ -119,33 +196,62 @@ public final class CameraProfileLibrary: @unchecked Sendable {
     }
 
     /// RAW 현상의 선형 단계에 넣을 필터. 프로필을 찾지 못하면 nil이다.
-    func linearFilter(name: String, rawURL: URL, temperature: Double) -> (filter: CIFilter, hasToneCurve: Bool)? {
+    /// 크리에이티브 프로필은 Adobe Standard DCP(있을 때) 위에 Look 표를 넣는다.
+    func linearFilter(name: String, rawURL: URL, temperature: Double,
+                      amount: Double = 1) -> (filter: CIFilter, hasToneCurve: Bool)? {
         let camera = camera(for: rawURL)
         let available = profiles(forCamera: camera)
-        guard let info = available.first(where: { $0.name == name }) else { return nil }
         let reference = available.first(where: { $0.name == "Adobe Standard" }).flatMap { load($0.url) }
-        let look = info.isLook ? loadLook(info.url) : nil
-        guard let profile = info.isLook ? reference : load(info.url), !info.isLook || look != nil else { return nil }
-        let weight = (profile.illuminantWeight(temperature: temperature) * 20).rounded() / 20
-        let key = "\(identity(name: name, camera: camera))|\(weight)"
+        let profile: DNGProfile?
+        let look: AdobeLookProfile?
+        if let creative = creativeProfiles().first(where: { $0.name == name }) {
+            guard let loaded = loadLook(creative.url) else { return nil }
+            profile = reference
+            look = loaded
+        } else {
+            guard let info = available.first(where: { $0.name == name }) else { return nil }
+            look = info.isLook ? loadLook(info.url) : nil
+            profile = info.isLook ? reference : load(info.url)
+            guard profile != nil, !info.isLook || look != nil else { return nil }
+        }
+        let weight = ((profile?.illuminantWeight(temperature: temperature) ?? 1) * 20).rounded() / 20
+        let representative = profile.flatMap { Self.temperature(forWeight: weight, profile: $0) } ?? temperature
+        let filter = cachedFilter(key: "\(identity(name: name, url: rawURL))|\(weight)|\(Self.roundedAmount(amount))") {
+            DNGProfileTransform(profile: profile, reference: reference, temperature: representative,
+                                additionalLook: look?.lookTable,
+                                rgbTable: look?.rgbTable.map { ($0, look!.rgbAmount(profileAmount: amount)) })
+        }
+        return (filter, profile?.hasToneCurve ?? false)
+    }
+
+    /// RAW가 아닌 사진에 현상 직후 거는 크리에이티브 프로필 필터(DCP 없이 Look 표만). 크리에이티브가 아니면 nil이다.
+    func outputFilter(name: String, amount: Double) -> CIFilter? {
+        guard let info = creativeProfiles().first(where: { $0.name == name }), let look = loadLook(info.url) else {
+            return nil
+        }
+        let date = Self.modificationDate(info.url)?.timeIntervalSinceReferenceDate ?? 0
+        return cachedFilter(key: "output|\(info.url.path)|\(date)|\(Self.roundedAmount(amount))") {
+            DNGProfileTransform(profile: nil, reference: nil, temperature: 5000, additionalLook: look.lookTable,
+                                rgbTable: look.rgbTable.map { ($0, look.rgbAmount(profileAmount: amount)) })
+        }
+    }
+
+    private static func roundedAmount(_ amount: Double) -> Double { (min(2, max(0, amount)) * 100).rounded() / 100 }
+
+    private func cachedFilter(key: String, transform: () -> DNGProfileTransform) -> CIFilter {
         lock.lock()
-        var cube = cubes[key]
+        let cached = cubes[key]
         lock.unlock()
-        if cube == nil {
-            let representative = Self.temperature(forWeight: weight, profile: profile) ?? temperature
-            let built = Self.cubeData(DNGProfileTransform(profile: profile, reference: reference,
-                                                          temperature: representative,
-                                                          additionalLook: look?.lookTable))
+        let cube = cached ?? Self.cubeData(transform())
+        if cached == nil {
             lock.lock()
-            cubes[key] = built
+            cubes[key] = cube
             cubeOrder.removeAll { $0 == key }
             cubeOrder.append(key)
             while cubeOrder.count > 4 { cubes.removeValue(forKey: cubeOrder.removeFirst()) }
             lock.unlock()
-            cube = built
         }
-        guard let cube else { return nil }
-        return (ShapedCubeFilter(cube: cube), profile.hasToneCurve)
+        return ShapedCubeFilter(cube: cube)
     }
 
     /// 반올림한 가중치를 내는 색온도. 두 표준광 사이에서 역 색온도로 되돌린다.
@@ -187,9 +293,11 @@ public final class CameraProfileLibrary: @unchecked Sendable {
         (pow(2, e * log2(1 + shaperGain * shaperRange)) - 1) / shaperGain
     }
 
-    /// 사진에 고른 프로필이 Adobe Raw 프로필이면 그 Look. 현상 단계의 곡선·조정값에 쓴다.
-    func look(named name: String, rawURL: URL) -> AdobeLookProfile? {
-        guard let info = profiles(forCamera: camera(for: rawURL)).first(where: { $0.name == name }), info.isLook else {
+    /// 사진에 고른 프로필이 Look(Adobe Raw·크리에이티브)이면 그 Look. 현상 단계의 곡선·조정값에 쓴다.
+    func look(named name: String, url: URL) -> AdobeLookProfile? {
+        if let creative = creativeProfiles().first(where: { $0.name == name }) { return loadLook(creative.url) }
+        guard ImagePipeline.isRAW(url),
+              let info = profiles(forCamera: camera(for: url)).first(where: { $0.name == name }), info.isLook else {
             return nil
         }
         return loadLook(info.url)

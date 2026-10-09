@@ -254,10 +254,10 @@ final class CameraProfileTests: XCTestCase {
         XCTAssertEqual(color.applied(to: EditSettings(), isRAW: true).cameraProfile, "Adobe Color")
 
         let creative = try LightroomPresetImporter.parse(data: xmp("""
-        <rdf:Description crs:Name="Creative" crs:CameraProfile="Artistic 01" crs:Dehaze="5"/>
+        <rdf:Description crs:Name="Creative" crs:CameraProfile="Futuristic 05" crs:Dehaze="5"/>
         """), fileName: "creative.xmp")
         XCTAssertNil(try XCTUnwrap(creative.lightroom).cameraProfile)
-        XCTAssertTrue(try XCTUnwrap(creative.lightroom).warnings.contains("지원하지 않아 제외: CameraProfile (Artistic 01)"))
+        XCTAssertTrue(try XCTUnwrap(creative.lightroom).warnings.contains("지원하지 않아 제외: CameraProfile (Futuristic 05)"))
 
         XCTAssertThrowsError(try LightroomPresetImporter.parse(data: xmp("""
         <rdf:Description crs:Name="Bad" crs:RedHue="101"/>
@@ -294,7 +294,8 @@ final class CameraProfileTests: XCTestCase {
                                                         maxPixel: 300)), standard, "Adobe Color는 Adobe Standard 위에 색 표를 더한다")
             XCTAssertEqual(names.first, "Adobe Color", "Adobe Raw 프로필이 먼저 보인다")
         }
-        XCTAssertEqual(pipeline.cameraProfileNames(for: URL(fileURLWithPath: "/tmp/photo.jpg")), [])
+        XCTAssertTrue(pipeline.cameraProfiles(for: URL(fileURLWithPath: "/tmp/photo.jpg")).allSatisfy(\.isCreative),
+                      "JPEG에는 크리에이티브 프로필만 보인다")
     }
 
     // MARK: Adobe Raw 프로필
@@ -311,8 +312,10 @@ final class CameraProfileTests: XCTestCase {
                                                       extra: #"crs:Clarity2012="+10" crs:Shadows2012="-5""#))
         XCTAssertEqual(look.name, "Adobe Vivid")
         XCTAssertEqual(look.baseProfile, "Adobe Standard")
-        XCTAssertEqual(look.clarity, 10)
-        XCTAssertEqual(look.shadows, -5)
+        XCTAssertEqual(look.settings["Clarity2012"], 10)
+        XCTAssertEqual(look.settings["Shadows2012"], -5)
+        XCTAssertFalse(look.supportsAmount)
+        XCTAssertNil(look.rgbTable)
         XCTAssertFalse(look.isMonochrome)
         XCTAssertEqual(look.curves.master.map(\.y), [0, 16 / 255, 1])
         XCTAssertEqual(look.curves.red, ToneCurves.identityPoints)
@@ -373,7 +376,9 @@ final class CameraProfileTests: XCTestCase {
         let look = AdobeLookProfile(name: "Adobe Landscape", baseProfile: "Adobe Standard",
                                     lookTable: DNGProfile.HueSatTable(hueDivisions: 1, saturationDivisions: 2, valueDivisions: 1,
                                                                       deltas: [0, 1, 1, 0, 1, 1], isSRGBEncoded: false),
-                                    curves: ToneCurves(), clarity: 10, highlights: -12, shadows: 12, isMonochrome: true)
+                                    curves: ToneCurves(),
+                                    settings: ["Clarity2012": 10, "Highlights2012": -12, "Shadows2012": 12],
+                                    isMonochrome: true)
         let edits = EditSettings(highlights: 0.05, shadows: 0.95, clarity: 0.2)
         let adjusted = ImagePipeline.applyingLookAdjustments(look, to: edits)
         XCTAssertEqual(adjusted.clarity, 0.3, accuracy: 1e-12)
@@ -381,6 +386,201 @@ final class CameraProfileTests: XCTestCase {
         XCTAssertEqual(adjusted.shadows, 1, accuracy: 1e-12)
         XCTAssertEqual(adjusted.colorProfile, .monochrome)
         XCTAssertEqual(ImagePipeline.applyingLookAdjustments(nil, to: edits), edits)
+        let half = ImagePipeline.applyingLookAdjustments(look, amount: 0.5, to: EditSettings())
+        XCTAssertEqual(half.clarity, 0.05, accuracy: 1e-12, "프로필 양을 곱한다")
+        XCTAssertEqual(half.shadows, 0.06, accuracy: 1e-12)
+    }
+
+    // MARK: 크리에이티브 프로필
+
+    func testDecodesRGBTableWithWrappedDeltasAndAxisOrder() throws {
+        // 출력 = (b, g, r): r 축이 가장 바깥, b 축이 가장 안쪽이어야 이 값이 나온다.
+        let swap = rgbTableData(divisions: 2) { r, g, b in (b, g, r) }
+        let table = try RGBLookTable.decode(swap)
+        let swapped = table.apply(SIMD3(0.2, 0.5, 0.8), amount: 1)
+        XCTAssertLessThan(maxDifference(swapped, SIMD3(0.8, 0.5, 0.2)), 1e-4)
+        XCTAssertEqual(table.apply(SIMD3(0.2, 0.5, 0.8), amount: 0), SIMD3(0.2, 0.5, 0.8))
+
+        let invert = try RGBLookTable.decode(rgbTableData(divisions: 3) { r, g, b in (1 - r, 1 - g, 1 - b) })
+        XCTAssertLessThan(maxDifference(invert.apply(SIMD3(repeating: 0.25), amount: 1), SIMD3(repeating: 0.75)), 1e-4,
+                          "항등값보다 작은 값도 차이를 감아 저장한다")
+        XCTAssertLessThan(maxDifference(invert.apply(SIMD3(repeating: 0.25), amount: 0.5), SIMD3(repeating: 0.5)), 1e-4)
+        let bright = invert.apply(SIMD3(1.5, 0.25, 0.25), amount: 1)
+        XCTAssertEqual(bright.x, 0.5, accuracy: 1e-4, "1 위의 넘는 부분(0.5)을 보존한다")
+
+        XCTAssertThrowsError(try RGBLookTable.decode(rgbTableData(divisions: 2, kind: 0) { ($0, $1, $2) })) {
+            XCTAssertEqual($0 as? AdobeLookProfileError, .unsupportedTable)
+        }
+        XCTAssertThrowsError(try RGBLookTable.decode(swap.prefix(40))) {
+            XCTAssertEqual($0 as? AdobeLookProfileError, .invalidTable)
+        }
+    }
+
+    func testCreativeLookAmountAndListing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let creative = root.appendingPathComponent("Profiles", isDirectory: true)
+        try FileManager.default.createDirectory(at: creative.appendingPathComponent("Vintage"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: creative.appendingPathComponent("B&W"), withIntermediateDirectories: true)
+        let invert = rgbTableData(divisions: 3, maximumAmount: 1.5) { r, g, b in (1 - r, 1 - g, 1 - b) }
+        try creativeXMP(name: "Vintage 01", rgbTable: invert, extra: #"crs:RGBTableAmount="0.5" crs:Clarity2012="+20""#)
+            .write(to: creative.appendingPathComponent("Vintage/Vintage 01.xmp"))
+        try creativeXMP(name: "B&W 01", rgbTable: nil,
+                        extra: #"crs:ConvertToGrayscale="True" crs:GrayMixerRed="-40""#, supportsAmount: false)
+            .write(to: creative.appendingPathComponent("B&W/B&W 01.xmp"))
+
+        let look = try AdobeLookProfile.load(url: creative.appendingPathComponent("Vintage/Vintage 01.xmp"))
+        XCTAssertTrue(look.supportsAmount)
+        XCTAssertEqual(look.rgbAmount(profileAmount: 1), 0.5)
+        XCTAssertEqual(look.rgbAmount(profileAmount: 2), 1)
+        XCTAssertEqual(look.rgbAmount(profileAmount: 0), 0)
+        XCTAssertNil(look.baseProfile)
+
+        let library = CameraProfileLibrary(adobeDirectory: root.appendingPathComponent("none"),
+                                           userDirectory: root.appendingPathComponent("none"),
+                                           lookDirectory: root.appendingPathComponent("none"), creativeDirectory: creative)
+        let jpeg = URL(fileURLWithPath: "/tmp/photo.jpg")
+        let listed = library.profiles(for: jpeg)
+        XCTAssertEqual(listed.map(\.name), ["B&W 01", "Vintage 01"], "그룹 순서(Artistic, B&W, Modern, Vintage)")
+        XCTAssertEqual(listed.map(\.supportsAmount), [false, true])
+        XCTAssertEqual(listed.map(\.creativeGroup), ["B&W", "Vintage"])
+
+        let bw = try AdobeLookProfile.load(url: creative.appendingPathComponent("B&W/B&W 01.xmp"))
+        XCTAssertEqual(ImagePipeline.lookRanges(bw, amount: 1), [ColorRangeAdjustment(band: .red, lightness: -0.4)],
+                       "흑백 믹서는 흑백일 때 같은 범위의 명도로 근사한다")
+        var color = bw
+        color.isMonochrome = false
+        XCTAssertEqual(ImagePipeline.lookRanges(color, amount: 1), [])
+    }
+
+    func testCreativeProfileRendersOnJPEGWithAmount() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let creative = root.appendingPathComponent("Profiles", isDirectory: true)
+        try FileManager.default.createDirectory(at: creative.appendingPathComponent("Modern"), withIntermediateDirectories: true)
+        try creativeXMP(name: "Modern 01", rgbTable: rgbTableData(divisions: 3, maximumAmount: 2) { r, g, b in (1 - r, 1 - g, 1 - b) },
+                        extra: "").write(to: creative.appendingPathComponent("Modern/Modern 01.xmp"))
+        let library = CameraProfileLibrary(adobeDirectory: root.appendingPathComponent("none"),
+                                           userDirectory: root.appendingPathComponent("none"),
+                                           lookDirectory: root.appendingPathComponent("none"), creativeDirectory: creative)
+        let pipeline = ImagePipeline(profileLibrary: library)
+        let url = try temporaryPNG(width: 16, height: 16) { _, _ in SIMD3(0.8, 0.5, 0.2) }
+        let plain = try rgba8(pipeline.render(url: url, edits: EditSettings(), maxPixel: nil))
+        let inverted = try rgba8(pipeline.render(url: url, edits: EditSettings(cameraProfile: "Modern 01"), maxPixel: nil))
+        // 선형 값에서 반전한다: 빨강 sRGB 0.8(선형 0.60) → 선형 0.40(sRGB 약 0.66), 파랑 0.2 → 약 0.98.
+        XCTAssertEqual(Double(inverted[0]), 0.66 * 255, accuracy: 6, "빨강이 반전되어 줄어든다")
+        XCTAssertEqual(Double(inverted[2]), 0.985 * 255, accuracy: 6)
+        let none = try rgba8(pipeline.render(url: url, edits: EditSettings(cameraProfile: "Modern 01", profileAmount: 0),
+                                             maxPixel: nil))
+        XCTAssertLessThanOrEqual(zip(none, plain).map { abs(Int($0) - Int($1)) }.max() ?? 0, 2, "양 0이면 거의 그대로")
+        XCTAssertEqual(try rgba8(pipeline.render(url: url, edits: EditSettings(cameraProfile: "Nope"), maxPixel: nil)), plain)
+    }
+
+    func testImportsLookNameAndAmountFromPresets() throws {
+        let xmpPreset = try LightroomPresetImporter.parse(data: xmp("""
+        <rdf:Description crs:Name="Punch" crs:CameraProfile="Adobe Standard" crs:Dehaze="5">
+          <crs:Look>
+            <rdf:Description crs:Name="B&amp;W 01" crs:Amount="1.5" crs:Stubbed="true">
+              <crs:Group><rdf:Alt><rdf:li xml:lang="x-default">Profiles</rdf:li></rdf:Alt></crs:Group>
+            </rdf:Description>
+          </crs:Look>
+        </rdf:Description>
+        """), fileName: "punch.xmp")
+        let payload = try XCTUnwrap(xmpPreset.lightroom)
+        XCTAssertEqual(payload.cameraProfile, "B&W 01", "Look 이름이 CameraProfile보다 앞선다")
+        XCTAssertEqual(payload.profileAmount, 1.5)
+        XCTAssertFalse(payload.warnings.contains { $0.contains("Look") }, "\(payload.warnings)")
+        let applied = xmpPreset.applied(to: EditSettings(profileAmount: 0.3), isRAW: false)
+        XCTAssertEqual(applied.cameraProfile, "B&W 01")
+        XCTAssertEqual(applied.profileAmount, 1.5)
+
+        let template = try LightroomPresetImporter.parse(data: Data("""
+        s = { title = "Vintage", type = "Develop", value = { settings = {
+          Look = { Name = "Vintage 03", Amount = 0.8, Parameters = { } }, Texture = 5,
+        }, }, }
+        """.utf8), fileName: "vintage.lrtemplate")
+        XCTAssertEqual(template.lightroom?.cameraProfile, "Vintage 03")
+        XCTAssertEqual(template.lightroom?.profileAmount, 0.8)
+
+        let unknown = try LightroomPresetImporter.parse(data: xmp("""
+        <rdf:Description crs:Name="Other" crs:Dehaze="5"><crs:Look><rdf:Description crs:Name="Futuristic 05" crs:Amount="1"/></crs:Look></rdf:Description>
+        """), fileName: "other.xmp")
+        XCTAssertNil(unknown.lightroom?.cameraProfile)
+        XCTAssertTrue(unknown.lightroom?.warnings.contains("지원하지 않아 제외: Look (Futuristic 05)") == true)
+
+        XCTAssertThrowsError(try LightroomPresetImporter.parse(data: xmp("""
+        <rdf:Description crs:Name="Bad"><crs:Look><rdf:Description crs:Name="Modern 01" crs:Amount="3"/></crs:Look></rdf:Description>
+        """), fileName: "bad.xmp")) { XCTAssertEqual($0 as? LightroomPresetImportError, .invalidValue("Look")) }
+
+        let edits = EditSettings(cameraProfile: "Modern 01", profileAmount: 1.4)
+        XCTAssertEqual(try JSONDecoder().decode(EditSettings.self, from: JSONEncoder().encode(edits)), edits)
+        XCTAssertNil(try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(EditSettings())) as? [String: Any])["profileAmount"])
+        XCTAssertEqual(EditSettings(profileAmount: 0.5).changeSummary(from: EditSettings()), "카메라 프로필")
+    }
+
+    private func rgbTableData(divisions n: Int, kind: UInt32 = 1, maximumAmount: Double = 2,
+                              map: (Double, Double, Double) -> (Double, Double, Double)) -> Data {
+        func le32(_ v: UInt32) -> [UInt8] { (0..<4).map { UInt8((v >> (8 * UInt32($0))) & 0xFF) } }
+        func le16(_ v: UInt16) -> [UInt8] { [UInt8(v & 0xFF), UInt8(v >> 8)] }
+        let nominal = (0..<n).map { (UInt32($0) * 0xFFFF + UInt32((n - 1) / 2)) / UInt32(n - 1) }
+        var bytes = le32(kind) + le32(1) + le32(3) + le32(UInt32(n))
+        for r in 0..<n {
+            for g in 0..<n {
+                for b in 0..<n {
+                    let out = map(Double(nominal[r]) / 65535, Double(nominal[g]) / 65535, Double(nominal[b]) / 65535)
+                    for (value, base) in [(out.0, nominal[r]), (out.1, nominal[g]), (out.2, nominal[b])] {
+                        let actual = UInt32((value * 65535).rounded())
+                        bytes += le16(UInt16(truncatingIfNeeded: actual &- base))
+                    }
+                }
+            }
+        }
+        bytes += le32(0) + le32(0) + le32(0)
+        bytes += withUnsafeBytes(of: Double(0).bitPattern.littleEndian, Array.init)
+        bytes += withUnsafeBytes(of: maximumAmount.bitPattern.littleEndian, Array.init)
+        return Data(bytes)
+    }
+
+    /// 표 바이트를 DNG SDK 방식(길이 + zlib + 85문자)으로 감싼다.
+    private func encodeBlock(_ raw: Data) -> String {
+        func le(_ v: UInt32) -> [UInt8] { (0..<4).map { UInt8((v >> (8 * UInt32($0))) & 0xFF) } }
+        let deflate = [UInt8](try! (raw as NSData).compressed(using: .zlib) as Data)
+        var a: UInt32 = 1, b: UInt32 = 0
+        for byte in raw { a = (a + UInt32(byte)) % 65521; b = (b + a) % 65521 }
+        let adler = (b << 16) | a
+        let block = le(UInt32(raw.count)) + [0x78, 0x9C] + deflate
+            + [UInt8(adler >> 24), UInt8((adler >> 16) & 0xFF), UInt8((adler >> 8) & 0xFF), UInt8(adler & 0xFF)]
+        let alphabet = AdobeLookProfile.encodingAlphabet
+        var text = ""
+        for start in stride(from: 0, to: block.count, by: 4) {
+            let bytes = Array(block[start..<min(start + 4, block.count)])
+            var number = bytes.enumerated().reduce(UInt64(0)) { $0 | UInt64($1.element) << (8 * UInt64($1.offset)) }
+            for _ in 0...bytes.count {
+                text.append(alphabet[Int(number % 85)])
+                number /= 85
+            }
+        }
+        return text
+    }
+
+    private func creativeXMP(name: String, rgbTable: Data?, extra: String, supportsAmount: Bool = true) -> Data {
+        func escaped(_ text: String) -> String {
+            text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: "\"", with: "&quot;")
+        }
+        let look = encodeTable(hue: 1, saturation: 2, value: 1, deltas: [0, 1, 1, 0, 1, 1], encoding: 0)
+        let rgb = rgbTable.map { #"crs:RGBTable="RGB1" crs:Table_RGB1=""# + escaped(encodeBlock($0)) + "\"" } ?? ""
+        return Data("""
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+         <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+          <rdf:Description rdf:about="" xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+           crs:PresetType="Look" crs:SupportsAmount="\(supportsAmount ? "True" : "False")"
+           crs:LookTable="LOOK1" crs:Table_LOOK1="\(escaped(look))" \(rgb) \(extra)>
+           <crs:Name><rdf:Alt><rdf:li xml:lang="x-default">\(escaped(name))</rdf:li></rdf:Alt></crs:Name>
+          </rdf:Description>
+         </rdf:RDF>
+        </x:xmpmeta>
+        """.utf8)
     }
 
     /// DNG SDK와 같은 방식으로 LookTable을 문자열로 만든다(테스트용).

@@ -1,4 +1,4 @@
-# Adobe 카메라 프로필(DCP)·캘리브레이션 계약 v1.1
+# Adobe 카메라 프로필(DCP)·캘리브레이션 계약 v1.2
 
 2026-10-09 사용자 요청("나머지도 다 구현해줘")에 따른 세 번째 하위 프로젝트다. 처음에는 가능성 확인(스파이크)부터 하기로 했고, 스파이크 결과를 바탕으로 이 세션의 Claude가 범위를 정했다. 성공 기준은 앞의 두 하위 프로젝트와 같다: 같은 프로필·값이 같은 방향과 역할로 보인다. Adobe 현상 엔진과 같은 픽셀은 보장하지 않는다.
 
@@ -14,7 +14,8 @@
 - **DCP 프로필(RAW만):** 설치된 Adobe DCP와 사용자 DCP 폴더(`~/Library/Application Support/Adobe/CameraRaw/CameraProfiles`)의 프로필을 사진 카메라에 맞춰 고른다. Lighthouse는 DCP를 복사하거나 배포하지 않고, 사용자의 Mac에 있는 파일을 읽기만 한다.
 - **캘리브레이션(모든 사진):** Lightroom의 그림자 틴트, 빨강·초록·파랑 원색의 색조·채도.
 - **Adobe Raw 프로필(v1.1, RAW만):** Adobe Color·Landscape·Monochrome·Neutral·Portrait·Vivid. 아래 절을 따른다.
-- 범위 밖: 크리에이티브 프로필(RGBTable), 프로필 양 슬라이더, DCP 없이 Adobe 기본 톤 곡선을 재현하는 것.
+- **크리에이티브 프로필(v1.2, 모든 사진):** Artistic·B&W·Modern·Vintage. 아래 절을 따른다.
+- 범위 밖: Adaptive 프로필(AI 게인 표), DCP 없이 Adobe 기본 톤 곡선을 재현하는 것.
 
 ## 모델과 저장
 
@@ -72,6 +73,21 @@
 - 메뉴: Adobe Raw 프로필(이름순) → Adobe Standard → Camera 계열. 프리셋의 `CameraProfile`이 이 여섯 이름이면 같은 이름으로 연결한다.
 - 현상 캐시 키에 Look 파일(경로·수정 시각)과 기준 DCP를 넣는다.
 
+## 크리에이티브 프로필(v1.2)
+
+2026-10-09 사용자 요청("크리에이티브 프로필도 구현해줘")으로 더했다.
+
+- 위치: Camera Raw 설치본 `Settings/Adobe/Profiles/{Artistic,B&W,Modern,Vintage}/*.xmp`(이 Mac에서 50개). 읽기만 한다. `Adaptive`, `Adobe Raw`, `Camera` 폴더는 이 목록에 넣지 않는다.
+- 구성(설치본 확인): 모두 `LookTable`(Adobe Color와 같은 표)이 있고, 대부분 `RGBTable`과 `RGBTableAmount`가 있다. 일부는 톤 곡선, 노출·대비·하이라이트·섀도·흰색·검정·명료도·채도, HSL, 흑백 믹서(`GrayMixer*`), 분할 톤, 비네팅, 흑백 변환을 담는다.
+- RGBTable 표(확인한 형식): 리틀 엔디언 `종류 1, 버전 1, 차원 3, 칸 수 N`, 이어서 r(가장 바깥)·g·b(가장 안쪽) 순서의 N³×3 uint16. 값은 항등값 `(i·65535 + (N-1)/2) / (N-1)`과의 차이를 65536으로 감아 저장한다. 뒤에 원색(0 sRGB, 1 Adobe RGB, 2 ProPhoto, 3 P3, 4 Rec.2020), 감마(0 선형, 1 sRGB, 2 1.8, 3 2.2), 색역(0 자르기), 최소·최대 양(double)이 온다.
+- 적용 양: `프로필 양`(0…200%, 기본 100%)을 둔다. RGB 표는 `RGBTableAmount(없으면 1) × 프로필 양`을 표의 최소·최대 양으로 자른 값으로, 표의 인코딩 공간에서 `입력 + 양·(표(입력) - 입력)`이다. 0…1 밖의 값은 자른 점의 변화량을 더해 넘는 부분을 보존한다. LookTable은 양과 관계없이 그대로 쓴다. 프로필에 든 곡선·조정값은 프로필 양을 곱해 쓴다(곡선은 항등선과 섞는다).
+- RAW: 같은 카메라의 Adobe Standard DCP(있을 때) → LookTable → RGB 표를 선형 단계 큐브에 넣는다. Adobe Standard가 없으면 DCP 없이 LookTable·RGB 표만 넣는다.
+- RAW가 아닌 사진: 현상 직후 선형 작업 공간 값에 같은 큐브(DCP 없이)를 적용한다. 그래서 `cameraProfile`은 크리에이티브 프로필이면 JPEG·HEIC에도 저장하고 쓴다.
+- 프로필 안의 설정: 노출·대비·하이라이트·섀도·흰색·검정·명료도·채도·생동감·비네팅 양은 사용자 값에 더한다. 곡선·HSL·흑백 믹서는 흑백 변환 전에, 분할 톤은 흑백 변환 뒤에 Lighthouse 처리로 적용한다. 흑백 믹서는 같은 색 범위의 HSL 명도(÷100)로 근사한다. 파라메트릭 곡선, 증분 색온도·틴트, 비네팅의 양 외 항목은 적용하지 않는다(알려진 한계).
+- 모델: `EditSettings.profileAmount` 0…2, 기본 1, 1이면 저장하지 않는다. 범위 밖은 디코드 오류. 일괄 복사에 포함하고 변경 이름은 "카메라 프로필"에 묶는다.
+- 메뉴: RAW는 Adobe Raw → Adobe Standard → 카메라 매칭 → 크리에이티브(그룹 이름순), JPEG 등은 macOS 기본과 크리에이티브만. 양을 지원하는 프로필이면 "프로필 양" 슬라이더를 보인다.
+- 프리셋: `CameraProfile`과 `crs:Look`(Name·Amount, XMP 중첩 Description과 lrtemplate `Look` table)을 읽는다. Look 이름이 있으면 그것을 쓰고 양은 0…2로 받는다. 크리에이티브 이름은 Artistic·B&W·Modern·Vintage 접두사로 알아본다.
+
 ## 검증
 
 - DCP 파서: 테스트 안에서 만든 작은 DCP(일반 TIFF·`0x4352` 매직, 리틀·빅 엔디언), 잘못된 개수·크기·잘린 파일 거부.
@@ -79,5 +95,6 @@
 - 찾기: 임시 폴더의 Adobe·사용자 구조에서 카메라 이름 일치, 사용자 폴더 우선.
 - 캘리브레이션: 0이면 단위 행렬, 흰색 보존, 색조 방향, 채도 방향, 그림자 틴트 방향, 미리보기·내보내기 일치.
 - 가져오기·앱: 키 범위, CameraProfile 매핑과 경고, 메뉴 선택 1단계 실행 취소.
+- 크리에이티브: RGB 표 디코드(차이 감기·순서), 양 0이면 무변화, 1 밖 값 보존, JPEG 적용, 프리셋 Look 이름·양, 실제 S9·JPEG에서 렌더가 바뀌고 B&W 프로필이 무채색.
 - Adobe Raw: 표 인코딩 왕복(테스트에서 만든 표), 잘못된 문자·길이·종류 거부, 곡선·조정값·흑백 읽기, 기준 DCP 없으면 사용 불가, 실제 S9에서 Adobe Color가 Adobe Standard와 다르고 Adobe Monochrome이 무채색.
 - 실제 S9 RW2와 설치된 DCP로 macOS 기본·Adobe Standard·Camera Vivid·Camera Monochrome·Camera Flat을 렌더해 방향(Vivid 채도↑, Monochrome 무채색, Flat 대비↓)을 보고 원본 SHA를 확인한다. DCP 파일은 Git에 넣지 않는다.

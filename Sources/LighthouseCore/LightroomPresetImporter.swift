@@ -125,6 +125,14 @@ public enum LightroomPresetImporter {
                     throw LightroomPresetImportError.invalidValue(key)
                 }
                 scalars[key] = profile
+            } else if key == "Look" {
+                guard let look = value.tableValue else { throw LightroomPresetImportError.invalidValue(key) }
+                let entries = Dictionary(look.map { ($0.key.lowercased(), $0.value) }, uniquingKeysWith: { first, _ in first })
+                if let lookName = entries["name"]?.stringValue { scalars["LookName"] = lookName } else { unsupported.insert(key) }
+                if let amount = entries["amount"] {
+                    guard let number = amount.numberValue else { throw LightroomPresetImportError.invalidValue(key) }
+                    scalars["LookAmount"] = String(number)
+                }
             } else if key == "WhiteBalance" {
                 guard let name = value.stringValue else {
                     throw LightroomPresetImportError.invalidValue(key)
@@ -159,7 +167,8 @@ public enum LightroomPresetImporter {
             guard allowed else { throw LightroomPresetImportError.unsupportedPresetType(type) }
         }
         var scalars: [String: Double] = [:]
-        var warnings = unsupportedKeys.sorted().map { "지원하지 않아 제외: \($0)" }
+        let excluded = rawScalars["LookName"] == nil ? unsupportedKeys : unsupportedKeys.subtracting(["Look"])
+        var warnings = excluded.sorted().map { "지원하지 않아 제외: \($0)" }
         var consumed = Set<String>()
         let aliases = [("Exposure2012", "Exposure"), ("Contrast2012", "Contrast"), ("Clarity2012", "Clarity")]
         for (modern, legacy) in aliases {
@@ -194,6 +203,20 @@ public enum LightroomPresetImporter {
                 } else {
                     warnings.append("지원하지 않아 제외: CameraProfile (\(raw))")
                 }
+            }
+        }
+        var profileAmount: Double?
+        if let lookName = rawScalars["LookName"]?.trimmingCharacters(in: .whitespacesAndNewlines), !lookName.isEmpty {
+            if LightroomPresetPayload.isDNGProfileName(lookName), lookName.count <= 128 {
+                cameraProfile = lookName
+                warnings.append("카메라 프로필은 이 Mac에 설치된 DCP로 근사하며 Adobe 결과와 다를 수 있습니다.")
+                if let raw = rawScalars["LookAmount"] {
+                    guard let amount = Double(raw.trimmingCharacters(in: .whitespaces)), amount.isFinite,
+                          (0...2).contains(amount) else { throw LightroomPresetImportError.invalidValue("Look") }
+                    profileAmount = amount
+                }
+            } else {
+                warnings.append("지원하지 않아 제외: Look (\(lookName))")
             }
         }
         var whiteBalance: String?
@@ -244,7 +267,8 @@ public enum LightroomPresetImporter {
         for warning in warnings where !uniqueWarnings.contains(warning) { uniqueWarnings.append(warning) }
         let payload = LightroomPresetPayload(format: format, scalars: scalars, curves: curves,
                                               warnings: uniqueWarnings, colorProfile: colorProfile,
-                                              whiteBalance: whiteBalance, cameraProfile: cameraProfile)
+                                              whiteBalance: whiteBalance, cameraProfile: cameraProfile,
+                                              profileAmount: profileAmount)
         do { try payload.validate() } catch LightroomPresetPayloadError.emptySettings {
             throw LightroomPresetImportError.emptyPreset
         }
@@ -341,6 +365,8 @@ private final class XMPDelegate: NSObject, XMLParserDelegate {
     private var scalarCapture: (key: String, depth: Int, text: String)?
     private var globalDescriptionDepth: Int?
     private var nameDepth: Int?
+    /// `crs:Look` 요소의 깊이. 안의 Name·Amount만 읽고 표 등 나머지는 건너뛴다.
+    private var lookDepth: Int?
     private var curveCapture: (key: String, depth: Int)?
     private var itemCapture: (depth: Int, text: String, language: String?)?
     private var names: [(String?, String)] = []
@@ -391,9 +417,24 @@ private final class XMPDelegate: NSObject, XMLParserDelegate {
             }
             return
         }
+        if let lookDepth, stack.count > lookDepth {
+            if namespaceURI == Self.rdf, elementName == "Description", stack.count == lookDepth + 1 {
+                for (qualified, raw) in attributeDict {
+                    guard let key = cameraRawAttribute(qualified), key == "Name" || key == "Amount" else { continue }
+                    processDirect(key: "Look" + key, raw: raw, parser: parser)
+                }
+            } else if namespaceURI == Self.crs, elementName == "Amount", stack.count == lookDepth + 2 {
+                scalarCapture = ("LookAmount", stack.count, "")
+            }
+            return
+        }
         if parent?.uri == Self.rdf, parent?.local == "Description", namespaceURI == Self.crs,
            globalDescriptionDepth == stack.count - 1 {
-            if LightroomPresetImporter.curveChannel(for: elementName) != nil {
+            if elementName == "Look" {
+                lookDepth = stack.count
+                // 이름을 찾으면 makePreset에서 지운다. 이름 없는 Look은 제외 경고로 남는다.
+                unsupportedKeys.insert("Look")
+            } else if LightroomPresetImporter.curveChannel(for: elementName) != nil {
                 encounteredCurveKeys.insert(elementName)
                 curveCapture = (elementName, stack.count)
             } else if elementName == "Name" {
@@ -446,6 +487,7 @@ private final class XMPDelegate: NSObject, XMLParserDelegate {
             curveCapture = nil
         }
         if nameDepth == stack.count { nameDepth = nil }
+        if lookDepth == stack.count { lookDepth = nil }
         if globalDescriptionDepth == stack.count { globalDescriptionDepth = nil }
         if rootRDFDepth == stack.count { rootRDFDepth = nil }
         stack.removeLast()
@@ -472,7 +514,8 @@ private final class XMPDelegate: NSObject, XMLParserDelegate {
         } else if LightroomPresetPayload.scalarRanges[key] != nil {
             if let current = scalars[key], !equalNumeric(current, raw) { fail(.conflictingValue(key), parser: parser) }
             else { scalars[key] = raw }
-        } else if key == "CameraProfile" || key == "ConvertToGrayscale" || key == "WhiteBalance" {
+        } else if key == "CameraProfile" || key == "ConvertToGrayscale" || key == "WhiteBalance" || key == "LookName"
+                    || key == "LookAmount" {
             if let current = scalars[key], current.trimmingCharacters(in: .whitespacesAndNewlines)
                 .caseInsensitiveCompare(raw.trimmingCharacters(in: .whitespacesAndNewlines)) != .orderedSame {
                 fail(.conflictingValue(key), parser: parser)
