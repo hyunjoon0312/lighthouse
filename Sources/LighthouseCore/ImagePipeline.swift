@@ -662,7 +662,10 @@ public final class ImagePipeline: @unchecked Sendable {
                 raw.isHighlightRecoveryEnabled = enabled
             }
             guard let output = raw.outputImage else { throw ImagePipelineError.renderFailed(url) }
-            return (output, Double(raw.neutralTemperature))
+            // 현상 결과에서 Core Image 렌더 단계를 나눈다. 미리보기는 그 결과를 캐시로 고정한다. 그러지 않으면 캐시 여부가
+            // 그때그때 달라 첫 근사 렌더가 RAW를 다시 현상(0.4~0.8초)해 슬라이더를 처음 끌 때 화면이 멈췄다.
+            // 내보내기도 같은 자리에서 나눠야 중간값의 정밀도가 같아 미리보기와 픽셀이 같다.
+            return (output.insertingIntermediate(cache: cachesDevelopment), Double(raw.neutralTemperature))
         }
         guard let source = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
             throw ImagePipelineError.unreadable(url)

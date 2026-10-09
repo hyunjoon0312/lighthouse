@@ -56,4 +56,24 @@ final class RAWSourceSizeTests: XCTestCase {
         let image = try pipeline.render(url: sample, edits: edits, maxPixel: nil)
         XCTAssertEqual(pipeline.outputSize(url: sample, edits: edits), CGSize(width: image.width, height: image.height))
     }
+
+    /// 정확한 현상 뒤 첫 근사 렌더가 RAW를 다시 현상하지 않는다. 예전에는 Core Image가 현상 결과를 남길지가 그때그때 달라
+    /// 첫 근사가 0.42~0.76초 걸리기도 했고(5번 중 2번), 슬라이더를 처음 끄는 동안 화면이 멈춰 보였다.
+    /// 지금은 약 0.01초다. 부하에 덜 흔들리도록 정확한 현상과의 시간 비율로 본다.
+    func testFirstApproximateRenderReusesDevelopedRAW() throws {
+        guard let sample = rawSample else {
+            throw XCTSkip("RAW 표본이 없습니다. LIGHTHOUSE_SAMPLE_RW2에 S9 RW2 경로를 지정하세요.")
+        }
+        let pipeline = ImagePipeline(cachesDevelopment: true)
+        let start = Date()
+        _ = try pipeline.renderPreview(url: sample, edits: EditSettings(), maxPixel: 2200)
+        let exact = Date().timeIntervalSince(start)
+        let approximateStart = Date()
+        let approximate = try pipeline.renderPreview(url: sample, edits: EditSettings(exposure: 0.2, temperatureShift: 150),
+                                                     maxPixel: 2200, allowApproximation: true)
+        let firstApproximate = Date().timeIntervalSince(approximateStart)
+        XCTAssertTrue(approximate.isApproximate)
+        XCTAssertLessThan(firstApproximate, exact * 0.15,
+                          String(format: "첫 근사 %.3f초, 정확한 현상 %.3f초", firstApproximate, exact))
+    }
 }
