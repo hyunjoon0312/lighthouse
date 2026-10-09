@@ -5,6 +5,7 @@ import LighthouseCore
 struct InspectorView: View {
     @EnvironmentObject private var model: LibraryModel
     let photo: PhotoAsset
+    @State private var presetSearch = ""
 
     private var edits: EditSettings { photo.edits }
 
@@ -127,9 +128,11 @@ struct InspectorView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    /// 자주 쓰는 빛·색상을 위에 두고, RAW 현상·프리셋·LUT는 그 아래에 둔다.
+    /// 프리셋을 빛·색상보다 위에 두어 자주 쓰는 색감을 바로 적용한다.
     private var globalControls: some View {
         Group {
+            presetControls
+            Divider()
             HStack {
                 section("빛")
                 Spacer()
@@ -142,9 +145,10 @@ struct InspectorView: View {
             }
             adjustment("노출", \.exposure, range: -4...4, format: "%.2f EV")
             adjustment("대비", \.contrast, range: 0.5...1.5, scale: 200)
-            // 하이라이트는 1(그대로)에서 낮추기만, 섀도는 0에서 올리기만 한다.
-            adjustment("하이라이트", \.highlights, range: 0...1, scale: 100)
-            adjustment("섀도", \.shadows, range: 0...1, scale: 100)
+            adjustment("하이라이트", \.highlights, range: 0...2, scale: 100)
+            adjustment("섀도", \.shadows, range: -1...1, scale: 100)
+            adjustment("흰색", \.whites, range: -1...1, scale: 100)
+            adjustment("검정", \.blacks, range: -1...1, scale: 100)
             adjustment("명료도", \.clarity, range: -1...1, scale: 100)
             Divider()
             HStack {
@@ -157,6 +161,16 @@ struct InspectorView: View {
                     .help("사진에서 회색·흰색이어야 할 곳을 눌러 색온도·틴트를 맞춥니다. Esc로 취소, ⌘Z로 되돌립니다")
                     .accessibilityLabel("흰색 기준 찍기")
             }
+            Picker("기본 프로필", selection: Binding(
+                get: { edits.colorProfile },
+                set: { profile in change { $0.colorProfile = profile } }
+            )) {
+                Text("기본 색상").tag(PhotoColorProfile.color)
+                Text("흑백").tag(PhotoColorProfile.monochrome)
+            }
+            .pickerStyle(.segmented)
+            .help("기본 색상은 macOS RAW 현상을 기준으로 합니다. Adobe DCP나 카메라 전용 프로필과 색이 다를 수 있습니다.")
+            .accessibilityLabel("기본 색상 프로필")
             adjustment("색온도 이동", \.temperatureShift, range: -2500...2500, format: "%.0f K")
             adjustment("틴트", \.tintShift, range: -100...100, scale: 1)
             adjustment("생동감", \.vibrance, range: -1...1, scale: 100)
@@ -188,8 +202,6 @@ struct InspectorView: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
             if photo.isRAW { rawDevelopControls.disabled(model.selectionUsesSmartPreview) }
-            Divider()
-            presetControls
             Divider()
             HStack {
                 section("LUT")
@@ -253,6 +265,12 @@ struct InspectorView: View {
         HStack {
             section("프리셋")
             Spacer()
+        }
+        HStack {
+            Button("Lightroom 가져오기…") { model.presentLightroomPresetImport() }
+                .font(.caption).buttonStyle(.borderless)
+                .disabled(model.presetLoadError != nil || model.isPresetImporting)
+                .accessibilityLabel("Lightroom 프리셋 가져오기")
             Button("현재 보정 저장…") {
                 model.presetSheet = PresetSheetRequest(kind: .save, initialName: "")
             }
@@ -260,21 +278,37 @@ struct InspectorView: View {
             .disabled(model.presetLoadError != nil)
             .accessibilityLabel("현재 보정을 프리셋으로 저장")
         }
+        TextField("프리셋 이름 검색", text: $presetSearch)
+            .textFieldStyle(.roundedBorder)
+            .font(.caption)
+            .accessibilityLabel("프리셋 이름 검색")
         if let error = model.presetLoadError {
             Text("프리셋 파일 오류: \(error)").font(.caption).foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)
+        } else if model.isPresetImporting {
+            HStack {
+                ProgressView().controlSize(.small)
+                Text("Lightroom 프리셋 확인 중…").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("취소") { model.cancelPresetImport() }.font(.caption)
+            }
         } else if model.presets.isEmpty {
             Text("자주 쓰는 보정을 저장해 두면 다른 사진이나 가져오는 사진에 한 번에 적용할 수 있습니다.")
                 .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        } else if filteredPresets.isEmpty {
+            Text("이름이 일치하는 프리셋이 없습니다.")
+                .font(.caption2).foregroundStyle(.secondary)
         } else {
-            ForEach(model.presets) { preset in
+            ForEach(filteredPresets) { preset in
                 HStack {
                     Button(preset.name) { model.applyPreset(preset) }
                         .buttonStyle(.borderless).lineLimit(1)
-                        .help(model.selectedPhotoIDs.count >= 2 ? "선택한 \(model.selectedPhotoIDs.count)장에 적용" : "현재 사진에 적용")
+                        .help(presetHelp(preset))
                         .accessibilityLabel("프리셋 \(preset.name) 적용")
                     Spacer()
                     Menu {
+                        Button("호환 정보…") { model.presentPresetCompatibility(preset) }
+                        Divider()
                         Button("이름 변경…") {
                             model.presetSheet = PresetSheetRequest(kind: .rename(preset.id), initialName: preset.name)
                         }
@@ -292,6 +326,17 @@ struct InspectorView: View {
             .font(.caption)
             .accessibilityLabel("가져오는 사진에 자동으로 적용할 프리셋")
         }
+    }
+
+    private func presetHelp(_ preset: EditPreset) -> String {
+        let target = model.selectedPhotos.count >= 2 ? "선택한 \(model.selectedPhotos.count)장에 적용" : "현재 사진에 적용"
+        guard let warnings = preset.lightroom?.warnings.count, warnings > 0 else { return target }
+        return "\(target) · 호환 안내 \(warnings)개"
+    }
+
+    private var filteredPresets: [EditPreset] {
+        let query = presetSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? model.presets : model.presets.filter { $0.name.localizedCaseInsensitiveContains(query) }
     }
 
     @ViewBuilder private var rawDevelopControls: some View {

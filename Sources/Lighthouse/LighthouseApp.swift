@@ -46,6 +46,8 @@ struct LighthouseApp: App {
                     .disabled(!session.library.catalogLoaded || session.library.isImporting || session.library.isExporting || session.library.hasModalPresentation)
                 Button("LUT 추가…") { library.presentLUTImport() }
                     .disabled(!library.catalogLoaded || library.isLUTImporting || library.isLUTLibraryLoading || library.hasModalPresentation)
+                Button("Lightroom 프리셋 가져오기…") { library.presentLightroomPresetImport() }
+                    .disabled(!library.catalogLoaded || library.presetLoadError != nil || library.isPresetImporting || library.hasModalPresentation)
                 Button("참조 사진 색감 맞추기…") { library.presentReferenceMatch() }
                     .disabled(library.selection == nil || library.hasModalPresentation)
             }
@@ -193,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminationPending { return .terminateLater }
-        if let library, library.driveUpload.isBusy || library.isExporting || library.isImporting || library.isAnalyzingFaces || library.isRunningWorkflow || library.isAnalyzingFlicker {
+        if let library, library.driveUpload.isBusy || library.isExporting || library.isImporting || library.isPresetImporting || library.isAnalyzingFaces || library.isRunningWorkflow || library.isAnalyzingFlicker {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "가져오기·내보내기 또는 얼굴 분석이 진행 중입니다"
@@ -203,6 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
             library.cancelExport()
             library.cancelImport()
+            library.cancelPresetImport()
             library.cancelFaceAnalysis()
             library.driveUpload.cancel()
             library.cancelWorkflow()

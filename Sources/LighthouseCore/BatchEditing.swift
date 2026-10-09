@@ -26,9 +26,13 @@ public extension EditSettings {
             result.tintShift = source.tintShift
             result.highlights = source.highlights
             result.shadows = source.shadows
+            result.whites = source.whites
+            result.blacks = source.blacks
+            result.colorProfile = source.colorProfile
             result.sharpness = source.sharpness
             result.curves = source.curves
             result.colorRanges = source.colorRanges
+            result.colorGrading = source.colorGrading
             result.grain = source.grain
             result.rawDevelop = source.rawDevelop
             result.noiseReduction = source.noiseReduction

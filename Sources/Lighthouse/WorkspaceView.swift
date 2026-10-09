@@ -59,6 +59,7 @@ struct WorkspaceView: View {
         .sheet(isPresented: $model.showShortcuts) { ShortcutHelpSheet() }
         .sheet(isPresented: $model.showPeople) { PeopleSheet() }
         .sheet(item: $model.presetSheet) { request in PresetSheet(request: request) }
+        .sheet(item: $model.lightroomPresetSheet) { request in LightroomPresetImportSheet(request: request) }
         .sheet(item: $model.cropSource) { source in
             let proxy = model.validatedPreviewSource(for: source)
             CropSheet(source: source, lutDirectory: model.lutStore.directory,
@@ -165,6 +166,8 @@ struct WorkspaceView: View {
             Rectangle().fill(.white.opacity(0.08)).frame(width: 1)
             VStack(spacing: 0) {
                 toolbar
+                Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                quickCullingBar
                 Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
                 if !model.photos.isEmpty {
                     selectionToolbar
@@ -421,6 +424,86 @@ struct WorkspaceView: View {
             .disabled(model.selection == nil || model.isExporting || !model.catalogLoaded)
         }
         .fixedSize()
+    }
+
+    private var quickCullingBar: some View {
+        HStack(spacing: 10) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 5) {
+                    quickFlagButton("전체 표시", flag: nil, help: "표시 조건만 지우고 검색·별점·폴더·다른 조건은 유지합니다")
+                    quickFlagButton("채택", flag: .pick, help: "채택 표시한 사진만 봅니다")
+                    quickFlagButton("미분류", flag: PhotoFlag.none, help: "P·X 표시가 없는 사진만 봅니다. 별점과는 별개입니다")
+                    quickFlagButton("제외", flag: .reject, help: "제외 표시한 사진만 봅니다")
+                }
+                quickFlagMenu
+            }
+            Spacer(minLength: 8)
+            if model.isPresetImporting {
+                ProgressView().controlSize(.small).help("Lightroom 프리셋 확인 중")
+            }
+            presetApplyMenu
+        }
+        .font(.caption)
+        .padding(.horizontal, 16)
+        .frame(height: 34)
+        .background(Palette.panel)
+    }
+
+    private func quickFlagButton(_ title: String, flag: PhotoFlag?, help: String) -> some View {
+        let selected = model.criteria.flag == flag
+        return Button(title) { model.criteria.flag = flag }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(selected ? Palette.accent.opacity(0.20) : .white.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(selected ? Palette.accent : Color.white.opacity(0.82))
+            .help(help)
+            .accessibilityLabel(title)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var quickFlagMenu: some View {
+        Menu {
+            Button("전체 표시") { model.criteria.flag = nil }
+            Button("채택") { model.criteria.flag = .pick }
+            Button("미분류") { model.criteria.flag = PhotoFlag.none }
+            Button("제외") { model.criteria.flag = .reject }
+        } label: {
+            Label(quickFlagTitle, systemImage: "line.3.horizontal.decrease")
+        }
+        .fixedSize()
+        .help("빠른 표시 필터: \(quickFlagTitle)")
+        .accessibilityLabel("빠른 표시 필터, \(quickFlagTitle)")
+    }
+
+    private var quickFlagTitle: String {
+        switch model.criteria.flag {
+        case .pick?: "채택"
+        case .reject?: "제외"
+        case PhotoFlag.none?: "미분류"
+        case nil: "전체 표시"
+        }
+    }
+
+    private var presetApplyMenu: some View {
+        Menu {
+            if model.presets.isEmpty { Text("저장한 프리셋이 없습니다") }
+            ForEach(model.presets) { preset in
+                Button(preset.name) { model.applyPreset(preset) }
+                    .disabled(model.selectedPhotos.isEmpty)
+            }
+            Divider()
+            Button("Lightroom 프리셋 가져오기…") { model.presentLightroomPresetImport() }
+                .disabled(!model.catalogLoaded || model.presetLoadError != nil || model.isPresetImporting)
+            if model.isPresetImporting {
+                Button("가져오기 취소") { model.cancelPresetImport() }
+            }
+        } label: {
+            Label("프리셋 적용", systemImage: "camera.filters")
+        }
+        .fixedSize()
+        .help(model.selectedPhotos.isEmpty ? "사진을 선택하면 프리셋을 적용할 수 있습니다. 가져오기는 지금도 가능합니다." :
+                "보이는 선택 \(model.selectedPhotos.count)장에 프리셋 적용")
+        .accessibilityLabel("프리셋 적용, 보이는 선택 \(model.selectedPhotos.count)장")
     }
 
     @ViewBuilder private var ratingChoices: some View {

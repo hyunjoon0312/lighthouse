@@ -362,7 +362,7 @@ public final class ImagePipeline: @unchecked Sendable {
                                                                  context: context, colorSpace: colorSpace)
         var image = retouch.image
         image = try AdvancedColorProcessor.applyColor(to: image, curves: edits.curves,
-                                                      ranges: edits.colorRanges)
+                                                      ranges: edits.colorRanges, grading: edits.colorGrading)
         let maskScale = Self.maskScale(sourceWidth: image.extent.width, sourceHeight: image.extent.height,
                                        edits: edits, maxPixel: maxPixel)
         for adjustment in edits.localAdjustments where adjustment.isEnabled && adjustment.hasMask {
@@ -621,6 +621,14 @@ public final class ImagePipeline: @unchecked Sendable {
             }
         }
 
+        if edits.colorProfile == .monochrome {
+            let filter = CIFilter.colorControls()
+            filter.inputImage = image
+            filter.saturation = 0
+            guard let output = filter.outputImage else { throw ImagePipelineError.renderFailed(url) }
+            image = output
+        }
+
         image = applyContrast(edits.contrast, to: image)
         if edits.saturation != 1 {
             let filter = CIFilter.colorControls()
@@ -628,13 +636,22 @@ public final class ImagePipeline: @unchecked Sendable {
             filter.saturation = Float(edits.saturation)
             image = filter.outputImage ?? image
         }
-        if edits.highlights != 1 || edits.shadows != 0 {
+        let legacyHighlights = min(1, edits.highlights)
+        let legacyShadows = max(0, edits.shadows)
+        if legacyHighlights != 1 || legacyShadows != 0 {
             let filter = CIFilter.highlightShadowAdjust()
             filter.inputImage = image
-            filter.highlightAmount = Float(edits.highlights)
-            filter.shadowAmount = Float(edits.shadows)
+            filter.highlightAmount = Float(legacyHighlights)
+            filter.shadowAmount = Float(legacyShadows)
             image = filter.outputImage ?? image
         }
+        image = try AdvancedColorProcessor.applyAdditionalTone(
+            to: image,
+            highlights: edits.highlights,
+            shadows: edits.shadows,
+            whites: edits.whites,
+            blacks: edits.blacks
+        )
         if edits.vibrance != 0, edits.vibrance.isFinite {
             let filter = CIFilter.vibrance()
             filter.inputImage = image

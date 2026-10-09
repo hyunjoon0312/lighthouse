@@ -58,6 +58,7 @@ struct AdvancedColorControls: View {
             Button("이 색상 초기화") { resetRange() }
                 .disabled(rangeAdjustment == ColorRangeAdjustment(band: band))
                 .accessibilityLabel("\(band.koreanName) HSL 초기화")
+            ColorGradingControls(edits: edits)
 
             Divider()
             Group {
@@ -71,6 +72,11 @@ struct AdvancedColorControls: View {
                            defaultValue: GrainSettings().size) {
                 let value = $0
                 updateGrain(continuous: true) { $0.size = value.isFinite ? min(8, max(0.5, value)) : 1.5 }
+            }
+            advancedSlider("거칠기", value: edits.grain.roughness * 100, range: 0...100, format: "%.0f%%",
+                           defaultValue: GrainSettings().roughness * 100) {
+                let value = $0 / 100
+                updateGrain(continuous: true) { $0.roughness = value.isFinite ? min(1, max(0, value)) : 0.5 }
             }
                 HStack {
                 Text("패턴 \(edits.grain.seed)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)

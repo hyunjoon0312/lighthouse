@@ -68,6 +68,61 @@ final class AutoAdjustTests: XCTestCase {
         XCTAssertEqual(abs(edits.temperatureShift), 0, accuracy: 150, "무채색은 색을 거의 옮기지 않는다")
     }
 
+    func testBrightTexturedSceneRetainsItsBrightnessWhenRendered() throws {
+        let url = try temporaryJPEG { x, y in
+            if x < 36 { return (0.28, 0.28, 0.28) }
+            let texture = Double((x * 7 + y * 3) % 17) / 100
+            let value = 0.72 + texture
+            return (value, value, value)
+        }
+        let pipeline = ImagePipeline()
+        let before = AutoAdjust.Stats(try pipeline.renderPreview(url: url, edits: .neutral,
+                                                                  maxPixel: AutoAdjust.measurePixels).image)
+        let result = try AutoAdjust.suggest(url: url, current: .neutral, pipeline: pipeline)
+        let after = AutoAdjust.Stats(try pipeline.renderPreview(url: url, edits: result.edits,
+                                                                 maxPixel: AutoAdjust.measurePixels).image)
+
+        XCTAssertGreaterThanOrEqual(result.edits.exposure, -0.2, "밝은 피사체를 중간 회색으로 내리지 않는다")
+        XCTAssertGreaterThanOrEqual(after.medianLinear, before.medianLinear * 0.85,
+                                    "실제 렌더에서도 중립 밝기의 대부분을 유지한다")
+    }
+
+    func testNormalMidtoneSceneIsNotUnnecessarilyDarkened() throws {
+        let url = try temporaryJPEG { x, y in
+            let texture = Double((x + y * 5) % 19) / 100
+            let value = 0.42 + texture
+            return (value, value, value)
+        }
+        let pipeline = ImagePipeline()
+        let before = AutoAdjust.Stats(try pipeline.renderPreview(url: url, edits: .neutral,
+                                                                  maxPixel: AutoAdjust.measurePixels).image)
+        let result = try AutoAdjust.suggest(url: url, current: .neutral, pipeline: pipeline)
+        let after = AutoAdjust.Stats(try pipeline.renderPreview(url: url, edits: result.edits,
+                                                                 maxPixel: AutoAdjust.measurePixels).image)
+
+        XCTAssertGreaterThanOrEqual(result.edits.exposure, -0.01)
+        XCTAssertGreaterThanOrEqual(after.medianLinear, before.medianLinear * 0.95)
+    }
+
+    func testApplyingAutoAgainIsDeterministicAndDoesNotCompoundDarkening() throws {
+        let url = try temporaryJPEG { x, y in
+            let value = x < 36 ? 0.28 : 0.72 + Double((x * 7 + y * 3) % 17) / 100
+            return (value, value, value)
+        }
+        let pipeline = ImagePipeline()
+        var current = EditSettings.neutral
+        current.vignette = 0.25
+        current.rotationQuarterTurns = 1
+
+        let first = try AutoAdjust.suggest(url: url, current: current, pipeline: pipeline)
+        let second = try AutoAdjust.suggest(url: url, current: first.edits, pipeline: pipeline)
+
+        XCTAssertEqual(second.edits, first.edits)
+        XCTAssertEqual(second.renders, first.renders)
+        XCTAssertEqual(second.edits.vignette, current.vignette, "자동 대상이 아닌 보정은 유지한다")
+        XCTAssertEqual(second.edits.rotationQuarterTurns, current.rotationQuarterTurns)
+    }
+
     func testSolveFindsZeroWithFewCalls() throws {
         var calls = 0
         XCTAssertEqual(try AutoAdjust.solve(from: 0.37, step: 10, limit: 100) { calls += 1; return (37 - $0) / 100 }, 37,

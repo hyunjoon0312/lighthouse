@@ -32,6 +32,7 @@ public extension EditSettings {
             ("채도", saturation != before.saturation),
             ("곡선", curves != before.curves),
             ("HSL", colorRanges != before.colorRanges),
+            ("컬러 그레이딩", colorGrading != before.colorGrading),
             ("필름 입자", grain != before.grain),
             ("RAW 현상", rawDevelop != before.rawDevelop),
             ("노이즈 감소", noiseReduction != before.noiseReduction),

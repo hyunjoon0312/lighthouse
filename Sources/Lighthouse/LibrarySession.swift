@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import LighthouseCore
 
@@ -9,10 +10,12 @@ final class LibrarySession: ObservableObject {
     @Published var errorMessage: String?
 
     private let usesEnvironmentRoot: Bool
+    private var libraryObservation: AnyCancellable?
 
     init(initialDirectory: URL? = nil) {
         usesEnvironmentRoot = ProcessInfo.processInfo.environment["LIGHTHOUSE_DATA_DIR"]?.isEmpty == false
         library = LibraryModel(dataDirectory: initialDirectory, allowsLaunchImport: true)
+        observeLibraryChanges()
     }
 
     @discardableResult
@@ -47,6 +50,7 @@ final class LibrarySession: ObservableObject {
             try library.flushSave()
             let next = LibraryModel(dataDirectory: target, allowsLaunchImport: false)
             library = next
+            observeLibraryChanges()
             if !usesEnvironmentRoot { UserDefaults.standard.set(target.path, forKey: "activeLibraryDirectory") }
             next.start()
             errorMessage = nil
@@ -54,6 +58,13 @@ final class LibrarySession: ObservableObject {
         } catch {
             errorMessage = "라이브러리를 열 수 없습니다: \(error.localizedDescription)"
             return false
+        }
+    }
+
+    private func observeLibraryChanges() {
+        libraryObservation?.cancel()
+        libraryObservation = library.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
         }
     }
 

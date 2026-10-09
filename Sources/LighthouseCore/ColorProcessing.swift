@@ -11,6 +11,9 @@ public enum AdvancedColorProcessingError: LocalizedError, Equatable, Sendable {
     case colorSpaceConversionFailed
     case colorFilterFailed
     case grainKernelFailed
+    case invalidToneSettings
+    case toneKernelFailed
+    case invalidColorGrading
 
     public var errorDescription: String? {
         switch self {
@@ -30,6 +33,12 @@ public enum AdvancedColorProcessingError: LocalizedError, Equatable, Sendable {
             "곡선과 색상 범위 필터를 적용할 수 없습니다."
         case .grainKernelFailed:
             "필름 입자 커널을 적용할 수 없습니다."
+        case .invalidToneSettings:
+            "톤 조절값이 허용 범위를 벗어났습니다."
+        case .toneKernelFailed:
+            "추가 톤 커널을 적용할 수 없습니다."
+        case .invalidColorGrading:
+            "컬러 그레이딩 조절값이 허용 범위를 벗어났습니다."
         }
     }
 }
@@ -46,22 +55,24 @@ public enum AdvancedColorProcessor {
     }
 
     public static func transformRGB(_ rgb: SIMD3<Double>, curves: ToneCurves,
-                                    ranges: [ColorRangeAdjustment]) throws -> SIMD3<Double> {
+                                    ranges: [ColorRangeAdjustment],
+                                    grading: ColorGrading = .neutral) throws -> SIMD3<Double> {
         guard rgb.x.isFinite, rgb.y.isFinite, rgb.z.isFinite else {
             throw AdvancedColorProcessingError.invalidRGB
         }
-        try validate(curves: curves, ranges: ranges)
-        if isNeutral(curves: curves, ranges: ranges) { return rgb }
-        return transformValidated(rgb, curves: curves, ranges: ranges)
+        try validate(curves: curves, ranges: ranges, grading: grading)
+        if isNeutral(curves: curves, ranges: ranges, grading: grading) { return rgb }
+        return transformValidated(rgb, curves: curves, ranges: ranges, grading: grading)
     }
 
     public static func applyColor(to image: CIImage, curves: ToneCurves,
-                                  ranges: [ColorRangeAdjustment]) throws -> CIImage {
-        try validate(curves: curves, ranges: ranges)
-        if isNeutral(curves: curves, ranges: ranges) { return image }
+                                  ranges: [ColorRangeAdjustment],
+                                  grading: ColorGrading = .neutral) throws -> CIImage {
+        try validate(curves: curves, ranges: ranges, grading: grading)
+        if isNeutral(curves: curves, ranges: ranges, grading: grading) { return image }
 
-        let cubeData = cubeCache.data(curves: curves, ranges: ranges) {
-            makeCubeData(curves: curves, ranges: ranges)
+        let cubeData = cubeCache.data(curves: curves, ranges: ranges, grading: grading) {
+            makeCubeData(curves: curves, ranges: ranges, grading: grading)
         }
         guard let encoded = image.matchedFromWorkingSpace(to: sRGB) else {
             throw AdvancedColorProcessingError.colorSpaceConversionFailed
@@ -81,7 +92,8 @@ public enum AdvancedColorProcessor {
 
     public static func applyGrain(to image: CIImage, settings: GrainSettings) throws -> CIImage {
         guard settings.amount.isFinite, (0...1).contains(settings.amount),
-              settings.size.isFinite, (0.5...8).contains(settings.size) else {
+              settings.size.isFinite, (0.5...8).contains(settings.size),
+              settings.roughness.isFinite, (0...1).contains(settings.roughness) else {
             throw AdvancedColorProcessingError.invalidGrainSettings
         }
         if settings.amount == 0 { return image }
@@ -95,7 +107,8 @@ public enum AdvancedColorProcessor {
             + Double(settings.seed >> 16) * 0.173
         guard let changed = kernel.apply(
             extent: encoded.extent,
-            arguments: [encoded, Float(settings.size), Float(settings.amount), Float(seedPhase)]
+            arguments: [encoded, Float(settings.size), Float(settings.amount), Float(seedPhase),
+                        Float(settings.roughness)]
         ) else {
             throw AdvancedColorProcessingError.grainKernelFailed
         }
@@ -105,8 +118,35 @@ public enum AdvancedColorProcessor {
         return restored.cropped(to: image.extent)
     }
 
-    private static func validate(curves: ToneCurves,
-                                 ranges: [ColorRangeAdjustment]) throws {
+    public static func applyAdditionalTone(to image: CIImage, highlights: Double, shadows: Double,
+                                           whites: Double, blacks: Double) throws -> CIImage {
+        guard highlights.isFinite, (0...2).contains(highlights),
+              shadows.isFinite, (-1...1).contains(shadows),
+              whites.isFinite, (-1...1).contains(whites),
+              blacks.isFinite, (-1...1).contains(blacks) else {
+            throw AdvancedColorProcessingError.invalidToneSettings
+        }
+        let highlight = max(highlights - 1, 0)
+        let shadow = min(shadows, 0)
+        guard highlight != 0 || shadow != 0 || whites != 0 || blacks != 0 else { return image }
+        guard let encoded = image.matchedFromWorkingSpace(to: sRGB) else {
+            throw AdvancedColorProcessingError.colorSpaceConversionFailed
+        }
+        guard let kernel = CoreImageKernels.additionalTone,
+              let changed = kernel.apply(
+                extent: encoded.extent,
+                arguments: [encoded, Float(highlight), Float(shadow), Float(whites), Float(blacks)]
+              ) else {
+            throw AdvancedColorProcessingError.toneKernelFailed
+        }
+        guard let restored = changed.matchedToWorkingSpace(from: sRGB) else {
+            throw AdvancedColorProcessingError.colorSpaceConversionFailed
+        }
+        return restored.cropped(to: image.extent)
+    }
+
+    private static func validate(curves: ToneCurves, ranges: [ColorRangeAdjustment],
+                                 grading: ColorGrading) throws {
         do {
             try curves.validate()
         } catch {
@@ -124,6 +164,7 @@ public enum AdvancedColorProcessor {
             }
             bands.append(range.band)
         }
+        guard grading.isValid else { throw AdvancedColorProcessingError.invalidColorGrading }
     }
 
     private static func validateCurve(_ points: [CurvePoint]) throws {
@@ -141,15 +182,15 @@ public enum AdvancedColorProcessor {
         }
     }
 
-    private static func isNeutral(curves: ToneCurves,
-                                  ranges: [ColorRangeAdjustment]) -> Bool {
-        curves.isIdentity && ranges.allSatisfy {
+    private static func isNeutral(curves: ToneCurves, ranges: [ColorRangeAdjustment],
+                                  grading: ColorGrading) -> Bool {
+        curves.isIdentity && grading.isNeutral && ranges.allSatisfy {
             $0.hue == 0 && $0.saturation == 0 && $0.lightness == 0
         }
     }
 
-    private static func makeCubeData(curves: ToneCurves,
-                                     ranges: [ColorRangeAdjustment]) -> Data {
+    private static func makeCubeData(curves: ToneCurves, ranges: [ColorRangeAdjustment],
+                                     grading: ColorGrading) -> Data {
         let dimension = cubeDimension
         let maximum = Double(dimension - 1)
         // 곡선 결과는 각 채널의 격자 위치에만 달려 있으므로 채널마다 64칸만 계산해 둔다.
@@ -158,6 +199,7 @@ public enum AdvancedColorProcessor {
             let curve = Curve(points)
             return (0..<dimension).map { curve.value(at: master.value(at: Double($0) / maximum)) }
         }
+        let plan = GradingPlan(grading)
         var values = [Float](repeating: 1, count: dimension * dimension * dimension * 4)
         values.withUnsafeMutableBufferPointer { buffer in
             // 파란 칸마다 서로 다른 구간만 쓰므로 여러 스레드가 같은 위치를 쓰지 않는다.
@@ -165,8 +207,9 @@ public enum AdvancedColorProcessor {
             DispatchQueue.concurrentPerform(iterations: dimension) { blue in
                 for green in 0..<dimension {
                     for red in 0..<dimension {
-                        let transformed = applyingRanges(ranges, to: SIMD3(tables[0][red], tables[1][green],
-                                                                           tables[2][blue]))
+                        let transformed = applyingGrading(plan, to: applyingRanges(
+                            ranges, to: SIMD3(tables[0][red], tables[1][green], tables[2][blue])
+                        ))
                         let index = ((blue * dimension + green) * dimension + red) * 4
                         output[index] = Float(transformed.x)
                         output[index + 1] = Float(transformed.y)
@@ -179,14 +222,15 @@ public enum AdvancedColorProcessor {
     }
 
     private static func transformValidated(_ rgb: SIMD3<Double>, curves: ToneCurves,
-                                           ranges: [ColorRangeAdjustment]) -> SIMD3<Double> {
+                                           ranges: [ColorRangeAdjustment],
+                                           grading: ColorGrading) -> SIMD3<Double> {
         let master = Curve(curves.master)
         let curved = SIMD3(
             Curve(curves.red).value(at: master.value(at: min(1, max(0, rgb.x)))),
             Curve(curves.green).value(at: master.value(at: min(1, max(0, rgb.y)))),
             Curve(curves.blue).value(at: master.value(at: min(1, max(0, rgb.z))))
         )
-        return applyingRanges(ranges, to: curved)
+        return applyingGrading(GradingPlan(grading), to: applyingRanges(ranges, to: curved))
     }
 
     private static func applyingRanges(_ ranges: [ColorRangeAdjustment],
@@ -213,6 +257,88 @@ public enum AdvancedColorProcessor {
             lightness: min(1, max(0, original.lightness + lightnessShift * 0.5))
         )
         return hslToRGB(adjusted)
+    }
+
+    /// 밝기로 영역 가중치를 정한 뒤 명도는 세 채널에 같이 더하고, 밝기 0인 색 방향은 0…1을 벗어나지 않는 만큼만 더한다.
+    /// 그래서 틴트는 밝기를 바꾸지 않고 순수한 검정·흰색은 그대로 남는다.
+    private static func applyingGrading(_ plan: GradingPlan?, to rgb: SIMD3<Double>) -> SIMD3<Double> {
+        guard let plan else { return rgb }
+        let luma = min(1, max(0, luminance(rgb)))
+        let weights = plan.weights(luma)
+        var tint = SIMD3<Double>(repeating: 0)
+        for (zone, weight) in zip(plan.tints, weights) where weight > 0 {
+            tint += weight * zone
+        }
+        let base = (rgb + SIMD3(repeating: plan.lift(at: luma))).clamped(lowerBound: SIMD3(repeating: 0),
+                                                                        upperBound: SIMD3(repeating: 1))
+        var scale = 1.0
+        for channel in 0..<3 where tint[channel] != 0 {
+            let room = tint[channel] < 0 ? base[channel] / -tint[channel] : (1 - base[channel]) / tint[channel]
+            scale = min(scale, room)
+        }
+        return base + max(0, scale) * tint
+    }
+
+    /// 그레이딩마다 한 번 계산하는 값. 큐브의 모든 칸이 같은 영역 색과 명도 이동표를 쓴다.
+    private struct GradingPlan {
+        private static let liftSamples = 1024
+        private let exponent: Double
+        private let edge: Double
+        /// 그림자·중간톤·하이라이트·전체 순서의 `채도 × 0.3 × 밝기 0인 색 방향`.
+        let tints: [SIMD3<Double>]
+        private let lifts: [Double]
+
+        init?(_ grading: ColorGrading) {
+            guard !grading.isNeutral else { return nil }
+            let zones = [grading.shadows, grading.midtones, grading.highlights, grading.global]
+            exponent = pow(2, -grading.balance)
+            edge = 0.05 + 0.45 * grading.blending
+            tints = zones.map { zone in
+                guard zone.saturation > 0 else { return SIMD3(repeating: 0) }
+                let color = hslToRGB(HSL(hue: zone.hue, saturation: 1, lightness: 0.5))
+                return zone.saturation * 0.3 * (color - SIMD3(repeating: luminance(color)))
+            }
+            // 명도 이동 뒤 밝기 L + ΔY(L)를 표로 만들고 누적 최대로 단조화한다.
+            // 혼합이 낮으면 영역 가중치가 가팔라져 밝은 입력이 더 어두워지는 계조 반전이 생길 수 있다.
+            let (exponent, edge) = (exponent, edge)
+            var highest = 0.0
+            lifts = (0...Self.liftSamples).map { index in
+                let luma = Double(index) / Double(Self.liftSamples)
+                let weights = Self.weights(luma, exponent: exponent, edge: edge)
+                let shift = zip(zones, weights).reduce(0.0) { $0 + $1.1 * $1.0.luminance * 0.5 * luma * (1 - luma) }
+                highest = max(highest, luma + shift)
+                return highest - luma
+            }
+        }
+
+        func weights(_ luma: Double) -> [Double] {
+            Self.weights(luma, exponent: exponent, edge: edge)
+        }
+
+        /// 표 사이는 선형 보간한다. 단조 표의 선형 보간이므로 결과 밝기도 단조다.
+        func lift(at luma: Double) -> Double {
+            let position = luma * Double(Self.liftSamples)
+            let index = min(Self.liftSamples - 1, max(0, Int(position)))
+            let fraction = min(1, max(0, position - Double(index)))
+            return lifts[index] * (1 - fraction) + lifts[index + 1] * fraction
+        }
+
+        private static func weights(_ luma: Double, exponent: Double, edge: Double) -> [Double] {
+            let position = pow(luma, exponent)
+            let shadows = 1 - smoothstep(max(0, 1.0 / 3 - edge), 1.0 / 3 + edge, position)
+            let highlights = smoothstep(2.0 / 3 - edge, min(1, 2.0 / 3 + edge), position)
+            return [shadows, max(0, 1 - shadows - highlights), highlights, 1]
+        }
+    }
+
+    private static func luminance(_ rgb: SIMD3<Double>) -> Double {
+        0.2126 * rgb.x + 0.7152 * rgb.y + 0.0722 * rgb.z
+    }
+
+    private static func smoothstep(_ edge0: Double, _ edge1: Double, _ value: Double) -> Double {
+        guard edge1 > edge0 else { return value < edge1 ? 0 : 1 }
+        let t = min(1, max(0, (value - edge0) / (edge1 - edge0)))
+        return t * t * (3 - 2 * t)
     }
 
     /// 단조 Hermite 곡선. 점마다의 기울기를 한 번만 계산해 두고 값을 여러 번 읽는다.
@@ -314,16 +440,20 @@ private final class ColorCubeCache: @unchecked Sendable {
     private struct Entry {
         let curves: ToneCurves
         let ranges: [ColorRangeAdjustment]
+        let grading: ColorGrading
         let data: Data
     }
 
     private let lock = NSLock()
     private var entries: [Entry] = []
 
-    func data(curves: ToneCurves, ranges: [ColorRangeAdjustment],
+    func data(curves: ToneCurves, ranges: [ColorRangeAdjustment], grading: ColorGrading,
               create: () -> Data) -> Data {
+        func matches(_ entry: Entry) -> Bool {
+            entry.curves == curves && entry.ranges == ranges && entry.grading == grading
+        }
         lock.lock()
-        if let index = entries.firstIndex(where: { $0.curves == curves && $0.ranges == ranges }) {
+        if let index = entries.firstIndex(where: matches) {
             let entry = entries.remove(at: index)
             entries.append(entry)
             lock.unlock()
@@ -333,13 +463,13 @@ private final class ColorCubeCache: @unchecked Sendable {
 
         let result = create()
         lock.lock()
-        if let index = entries.firstIndex(where: { $0.curves == curves && $0.ranges == ranges }) {
+        if let index = entries.firstIndex(where: matches) {
             let existing = entries.remove(at: index)
             entries.append(existing)
             lock.unlock()
             return existing.data
         }
-        entries.append(Entry(curves: curves, ranges: ranges, data: result))
+        entries.append(Entry(curves: curves, ranges: ranges, grading: grading, data: result))
         if entries.count > 4 { entries.removeFirst(entries.count - 4) }
         lock.unlock()
         return result

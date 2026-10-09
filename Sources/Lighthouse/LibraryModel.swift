@@ -239,6 +239,8 @@ final class LibraryModel: ObservableObject {
     @Published var presets: [EditPreset] = []
     @Published var presetLoadError: String?
     @Published var presetSheet: PresetSheetRequest?
+    @Published var lightroomPresetSheet: LightroomPresetSheetRequest?
+    @Published var isPresetImporting = false
     @Published var importPresetID: UUID? = UserDefaults.standard.string(forKey: "importPresetID").flatMap(UUID.init) {
         didSet { UserDefaults.standard.set(importPresetID?.uuidString, forKey: "importPresetID") }
     }
@@ -425,6 +427,8 @@ final class LibraryModel: ObservableObject {
     var faceBatchGeneration = 0
     var workflowCancellation: CancellationFlag?
     var workflowGeneration = 0
+    var presetImportTask: Task<Void, Never>?
+    var presetImportGeneration = 0
     var previewRefreshGeneration = 0
     var workflowCompletionWaiters: [CheckedContinuation<Void, Never>] = []
     var flickerGeneration = 0
@@ -539,7 +543,7 @@ final class LibraryModel: ObservableObject {
     var canUndo: Bool { editHistory.canUndo }
     var canRedo: Bool { editHistory.canRedo }
     var hasModalPresentation: Bool {
-        showBatchEdit || showExport || showCardImport || showShortcuts || showPeople || presetSheet != nil || referenceMatchSource != nil || folderSheetRequest != nil ||
+        showBatchEdit || showExport || showCardImport || showShortcuts || showPeople || presetSheet != nil || lightroomPresetSheet != nil || referenceMatchSource != nil || folderSheetRequest != nil ||
             cropSource != nil || catalogRemoval != nil || showSimilarPhotos || showSmartPreviews || showLibraryBackup || showLibraryRestore || rangeMaskRequest != nil
     }
     var selectedLocal: LocalAdjustment? { selection?.edits.localAdjustments.first { $0.id == selectedLocalID } }

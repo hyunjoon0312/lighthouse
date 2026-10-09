@@ -25,14 +25,36 @@ enum CoreImageKernels {
         }
         """)
 
+    /// sRGB 값의 섀도·하이라이트·흰색·검정 범위를 독립적으로 움직인다.
+    /// 0…1 밖은 가까운 끝점의 이동량을 더해 확장 범위 차이를 보존하고, 원래 알파를 유지한다.
+    static let additionalTone = compile("""
+        [[stitchable]] float4 lighthouseAdditionalTone(coreimage::sample_t pixel, float highlight,
+                                                       float shadow, float whites, float blacks) {
+            if (pixel.a <= 0.0) { return pixel; }
+            float3 original = pixel.rgb / pixel.a;
+            float3 base = clamp(original, 0.0, 1.0);
+            float3 x = base;
+            x += shadow * 0.8 * x * pow(1.0 - x, float3(2.0));
+            x += highlight * 0.8 * x * x * (1.0 - x);
+            x += whites * 0.25 * smoothstep(float3(0.5), float3(1.0), x);
+            x += blacks * 0.25 * (1.0 - smoothstep(float3(0.0), float3(0.5), x));
+            float3 changed = original + (clamp(x, 0.0, 1.0) - base);
+            return float4(changed * pixel.a, pixel.a);
+        }
+        """)
+
     /// 출력 좌표에서 만든 값 노이즈를 sRGB 값에 더한다(필름 입자).
     static let grain = compile("""
         [[stitchable]] float4 lighthouseGrain(coreimage::sample_t pixel, float grainSize, float amount, float seed,
+                                              float roughness,
                                               coreimage::destination dest) {
             float2 position = dest.coord() / grainSize;
             float2 cell = floor(position);
-            float2 blend = fract(position);
-            blend = blend * blend * (3.0 - 2.0 * blend);
+            float2 linearBlend = fract(position);
+            float2 smoothBlend = linearBlend * linearBlend * (3.0 - 2.0 * linearBlend);
+            float2 blend = roughness <= 0.5
+                ? mix(linearBlend, smoothBlend, roughness * 2.0)
+                : mix(smoothBlend, step(float2(0.5), linearBlend), (roughness - 0.5) * 2.0);
             float n00 = fract(sin(dot(cell, float2(12.9898, 78.233)) + seed) * 43758.5453);
             float n10 = fract(sin(dot(cell + float2(1.0, 0.0), float2(12.9898, 78.233)) + seed) * 43758.5453);
             float n01 = fract(sin(dot(cell + float2(0.0, 1.0), float2(12.9898, 78.233)) + seed) * 43758.5453);

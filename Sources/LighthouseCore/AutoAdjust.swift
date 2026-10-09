@@ -25,11 +25,12 @@ public enum AutoAdjust {
         let probe = measurement.probe
 
         let stats = try measurement.measure()
-        // 평균 밝기(로그 평균)를 18% 회색(sRGB 약 0.46)에 맞춘다. 밝게 할 때는 가장 밝은 0.5%가 잘리지 않는 만큼만 올리고
-        // 남은 어두운 부분은 섀도로 끌어올린다. 흰 벽과 짙은 그늘이 함께 있는 사진을 날리지 않기 위해서다.
+        // 어두운 장면은 평균 밝기(로그 평균)를 18% 회색(sRGB 약 0.46)에 맞추되, 밝은 장면은 흰 피사체를
+        // 중간 회색으로 내리지 않는다. 넓은 밝은 영역(p95)에 필요한 여유만 확보한다.
         let key = min(2, max(-2, log2(0.18 / max(0.002, stats.logAverage))))
         let headroom = log2(0.95 / max(0.002, stats.percentile(0.995)))
-        let exposure = key > 0 ? min(key, max(0, headroom)) : key
+        let brightHeadroom = min(0, log2(0.90 / max(0.002, stats.percentile(0.95))))
+        let exposure = key > 0 ? min(key, max(0, headroom)) : max(key, brightHeadroom)
         let gain = pow(2, exposure)
         let clipped = stats.fraction { $0 * gain >= 0.98 }
         let crushed = stats.fraction { $0 * gain < 0.012 }

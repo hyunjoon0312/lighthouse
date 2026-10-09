@@ -8,6 +8,7 @@ public struct EditPreset: Identifiable, Codable, Equatable, Sendable {
     public var name: String
     public var settings: EditSettings
     public var components: EditComponents
+    public var lightroom: LightroomPresetPayload?
 
     /// `source`에서 `components`에 해당하는 값만 가져온다.
     public init(id: UUID = UUID(), name: String, source: EditSettings, components: EditComponents) {
@@ -16,13 +17,25 @@ public struct EditPreset: Identifiable, Codable, Equatable, Sendable {
         self.name = name
         self.settings = EditSettings.neutral.merging(from: source, components: kept)
         self.components = kept
+        self.lightroom = nil
+    }
+
+    public init(id: UUID = UUID(), name: String, lightroom: LightroomPresetPayload) {
+        self.id = id
+        self.name = name
+        self.settings = .neutral
+        self.components = .global
+        self.lightroom = lightroom
     }
 
     public func applied(to edits: EditSettings) -> EditSettings {
-        edits.merging(from: settings, components: components)
+        if let lightroom {
+            return lightroom.applying(to: edits)
+        }
+        return edits.merging(from: settings, components: components)
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, settings, components }
+    private enum CodingKeys: String, CodingKey { case id, name, settings, components, lightroom }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -31,6 +44,8 @@ public struct EditPreset: Identifiable, Codable, Equatable, Sendable {
         settings = try container.decode(EditSettings.self, forKey: .settings)
         let raw = try container.decode(Int.self, forKey: .components)
         components = EditComponents(rawValue: raw)
+        lightroom = container.contains(.lightroom)
+            ? try container.decode(LightroomPresetPayload.self, forKey: .lightroom) : nil
         guard !components.isEmpty, Self.allowedComponents.isSuperset(of: components) else {
             throw DecodingError.dataCorruptedError(forKey: .components, in: container,
                                                    debugDescription: "Unsupported preset components \(raw)")
@@ -43,6 +58,7 @@ public struct EditPreset: Identifiable, Codable, Equatable, Sendable {
         try container.encode(name, forKey: .name)
         try container.encode(settings, forKey: .settings)
         try container.encode(components.rawValue, forKey: .components)
+        try container.encodeIfPresent(lightroom, forKey: .lightroom)
     }
 }
 
@@ -100,6 +116,7 @@ public struct EditPresetStore: Sendable {
             guard ids.insert(preset.id).inserted else { throw EditPresetStoreError.duplicateID(preset.id) }
             guard !preset.components.isEmpty else { throw EditPresetStoreError.emptyComponents }
             var normalized = preset
+            try normalized.lightroom?.validate()
             normalized.name = preset.name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard (1...80).contains(normalized.name.count) else { throw EditPresetStoreError.invalidName(preset.name) }
             let key = normalized.name.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX"))

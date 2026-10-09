@@ -28,7 +28,7 @@ struct RangeMaskSheetRequest: Identifiable {
 extension LibraryModel {
     var hasConflictingWorkflow: Bool {
         isRunningWorkflow || isImporting || isExporting || isAnalyzingFaces || driveUpload.isBusy ||
-            isLUTImporting || isLUTLibraryLoading || isAutoMasking || isAutoAdjusting || isFindingHealSource ||
+            isLUTImporting || isLUTLibraryLoading || isPresetImporting || isAutoMasking || isAutoAdjusting || isFindingHealSource ||
             isPickingWhiteBalance || isAnalyzingBursts || isAnalyzingFlicker
     }
 

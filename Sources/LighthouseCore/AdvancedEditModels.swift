@@ -124,11 +124,149 @@ public struct GrainSettings: Codable, Equatable, Sendable {
     public var amount: Double
     public var size: Double
     public var seed: UInt32
+    public var roughness: Double
 
-    public init(amount: Double = 0, size: Double = 1.5, seed: UInt32 = 1) {
+    public init(amount: Double = 0, size: Double = 1.5, seed: UInt32 = 1, roughness: Double = 0.5) {
         self.amount = amount
         self.size = size
         self.seed = seed
+        self.roughness = roughness
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case amount, size, seed, roughness
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        amount = try container.decode(Double.self, forKey: .amount)
+        size = try container.decode(Double.self, forKey: .size)
+        seed = try container.decode(UInt32.self, forKey: .seed)
+        roughness = try container.contains(.roughness)
+            ? container.decode(Double.self, forKey: .roughness) : 0.5
+        guard roughness.isFinite, (0...1).contains(roughness) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .roughness,
+                in: container,
+                debugDescription: "Grain roughness must be finite and within 0...1"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(amount, forKey: .amount)
+        try container.encode(size, forKey: .size)
+        try container.encode(seed, forKey: .seed)
+        if roughness != 0.5 { try container.encode(roughness, forKey: .roughness) }
+    }
+}
+
+/// 컬러 그레이딩의 한 영역. 색조는 0..<360도, 채도 0…1, 명도 -1…1.
+public struct ColorGradeZone: Codable, Equatable, Sendable {
+    public var hue: Double
+    public var saturation: Double
+    public var luminance: Double
+
+    public init(hue: Double = 0, saturation: Double = 0, luminance: Double = 0) {
+        self.hue = hue
+        self.saturation = saturation
+        self.luminance = luminance
+    }
+
+    public var isNeutral: Bool { saturation == 0 && luminance == 0 }
+
+    public var isValid: Bool {
+        hue.isFinite && hue >= 0 && hue < 360
+            && saturation.isFinite && (0...1).contains(saturation)
+            && luminance.isFinite && (-1...1).contains(luminance)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case hue, saturation, luminance
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        hue = try container.contains(.hue) ? container.decode(Double.self, forKey: .hue) : 0
+        saturation = try container.contains(.saturation) ? container.decode(Double.self, forKey: .saturation) : 0
+        luminance = try container.contains(.luminance) ? container.decode(Double.self, forKey: .luminance) : 0
+        guard isValid else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Color grade zone must be finite and within its supported ranges"
+            ))
+        }
+    }
+}
+
+/// 그림자·중간톤·하이라이트·전체 영역의 색과 명도. 혼합은 영역 경계의 부드러움(0…1), 균형은 그림자·하이라이트 경계 이동(-1…1)이다.
+public struct ColorGrading: Codable, Equatable, Sendable {
+    public var shadows: ColorGradeZone
+    public var midtones: ColorGradeZone
+    public var highlights: ColorGradeZone
+    public var global: ColorGradeZone
+    public var blending: Double
+    public var balance: Double
+
+    public init(shadows: ColorGradeZone = ColorGradeZone(), midtones: ColorGradeZone = ColorGradeZone(),
+                highlights: ColorGradeZone = ColorGradeZone(), global: ColorGradeZone = ColorGradeZone(),
+                blending: Double = 0.5, balance: Double = 0) {
+        self.shadows = shadows
+        self.midtones = midtones
+        self.highlights = highlights
+        self.global = global
+        self.blending = blending
+        self.balance = balance
+    }
+
+    public static let neutral = ColorGrading()
+
+    /// 네 영역 모두 채도·명도가 0이면 혼합·균형과 관계없이 효과가 없다.
+    public var isNeutral: Bool {
+        shadows.isNeutral && midtones.isNeutral && highlights.isNeutral && global.isNeutral
+    }
+
+    public var isValid: Bool {
+        [shadows, midtones, highlights, global].allSatisfy(\.isValid)
+            && blending.isFinite && (0...1).contains(blending)
+            && balance.isFinite && (-1...1).contains(balance)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case shadows, midtones, highlights, global, blending, balance
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func zone(_ key: CodingKeys) throws -> ColorGradeZone {
+            try container.contains(key) ? container.decode(ColorGradeZone.self, forKey: key) : ColorGradeZone()
+        }
+        shadows = try zone(.shadows)
+        midtones = try zone(.midtones)
+        highlights = try zone(.highlights)
+        global = try zone(.global)
+        blending = try container.contains(.blending) ? container.decode(Double.self, forKey: .blending) : 0.5
+        balance = try container.contains(.balance) ? container.decode(Double.self, forKey: .balance) : 0
+        guard isValid else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Color grading must be finite and within its supported ranges"
+            ))
+        }
+    }
+}
+
+public enum ColorGradeRegion: String, CaseIterable, Sendable {
+    case shadows, midtones, highlights, global
+
+    public var keyPath: WritableKeyPath<ColorGrading, ColorGradeZone> {
+        switch self {
+        case .shadows: \.shadows
+        case .midtones: \.midtones
+        case .highlights: \.highlights
+        case .global: \.global
+        }
     }
 }
 

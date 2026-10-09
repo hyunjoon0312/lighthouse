@@ -154,7 +154,7 @@ extension LibraryModel {
         _ = writePresets(presets.filter { $0.id != id }, message: "프리셋을 삭제했습니다. 이미 적용한 사진의 보정은 그대로입니다.")
     }
 
-    private func writePresets(_ updated: [EditPreset], message: String?) -> String? {
+    func writePresets(_ updated: [EditPreset], message: String?) -> String? {
         do {
             let normalized = try EditPresetStore.validated(updated)
             try saveQueue.sync { try presetStore.save(normalized) }
@@ -168,10 +168,16 @@ extension LibraryModel {
 
     /// 여러 장이 선택되어 있으면 선택한 사진 전체에, 아니면 현재 사진에 적용한다. 한 번에 실행 취소된다.
     func applyPreset(_ preset: EditPreset) {
-        let targets = selectedPhotoIDs.count >= 2 ? selectedPhotos.map(\.id) : selectedID.map { [$0] } ?? []
+        let visibleIDs = Set(visiblePhotos.map(\.id))
+        let targets = selectedPhotoIDs.intersection(visibleIDs)
         guard !targets.isEmpty else { return }
-        applyBatchEdits(source: preset.settings, to: targets, components: preset.components)
-        operationMessage = "프리셋 ‘\(preset.name)’ 적용 · " + (operationMessage ?? "")
+        let changes = photos.compactMap { photo -> PhotoEditChange? in
+            guard targets.contains(photo.id) else { return nil }
+            let after = preset.applied(to: photo.edits)
+            return after == photo.edits ? nil : PhotoEditChange(id: photo.id, before: photo.edits, after: after)
+        }
+        applyEditChanges(changes, useAfter: true, record: true)
+        operationMessage = "프리셋 ‘\(preset.name)’ · 선택 \(targets.count)장 중 \(changes.count)장 보정 변경"
     }
 
     /// 카드의 사진을 `root`로 복사한 뒤 복사본을 가져온다. 카드의 원본은 읽기만 한다.

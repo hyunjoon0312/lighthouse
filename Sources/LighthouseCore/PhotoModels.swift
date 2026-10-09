@@ -180,6 +180,11 @@ public struct LUTAdjustment: Codable, Equatable, Sendable {
     }
 }
 
+public enum PhotoColorProfile: String, Codable, CaseIterable, Sendable {
+    case color
+    case monochrome
+}
+
 public struct EditSettings: Codable, Equatable, Sendable {
     public var exposure: Double
     public var contrast: Double
@@ -188,6 +193,9 @@ public struct EditSettings: Codable, Equatable, Sendable {
     public var tintShift: Double
     public var highlights: Double
     public var shadows: Double
+    public var whites: Double
+    public var blacks: Double
+    public var colorProfile: PhotoColorProfile
     public var sharpness: Double
     public var rotationQuarterTurns: Int
     public var cropAspect: Double?
@@ -207,17 +215,22 @@ public struct EditSettings: Codable, Equatable, Sendable {
     public var vignette: Double
     /// RAW HDR 하이라이트(0…2). 0이면 쓰지 않는다. HDR 화면에서 밝은 부분을 더 밝게 보이고 HEIF·JPEG에 게인 맵을 넣는다.
     public var hdrAmount: Double
+    /// 그림자·중간톤·하이라이트·전체 컬러 그레이딩. 중립이면 저장하지 않는다.
+    public var colorGrading: ColorGrading
 
     public init(exposure: Double = 0, contrast: Double = 1, saturation: Double = 1,
                 temperatureShift: Double = 0, tintShift: Double = 0, highlights: Double = 1,
-                shadows: Double = 0, sharpness: Double = 0, rotationQuarterTurns: Int = 0,
+                shadows: Double = 0, whites: Double = 0, blacks: Double = 0,
+                colorProfile: PhotoColorProfile = .color,
+                sharpness: Double = 0, rotationQuarterTurns: Int = 0,
                 cropAspect: Double? = nil, localAdjustments: [LocalAdjustment] = [],
                 lut: LUTAdjustment? = nil, curves: ToneCurves = .identity,
                 colorRanges: [ColorRangeAdjustment] = [], grain: GrainSettings = GrainSettings(),
                 straightenDegrees: Double = 0, cropRect: NormalizedCrop? = nil,
                 retouchStrokes: [RetouchStroke] = [], rawDevelop: RAWDevelopSettings = RAWDevelopSettings(),
                 noiseReduction: NoiseReductionSettings = NoiseReductionSettings(), flicker: FlickerSettings = FlickerSettings(),
-                vibrance: Double = 0, clarity: Double = 0, vignette: Double = 0, hdrAmount: Double = 0) {
+                vibrance: Double = 0, clarity: Double = 0, vignette: Double = 0, hdrAmount: Double = 0,
+                colorGrading: ColorGrading = .neutral) {
         self.exposure = exposure
         self.contrast = contrast
         self.saturation = saturation
@@ -225,6 +238,9 @@ public struct EditSettings: Codable, Equatable, Sendable {
         self.tintShift = tintShift
         self.highlights = highlights
         self.shadows = shadows
+        self.whites = whites
+        self.blacks = blacks
+        self.colorProfile = colorProfile
         self.sharpness = sharpness
         self.rotationQuarterTurns = rotationQuarterTurns
         self.cropAspect = cropAspect
@@ -243,16 +259,18 @@ public struct EditSettings: Codable, Equatable, Sendable {
         self.clarity = clarity
         self.vignette = vignette
         self.hdrAmount = hdrAmount
+        self.colorGrading = colorGrading
     }
 
     public static let neutral = EditSettings()
     public var isModified: Bool { self != .neutral }
 
     private enum CodingKeys: String, CodingKey {
-        case exposure, contrast, saturation, temperatureShift, tintShift, highlights, shadows
+        case exposure, contrast, saturation, temperatureShift, tintShift, highlights, shadows, whites, blacks
+        case colorProfile
         case sharpness, rotationQuarterTurns, cropAspect, localAdjustments, lut
         case curves, colorRanges, grain, straightenDegrees, cropRect, retouchStrokes, rawDevelop, noiseReduction, flicker
-        case vibrance, clarity, vignette, hdrAmount
+        case vibrance, clarity, vignette, hdrAmount, colorGrading
     }
 
     public init(from decoder: Decoder) throws {
@@ -264,6 +282,19 @@ public struct EditSettings: Codable, Equatable, Sendable {
         tintShift = try container.decode(Double.self, forKey: .tintShift)
         highlights = try container.decode(Double.self, forKey: .highlights)
         shadows = try container.decode(Double.self, forKey: .shadows)
+        whites = try container.contains(.whites) ? container.decode(Double.self, forKey: .whites) : 0
+        blacks = try container.contains(.blacks) ? container.decode(Double.self, forKey: .blacks) : 0
+        colorProfile = try container.contains(.colorProfile)
+            ? container.decode(PhotoColorProfile.self, forKey: .colorProfile) : .color
+        guard highlights.isFinite, (0...2).contains(highlights),
+              shadows.isFinite, (-1...1).contains(shadows),
+              whites.isFinite, (-1...1).contains(whites),
+              blacks.isFinite, (-1...1).contains(blacks) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Tone settings must be finite and within their supported ranges"
+            ))
+        }
         sharpness = try container.decode(Double.self, forKey: .sharpness)
         rotationQuarterTurns = try container.decode(Int.self, forKey: .rotationQuarterTurns)
         cropAspect = try container.decodeIfPresent(Double.self, forKey: .cropAspect)
@@ -291,6 +322,8 @@ public struct EditSettings: Codable, Equatable, Sendable {
         clarity = try container.decodeIfPresent(Double.self, forKey: .clarity) ?? 0
         vignette = try container.decodeIfPresent(Double.self, forKey: .vignette) ?? 0
         hdrAmount = try container.decodeIfPresent(Double.self, forKey: .hdrAmount) ?? 0
+        colorGrading = try container.contains(.colorGrading)
+            ? container.decode(ColorGrading.self, forKey: .colorGrading) : .neutral
     }
 
     /// HDR 하이라이트는 쓸 때만 적는다. 쓰지 않는 사진의 카탈로그와 썸네일 키가 예전과 같게 남는다.
@@ -303,6 +336,9 @@ public struct EditSettings: Codable, Equatable, Sendable {
         try container.encode(tintShift, forKey: .tintShift)
         try container.encode(highlights, forKey: .highlights)
         try container.encode(shadows, forKey: .shadows)
+        if whites != 0 { try container.encode(whites, forKey: .whites) }
+        if blacks != 0 { try container.encode(blacks, forKey: .blacks) }
+        if colorProfile != .color { try container.encode(colorProfile, forKey: .colorProfile) }
         try container.encode(sharpness, forKey: .sharpness)
         try container.encode(rotationQuarterTurns, forKey: .rotationQuarterTurns)
         try container.encodeIfPresent(cropAspect, forKey: .cropAspect)
@@ -325,6 +361,7 @@ public struct EditSettings: Codable, Equatable, Sendable {
         try container.encode(clarity, forKey: .clarity)
         try container.encode(vignette, forKey: .vignette)
         if hdrAmount != 0 { try container.encode(hdrAmount, forKey: .hdrAmount) }
+        if colorGrading != .neutral { try container.encode(colorGrading, forKey: .colorGrading) }
     }
 }
 
