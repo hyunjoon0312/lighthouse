@@ -211,10 +211,14 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
         "Daylight": .daylight, "Cloudy": .cloudy, "Shade": .shade, "Tungsten": .tungsten,
         "Fluorescent": .fluorescent, "Flash": .flash,
     ]
-    /// Lighthouse가 설치된 DCP로 찾는 프로필 이름. Adobe Color 같은 Look 기반 프로필은 아니다.
+    /// Lighthouse가 이 Mac에 설치된 DCP·Adobe Raw 프로필로 찾는 이름.
     static func isDNGProfileName(_ name: String) -> Bool {
-        name == "Adobe Standard" || (name.hasPrefix("Camera ") && name.count > 7)
+        name == "Adobe Standard" || adobeRawProfileNames.contains(name) || (name.hasPrefix("Camera ") && name.count > 7)
     }
+
+    /// Camera Raw가 설치하는 Adobe Raw 프로필(Look XMP). 같은 이름으로 설치본을 찾는다.
+    static let adobeRawProfileNames: Set<String> = ["Adobe Color", "Adobe Landscape", "Adobe Monochrome",
+                                                    "Adobe Neutral", "Adobe Portrait", "Adobe Vivid"]
 
     static var calibrationKeys: [(String, WritableKeyPath<CalibrationSettings, Double>)] {
         [("ShadowTint", \.shadowTint), ("RedHue", \.redHue), ("RedSaturation", \.redSaturation),

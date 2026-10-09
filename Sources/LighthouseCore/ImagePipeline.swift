@@ -636,6 +636,18 @@ public final class ImagePipeline: @unchecked Sendable {
         return (source, nil)
     }
 
+    /// Adobe Raw 프로필에 든 명료도·하이라이트·섀도(Adobe 단위)를 사용자 값에 더하고, 흑백 프로필이면 흑백으로 그린다.
+    /// 사진에 저장된 값은 바꾸지 않고 이번 렌더에만 쓴다.
+    static func applyingLookAdjustments(_ look: AdobeLookProfile?, to edits: EditSettings) -> EditSettings {
+        guard let look else { return edits }
+        var result = edits
+        result.clarity = min(1, max(-1, edits.clarity + look.clarity / 100))
+        result.highlights = min(2, max(0, edits.highlights + look.highlights / 100))
+        result.shadows = min(1, max(-1, edits.shadows + look.shadows / 100))
+        if look.isMonochrome { result.colorProfile = .monochrome }
+        return result
+    }
+
     /// RAW 현상에 쓸 중립 색온도·틴트. 화이트밸런스 기준값이 있으면 그 값, 없으면 촬영 시 값에 이동량을 더한다.
     static func rawNeutral(asShotTemperature: Float, asShotTint: Float,
                            edits: EditSettings) -> (temperature: Float, tint: Float) {
@@ -644,8 +656,10 @@ public final class ImagePipeline: @unchecked Sendable {
                 min(150, max(-150, base.1 + Float(edits.tintShift))))
     }
 
-    private func developed(url: URL, edits: EditSettings, scale: Double, allowApproximation: Bool)
+    private func developed(url: URL, edits requested: EditSettings, scale: Double, allowApproximation: Bool)
         throws -> (image: CIImage, isApproximate: Bool, source: CIImage, offset: CGPoint) {
+        let look = Self.isRAW(url) ? requested.cameraProfile.flatMap { profileLibrary.look(named: $0, rawURL: url) } : nil
+        let edits = Self.applyingLookAdjustments(look, to: requested)
         let source = try developedSource(url: url, edits: edits, scale: scale, allowApproximation: allowApproximation)
         var image = source.image
         if let delta = source.delta {
@@ -694,6 +708,9 @@ public final class ImagePipeline: @unchecked Sendable {
             }
         }
 
+        if let look, !look.curves.isIdentity {
+            image = try AdvancedColorProcessor.applyColor(to: image, curves: look.curves, ranges: [])
+        }
         image = CalibrationProcessor.apply(edits.calibration, to: image)
         image = applyDehaze(edits.dehaze, to: image)
 

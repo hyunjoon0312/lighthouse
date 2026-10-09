@@ -8,6 +8,15 @@ public struct CameraProfileInfo: Equatable, Sendable {
     public let name: String
     public let url: URL
     public let isUserProfile: Bool
+    /// Adobe Raw 프로필(Adobe Color 등, Look XMP)이다. 기준 DCP는 같은 카메라의 Adobe Standard다.
+    public let isLook: Bool
+
+    public init(name: String, url: URL, isUserProfile: Bool, isLook: Bool = false) {
+        self.name = name
+        self.url = url
+        self.isUserProfile = isUserProfile
+        self.isLook = isLook
+    }
 }
 
 /// 사용자의 Mac에 있는 Adobe·사용자 DCP를 찾아 읽는다. 파일은 읽기만 하고 복사하지 않는다.
@@ -16,6 +25,8 @@ public final class CameraProfileLibrary: @unchecked Sendable {
     public static let defaultAdobeDirectory = URL(fileURLWithPath: "/Library/Application Support/Adobe/CameraRaw/CameraProfiles")
     public static let defaultUserDirectory = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Adobe/CameraRaw/CameraProfiles")
+    public static let defaultLookDirectory = URL(
+        fileURLWithPath: "/Library/Application Support/Adobe/CameraRaw/Settings/Adobe/Profiles/Adobe Raw")
     public static let shared = CameraProfileLibrary()
 
     /// 큐브 격자 크기와 입력·출력 모양(0…4의 로그 곡선).
@@ -25,17 +36,21 @@ public final class CameraProfileLibrary: @unchecked Sendable {
 
     private let adobeDirectory: URL
     private let userDirectory: URL
+    private let lookDirectory: URL
     private let lock = NSLock()
     private var listings: [String: (stamp: String, profiles: [CameraProfileInfo])] = [:]
     private var parsed: [String: (stamp: Date?, profile: DNGProfile?)] = [:]
+    private var parsedLooks: [String: (stamp: Date?, look: AdobeLookProfile?)] = [:]
     private var cameras: [String: String?] = [:]
     private var cubes: [String: Data] = [:]
     private var cubeOrder: [String] = []
 
     public init(adobeDirectory: URL = CameraProfileLibrary.defaultAdobeDirectory,
-                userDirectory: URL = CameraProfileLibrary.defaultUserDirectory) {
+                userDirectory: URL = CameraProfileLibrary.defaultUserDirectory,
+                lookDirectory: URL = CameraProfileLibrary.defaultLookDirectory) {
         self.adobeDirectory = adobeDirectory
         self.userDirectory = userDirectory
+        self.lookDirectory = lookDirectory
     }
 
     /// 카메라 이름이 DCP의 UniqueCameraModel과 같거나, 카메라 이름이 DCP 이름의 모델 부분(제조사 다음)으로 끝나면
@@ -51,10 +66,10 @@ public final class CameraProfileLibrary: @unchecked Sendable {
     }
 
     /// 이 카메라에 쓸 수 있는 프로필. 사용자 폴더가 같은 이름의 Adobe 프로필보다 앞선다.
-    /// Adobe Standard가 먼저이고 나머지는 이름순이다.
+    /// Adobe Raw 프로필(이름순), Adobe Standard, 나머지 DCP(이름순) 순서다. Adobe Raw 프로필은 Adobe Standard가 있을 때만 보인다.
     public func profiles(forCamera camera: String?) -> [CameraProfileInfo] {
         guard let camera, !camera.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-        let stamp = [userDirectory, adobeDirectory, adobeDirectory.appendingPathComponent("Camera")]
+        let stamp = [userDirectory, adobeDirectory, adobeDirectory.appendingPathComponent("Camera"), lookDirectory]
             .map { Self.modificationDate($0).map { String($0.timeIntervalSinceReferenceDate) } ?? "-" }
             .joined(separator: "|")
         lock.lock()
@@ -72,8 +87,17 @@ public final class CameraProfileLibrary: @unchecked Sendable {
                 found.append(CameraProfileInfo(name: profile.name, url: url, isUserProfile: isUser))
             }
         }
+        if found.contains(where: { $0.name == "Adobe Standard" }) {
+            let looks = (try? FileManager.default.contentsOfDirectory(at: lookDirectory, includingPropertiesForKeys: nil)) ?? []
+            for url in looks.sorted(by: { $0.path < $1.path }) where url.pathExtension.lowercased() == "xmp" {
+                guard let look = loadLook(url), look.baseProfile == "Adobe Standard",
+                      !found.contains(where: { $0.name == look.name }) else { continue }
+                found.append(CameraProfileInfo(name: look.name, url: url, isUserProfile: false, isLook: true))
+            }
+        }
         found.sort { lhs, rhs in
-            if (lhs.name == "Adobe Standard") != (rhs.name == "Adobe Standard") { return lhs.name == "Adobe Standard" }
+            func rank(_ info: CameraProfileInfo) -> Int { info.isLook ? 0 : info.name == "Adobe Standard" ? 1 : 2 }
+            if rank(lhs) != rank(rhs) { return rank(lhs) < rank(rhs) }
             return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
         lock.lock()
@@ -84,17 +108,24 @@ public final class CameraProfileLibrary: @unchecked Sendable {
 
     /// 현상 캐시 키에 넣을 프로필 파일 식별값. 찾지 못하면 "missing"이다.
     func identity(name: String, camera: String?) -> String {
-        guard let info = profiles(forCamera: camera).first(where: { $0.name == name }) else { return "missing" }
+        let available = profiles(forCamera: camera)
+        guard let info = available.first(where: { $0.name == name }) else { return "missing" }
         let date = Self.modificationDate(info.url)?.timeIntervalSinceReferenceDate ?? 0
-        return "\(info.url.path)|\(date)"
+        guard info.isLook, let base = available.first(where: { $0.name == "Adobe Standard" }) else {
+            return "\(info.url.path)|\(date)"
+        }
+        let baseDate = Self.modificationDate(base.url)?.timeIntervalSinceReferenceDate ?? 0
+        return "\(info.url.path)|\(date)|\(base.url.path)|\(baseDate)"
     }
 
     /// RAW 현상의 선형 단계에 넣을 필터. 프로필을 찾지 못하면 nil이다.
     func linearFilter(name: String, rawURL: URL, temperature: Double) -> (filter: CIFilter, hasToneCurve: Bool)? {
         let camera = camera(for: rawURL)
         let available = profiles(forCamera: camera)
-        guard let info = available.first(where: { $0.name == name }), let profile = load(info.url) else { return nil }
+        guard let info = available.first(where: { $0.name == name }) else { return nil }
         let reference = available.first(where: { $0.name == "Adobe Standard" }).flatMap { load($0.url) }
+        let look = info.isLook ? loadLook(info.url) : nil
+        guard let profile = info.isLook ? reference : load(info.url), !info.isLook || look != nil else { return nil }
         let weight = (profile.illuminantWeight(temperature: temperature) * 20).rounded() / 20
         let key = "\(identity(name: name, camera: camera))|\(weight)"
         lock.lock()
@@ -103,7 +134,8 @@ public final class CameraProfileLibrary: @unchecked Sendable {
         if cube == nil {
             let representative = Self.temperature(forWeight: weight, profile: profile) ?? temperature
             let built = Self.cubeData(DNGProfileTransform(profile: profile, reference: reference,
-                                                          temperature: representative))
+                                                          temperature: representative,
+                                                          additionalLook: look?.lookTable))
             lock.lock()
             cubes[key] = built
             cubeOrder.removeAll { $0 == key }
@@ -153,6 +185,29 @@ public final class CameraProfileLibrary: @unchecked Sendable {
 
     static func unshape(_ e: Double) -> Double {
         (pow(2, e * log2(1 + shaperGain * shaperRange)) - 1) / shaperGain
+    }
+
+    /// 사진에 고른 프로필이 Adobe Raw 프로필이면 그 Look. 현상 단계의 곡선·조정값에 쓴다.
+    func look(named name: String, rawURL: URL) -> AdobeLookProfile? {
+        guard let info = profiles(forCamera: camera(for: rawURL)).first(where: { $0.name == name }), info.isLook else {
+            return nil
+        }
+        return loadLook(info.url)
+    }
+
+    private func loadLook(_ url: URL) -> AdobeLookProfile? {
+        let stamp = Self.modificationDate(url)
+        lock.lock()
+        if let cached = parsedLooks[url.path], cached.stamp == stamp {
+            lock.unlock()
+            return cached.look
+        }
+        lock.unlock()
+        let look = try? AdobeLookProfile.load(url: url)
+        lock.lock()
+        parsedLooks[url.path] = (stamp, look)
+        lock.unlock()
+        return look
     }
 
     private func load(_ url: URL) -> DNGProfile? {

@@ -82,9 +82,10 @@ JPEG·HEIC에도 쓸 수 있는 **전체 보정 → 노이즈 감소 → 일반 
 
 ## 카메라 프로필과 캘리브레이션
 
-RAW 사진은 **색상 → 카메라 프로필**에서 macOS 기본 대신 Adobe Standard나 Camera Vivid·Flat·Monochrome 같은 Camera Matching 프로필을 고를 수 있습니다. Lighthouse는 Camera Raw가 이 Mac에 설치한 DCP 파일(`/Library/Application Support/Adobe/CameraRaw/CameraProfiles`)과 사용자 DCP 폴더를 읽기만 합니다. DCP를 복사하거나 함께 배포하지 않으므로, Camera Raw가 없는 Mac에서는 메뉴가 비어 있고 이미 고른 프로필은 "이 Mac에 없음"으로 표시되며 기본 색상으로 보입니다.
+RAW 사진은 **색상 → 카메라 프로필**에서 macOS 기본 대신 Adobe Color·Landscape·Monochrome·Neutral·Portrait·Vivid(Adobe Raw 프로필), Adobe Standard, Camera Vivid·Flat·Monochrome 같은 Camera Matching 프로필을 고를 수 있습니다. Lighthouse는 Camera Raw가 이 Mac에 설치한 DCP 파일(`/Library/Application Support/Adobe/CameraRaw/CameraProfiles`), Adobe Raw 프로필(`…/CameraRaw/Settings/Adobe/Profiles/Adobe Raw`), 사용자 DCP 폴더를 읽기만 합니다. DCP를 복사하거나 함께 배포하지 않으므로, Camera Raw가 없는 Mac에서는 메뉴가 비어 있고 이미 고른 프로필은 "이 Mac에 없음"으로 표시되며 기본 색상으로 보입니다.
 
 - DCP의 ForwardMatrix·HueSatMap·LookTable·톤 곡선을 macOS RAW 현상의 선형 단계에 근사 적용합니다. 같은 카메라의 Adobe Standard를 기준으로 카메라 색을 되돌리므로, Adobe와 같은 픽셀은 보장하지 않습니다.
+- Adobe Raw 프로필은 같은 카메라의 Adobe Standard 위에 프로필의 색 표와 톤 곡선을 더합니다. Landscape·Vivid·Monochrome에 든 명료도·하이라이트·섀도는 슬라이더 값에 더해 그리며 슬라이더 숫자는 바뀌지 않습니다. Adobe Monochrome은 흑백으로 그립니다.
 - 톤 곡선이 없는 Adobe Standard는 Adobe 기본 곡선 대신 macOS 톤 곡선을 씁니다. Camera 계열은 DCP 곡선을 쓰므로 HDR 하이라이트의 효과가 줄 수 있습니다.
 - 스마트 미리보기(원본 없이 보는 대리본)에는 프로필이 반영되지 않습니다.
 

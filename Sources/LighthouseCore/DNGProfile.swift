@@ -236,10 +236,13 @@ struct DNGProfileTransform: Sendable {
     let hueSatMap: DNGProfile.HueSatTable?
     let exposureScale: Double
     let lookTable: DNGProfile.HueSatTable?
+    /// Adobe Raw 프로필(Adobe Color 등)의 색 표. DCP LookTable 다음에 적용한다.
+    let additionalLook: DNGProfile.HueSatTable?
     let toneCurve: [SIMD2<Double>]?
 
     /// `reference`는 같은 카메라의 Adobe Standard다. macOS 현상 결과를 그 프로필의 색 측정 결과로 보고 카메라 RGB를 되돌린다.
-    init(profile: DNGProfile, reference: DNGProfile?, temperature: Double) {
+    init(profile: DNGProfile, reference: DNGProfile?, temperature: Double,
+         additionalLook: DNGProfile.HueSatTable? = nil) {
         let weight = profile.illuminantWeight(temperature: temperature)
         var difference = Matrix3.identity
         if let forward = profile.forwardMatrix(weight: weight),
@@ -253,6 +256,7 @@ struct DNGProfileTransform: Sendable {
         hueSatMap = profile.hueSatMap(weight: weight)
         exposureScale = pow(2, profile.baselineExposureOffset)
         lookTable = profile.lookTable
+        self.additionalLook = additionalLook
         toneCurve = profile.toneCurve
     }
 
@@ -262,6 +266,7 @@ struct DNGProfileTransform: Sendable {
         if let hueSatMap { value = Self.applying(hueSatMap, to: value) }
         value *= exposureScale
         if let lookTable { value = Self.applying(lookTable, to: value) }
+        if let additionalLook { value = Self.applying(additionalLook, to: value) }
         if let toneCurve { value = Self.applyingTone(toneCurve, to: value) }
         return toSRGB.apply(value)
     }

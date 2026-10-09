@@ -149,7 +149,8 @@ final class CameraProfileTests: XCTestCase {
         try write(makeDCP(standardTags(name: "Camera Vivid")), "My Vivid.dcp", in: user)
         try write(Data("broken".utf8), "broken.dcp", in: user)
 
-        let library = CameraProfileLibrary(adobeDirectory: adobe, userDirectory: user)
+        let library = CameraProfileLibrary(adobeDirectory: adobe, userDirectory: user,
+                                           lookDirectory: root.appendingPathComponent("NoLooks"))
         let profiles = library.profiles(forCamera: "Panasonic DC-S9")
         XCTAssertEqual(profiles.map(\.name), ["Adobe Standard", "Camera Vivid"])
         XCTAssertEqual(profiles.first { $0.name == "Camera Vivid" }?.isUserProfile, true, "사용자 폴더가 앞선다")
@@ -247,11 +248,16 @@ final class CameraProfileTests: XCTestCase {
         """), fileName: "std.xmp")
         XCTAssertEqual(standard.applied(to: EditSettings(), isRAW: true).cameraProfile, "Adobe Standard")
 
-        let look = try LightroomPresetImporter.parse(data: xmp("""
-        <rdf:Description crs:Name="Look" crs:CameraProfile="Adobe Color" crs:Dehaze="5"/>
-        """), fileName: "look.xmp")
-        XCTAssertNil(try XCTUnwrap(look.lightroom).cameraProfile)
-        XCTAssertTrue(try XCTUnwrap(look.lightroom).warnings.contains("지원하지 않아 제외: CameraProfile (Adobe Color)"))
+        let color = try LightroomPresetImporter.parse(data: xmp("""
+        <rdf:Description crs:Name="Color" crs:CameraProfile="Adobe Color"/>
+        """), fileName: "color.xmp")
+        XCTAssertEqual(color.applied(to: EditSettings(), isRAW: true).cameraProfile, "Adobe Color")
+
+        let creative = try LightroomPresetImporter.parse(data: xmp("""
+        <rdf:Description crs:Name="Creative" crs:CameraProfile="Artistic 01" crs:Dehaze="5"/>
+        """), fileName: "creative.xmp")
+        XCTAssertNil(try XCTUnwrap(creative.lightroom).cameraProfile)
+        XCTAssertTrue(try XCTUnwrap(creative.lightroom).warnings.contains("지원하지 않아 제외: CameraProfile (Artistic 01)"))
 
         XCTAssertThrowsError(try LightroomPresetImporter.parse(data: xmp("""
         <rdf:Description crs:Name="Bad" crs:RedHue="101"/>
@@ -281,7 +287,141 @@ final class CameraProfileTests: XCTestCase {
                          - Int(min(mono[index], mono[index + 1], mono[index + 2])))
         }
         XCTAssertLessThanOrEqual(chroma, 2, "Camera Monochrome은 무채색이다")
+        if names.contains("Adobe Color") {
+            let standard = try rgba8(pipeline.render(url: raw, edits: EditSettings(cameraProfile: "Adobe Standard"),
+                                                     maxPixel: 300))
+            XCTAssertNotEqual(try rgba8(pipeline.render(url: raw, edits: EditSettings(cameraProfile: "Adobe Color"),
+                                                        maxPixel: 300)), standard, "Adobe Color는 Adobe Standard 위에 색 표를 더한다")
+            XCTAssertEqual(names.first, "Adobe Color", "Adobe Raw 프로필이 먼저 보인다")
+        }
         XCTAssertEqual(pipeline.cameraProfileNames(for: URL(fileURLWithPath: "/tmp/photo.jpg")), [])
+    }
+
+    // MARK: Adobe Raw 프로필
+
+    func testDecodesAdobeLookTableAndProfile() throws {
+        let deltas: [Float] = (0..<(3 * 4 * 2)).flatMap { index -> [Float] in [Float(index % 5), 1.05, 0.98] }
+        let encoded = encodeTable(hue: 3, saturation: 4, value: 2, deltas: deltas, encoding: 0)
+        let table = try AdobeLookProfile.decodeTable(encoded)
+        XCTAssertEqual([table.hueDivisions, table.saturationDivisions, table.valueDivisions], [3, 4, 2])
+        XCTAssertEqual(table.deltas, deltas)
+        XCTAssertFalse(table.isSRGBEncoded)
+
+        let look = try AdobeLookProfile.parse(lookXMP(name: "Adobe Vivid", table: encoded,
+                                                      extra: #"crs:Clarity2012="+10" crs:Shadows2012="-5""#))
+        XCTAssertEqual(look.name, "Adobe Vivid")
+        XCTAssertEqual(look.baseProfile, "Adobe Standard")
+        XCTAssertEqual(look.clarity, 10)
+        XCTAssertEqual(look.shadows, -5)
+        XCTAssertFalse(look.isMonochrome)
+        XCTAssertEqual(look.curves.master.map(\.y), [0, 16 / 255, 1])
+        XCTAssertEqual(look.curves.red, ToneCurves.identityPoints)
+        XCTAssertTrue(try AdobeLookProfile.parse(lookXMP(name: "Adobe Monochrome", table: encoded,
+                                                         extra: #"crs:ConvertToGrayscale="True""#)).isMonochrome)
+    }
+
+    func testRejectsBrokenAdobeLookTables() throws {
+        let valid = encodeTable(hue: 1, saturation: 2, value: 1, deltas: [0, 1, 1, 0, 1, 1], encoding: 0)
+        XCTAssertThrowsError(try AdobeLookProfile.decodeTable(valid + "~")) {
+            XCTAssertEqual($0 as? AdobeLookProfileError, .invalidTable)
+        }
+        XCTAssertThrowsError(try AdobeLookProfile.decodeTable(String(valid.dropLast(7)))) {
+            XCTAssertEqual($0 as? AdobeLookProfileError, .invalidTable)
+        }
+        XCTAssertThrowsError(try AdobeLookProfile.decodeTable(
+            encodeTable(hue: 1, saturation: 2, value: 1, deltas: [0, 1, 1, 0, 1, 1], encoding: 0, kind: 2))) {
+            XCTAssertEqual($0 as? AdobeLookProfileError, .unsupportedTable)
+        }
+        XCTAssertThrowsError(try AdobeLookProfile.decodeTable(
+            encodeTable(hue: 2, saturation: 2, value: 1, deltas: [0, 1, 1, 0, 1, 1], encoding: 0))) {
+            XCTAssertEqual($0 as? AdobeLookProfileError, .invalidTable, "칸 수보다 값이 적다")
+        }
+        let preset = Data(String(decoding: lookXMP(name: "Not a look", table: valid, extra: ""), as: UTF8.self)
+            .replacingOccurrences(of: #"crs:PresetType="Look""#, with: #"crs:PresetType="Normal""#).utf8)
+        XCTAssertThrowsError(try AdobeLookProfile.parse(preset)) { XCTAssertEqual($0 as? AdobeLookProfileError, .notLook) }
+    }
+
+    func testLibraryListsAdobeRawProfilesOnlyWithAdobeStandard() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let adobe = root.appendingPathComponent("Adobe", isDirectory: true)
+        let looks = root.appendingPathComponent("Looks", isDirectory: true)
+        try FileManager.default.createDirectory(at: adobe.appendingPathComponent("Adobe Standard"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: adobe.appendingPathComponent("Camera/Panasonic DC-S9"),
+                                                withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: looks, withIntermediateDirectories: true)
+        let table = encodeTable(hue: 1, saturation: 2, value: 1, deltas: [0, 1, 1, 0, 1, 1], encoding: 0)
+        try lookXMP(name: "Adobe Color", table: table, extra: "").write(to: looks.appendingPathComponent("Adobe Color.xmp"))
+        try makeDCP(standardTags(name: "Camera Vivid"))
+            .write(to: adobe.appendingPathComponent("Camera/Panasonic DC-S9/Panasonic DC-S9 Camera Vivid.dcp"))
+        let user = root.appendingPathComponent("User", isDirectory: true)
+        var library = CameraProfileLibrary(adobeDirectory: adobe, userDirectory: user, lookDirectory: looks)
+        XCTAssertEqual(library.profiles(forCamera: "Panasonic DC-S9").map(\.name), ["Camera Vivid"],
+                       "기준 Adobe Standard가 없으면 Adobe Raw 프로필을 보이지 않는다")
+
+        try makeDCP(standardTags(name: "Adobe Standard"))
+            .write(to: adobe.appendingPathComponent("Adobe Standard/Panasonic DC-S9 Adobe Standard.dcp"))
+        library = CameraProfileLibrary(adobeDirectory: adobe, userDirectory: user, lookDirectory: looks)
+        let profiles = library.profiles(forCamera: "Panasonic DC-S9")
+        XCTAssertEqual(profiles.map(\.name), ["Adobe Color", "Adobe Standard", "Camera Vivid"])
+        XCTAssertEqual(profiles.first?.isLook, true)
+        XCTAssertTrue(library.identity(name: "Adobe Color", camera: "Panasonic DC-S9").contains("Adobe Standard.dcp"),
+                      "캐시 키에 기준 DCP도 넣는다")
+    }
+
+    func testLookAdjustmentsAddToUserValuesAndClamp() {
+        let look = AdobeLookProfile(name: "Adobe Landscape", baseProfile: "Adobe Standard",
+                                    lookTable: DNGProfile.HueSatTable(hueDivisions: 1, saturationDivisions: 2, valueDivisions: 1,
+                                                                      deltas: [0, 1, 1, 0, 1, 1], isSRGBEncoded: false),
+                                    curves: ToneCurves(), clarity: 10, highlights: -12, shadows: 12, isMonochrome: true)
+        let edits = EditSettings(highlights: 0.05, shadows: 0.95, clarity: 0.2)
+        let adjusted = ImagePipeline.applyingLookAdjustments(look, to: edits)
+        XCTAssertEqual(adjusted.clarity, 0.3, accuracy: 1e-12)
+        XCTAssertEqual(adjusted.highlights, 0, accuracy: 1e-12, "범위 아래로 내리지 않는다")
+        XCTAssertEqual(adjusted.shadows, 1, accuracy: 1e-12)
+        XCTAssertEqual(adjusted.colorProfile, .monochrome)
+        XCTAssertEqual(ImagePipeline.applyingLookAdjustments(nil, to: edits), edits)
+    }
+
+    /// DNG SDK와 같은 방식으로 LookTable을 문자열로 만든다(테스트용).
+    private func encodeTable(hue: Int, saturation: Int, value: Int, deltas: [Float], encoding: UInt32,
+                             kind: UInt32 = 0) -> String {
+        func le(_ v: UInt32) -> [UInt8] { (0..<4).map { UInt8((v >> (8 * UInt32($0))) & 0xFF) } }
+        var raw = le(kind) + le(1) + le(UInt32(hue)) + le(UInt32(saturation)) + le(UInt32(value))
+        raw += deltas.flatMap { le($0.bitPattern) } + le(encoding)
+        let deflate = [UInt8](try! (Data(raw) as NSData).compressed(using: .zlib) as Data)
+        var a: UInt32 = 1, b: UInt32 = 0
+        for byte in raw { a = (a + UInt32(byte)) % 65521; b = (b + a) % 65521 }
+        let adler = (b << 16) | a
+        let block = le(UInt32(raw.count)) + [0x78, 0x9C] + deflate
+            + [UInt8(adler >> 24), UInt8((adler >> 16) & 0xFF), UInt8((adler >> 8) & 0xFF), UInt8(adler & 0xFF)]
+        let alphabet = AdobeLookProfile.encodingAlphabet
+        var text = ""
+        for start in stride(from: 0, to: block.count, by: 4) {
+            let bytes = Array(block[start..<min(start + 4, block.count)])
+            var number = bytes.enumerated().reduce(UInt64(0)) { $0 | UInt64($1.element) << (8 * UInt64($1.offset)) }
+            for _ in 0...bytes.count {
+                text.append(alphabet[Int(number % 85)])
+                number /= 85
+            }
+        }
+        return text
+    }
+
+    private func lookXMP(name: String, table: String, extra: String) -> Data {
+        let escaped = table.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+        return Data("""
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+         <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+          <rdf:Description rdf:about="" xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+           crs:PresetType="Look" crs:CameraProfile="Adobe Standard" crs:LookTable="ABC" crs:Table_ABC="\(escaped)" \(extra)>
+           <crs:Name><rdf:Alt><rdf:li xml:lang="x-default">\(name)</rdf:li></rdf:Alt></crs:Name>
+           <crs:ToneCurvePV2012><rdf:Seq><rdf:li>0, 0</rdf:li><rdf:li>22, 16</rdf:li><rdf:li>255, 255</rdf:li></rdf:Seq></crs:ToneCurvePV2012>
+          </rdf:Description>
+         </rdf:RDF>
+        </x:xmpmeta>
+        """.utf8)
     }
 
     // MARK: 도우미

@@ -144,10 +144,10 @@ final class LightroomPresetTests: XCTestCase {
         XCTAssertTrue(payload.warnings.contains(where: { $0.contains("기본 흑백을 우선 적용") }))
 
         let unknown = try LightroomPresetImporter.parse(data: xmp("""
-        <rdf:Description crs:CameraProfile="Adobe Color" crs:ConvertToGrayscale="False"/>
+        <rdf:Description crs:CameraProfile="Artistic 01" crs:ConvertToGrayscale="False"/>
         """), fileName: "unknown.xmp")
         XCTAssertEqual(unknown.lightroom?.colorProfile, .color)
-        XCTAssertTrue(unknown.lightroom?.warnings.contains(where: { $0.contains("Adobe Color") }) == true)
+        XCTAssertTrue(unknown.lightroom?.warnings.contains(where: { $0.contains("Artistic 01") }) == true)
         XCTAssertTrue(unknown.lightroom?.warnings.contains(where: { $0.contains("기본 색상을 우선 적용") }) == true)
 
         let template = Data("""

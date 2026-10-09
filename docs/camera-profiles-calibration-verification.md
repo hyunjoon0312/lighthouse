@@ -44,8 +44,32 @@
 - release `dist/Lighthouse.app`을 격리된 임시 `LIGHTHOUSE_DATA_DIR`로 실행해 창(1440×900)이 뜨는 것을 확인했다. 실행 전 다른 Lighthouse 프로세스는 없었고, 띄운 PID 53391만 종료했다.
 - 접근성 권한이 없어 실제 창에서 메뉴·슬라이더를 직접 조작하는 검사는 하지 않았다(not_run). 같은 흐름은 앱 테스트로 확인했다.
 
+## Adobe Raw 프로필(v1.1)
+
+2026-10-09 추가. 설치본 6종의 표를 Python으로 먼저 풀어 구조(36×16×16, 선형 인코딩, 종류 0)를 확인한 뒤 구현했다.
+
+| 범위 | 결과 |
+|---|---|
+| `swift test --filter CameraProfileTests` | 18개 통과(표 인코딩 왕복·거부, Look XMP 읽기, 기준 DCP 조건, 조정값 더하기, 실제 S9) |
+| 실제 S9 `probe`(`probe-look.log`) | `ALL_OK`, Adobe Color XMP SHA `8aff634b…` 렌더 전후 같음 |
+
+| 프로필 | 평균 RGB | 채도 | 밝기 표준편차 |
+|---|---|---|---|
+| Adobe Standard | 93.1 88.9 86.2 | 15.27 | 62.88 |
+| Adobe Color | 92.1 87.1 84.0 | 16.56 | 66.12 |
+| Adobe Vivid | 89.9 84.3 81.0 | 17.97 | 68.69 |
+| Adobe Monochrome | 86.8 86.8 86.8 | 0.00 | 66.66 |
+| Adobe Neutral | 95.2 91.1 88.4 | 15.41 | 54.85 |
+| Adobe Landscape | 93.0 86.7 83.4 | 20.55 | 63.93 |
+| Adobe Portrait | 92.5 88.2 85.5 | 15.24 | 63.83 |
+
+- Adobe Color는 Adobe Standard보다 대비·채도가 조금 높고, Vivid는 더 진하며, Neutral은 대비가 낮고, Monochrome은 무채색이다. JPEG를 눈으로 봐도 자연스러웠다.
+- 디버그 빌드 기준 처음 프로필 목록을 만들 때 1.7초(DCP 15개·Look 6개 읽기), 다시 부를 때 0초다. Adobe Color 첫 렌더 1.7초, 캐시 뒤 0.5초(300px).
+- 전체 `swift test`: 400개 중 7 skip, 실패는 `PreviewResponsivenessTests.testRAWDragShowsFramesAndSettlesExactly` 1건(드래그 중 프레임 0장). 같은 시각 load가 15~41이었고, 이번 변경을 잠시 빼고(`git stash`) 이전 커밋으로 같은 검사를 3번 돌려도 2번 실패했다. 부하에 흔들리는 검사로 보고 고치지 않았다. release 빌드·codesign은 통과했다.
+- 기존 테스트의 "지원하지 않는 프로필" 예를 Adobe Color에서 Artistic 01로 바꿨다. 기존 찾기 테스트는 실제 설치 폴더를 읽지 않도록 빈 Look 폴더를 넘긴다.
+
 ## 검증하지 않은 것
 
-- Adobe Camera Raw/Lightroom 렌더와의 비교. 비교 자료가 없다.
+- Adobe Camera Raw/Lightroom 렌더와의 비교. 비교 자료가 없다. Adobe Raw 프로필의 곡선을 sRGB 값에 거는 것도 Adobe 처리 공간과 다를 수 있다.
 - 다른 제조사 카메라의 DCP 찾기(이름 맞추기 규칙은 단위 테스트로만 확인했다).
 - Camera 계열 프로필에서 HDR 하이라이트의 효과.

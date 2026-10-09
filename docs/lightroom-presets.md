@@ -28,15 +28,15 @@ Lightroom과 Lighthouse는 현상 엔진이 다릅니다. 같은 값이어도 �
 | 기본 프로필·흑백 | Default Color/Color → 기본 색상, Default Monochrome/Monochrome 및 ConvertToGrayscale → 색상/흑백 선택 |
 | 컬러 그레이딩·분할 톤 | 그림자·중간톤·하이라이트·전체의 색조·채도·명도, 혼합, 균형. 옛 분할 톤 키도 같은 값으로 읽음 |
 | 텍스처·디헤이즈 | -100…100을 Lighthouse 텍스처·디헤이즈로 근사 변환 |
-| 카메라 프로필 | Adobe Standard·Camera … 이름을 이 Mac에 설치된 DCP로 연결(RAW만) |
+| 카메라 프로필 | Adobe Color 등 Adobe Raw 프로필 6종, Adobe Standard, Camera … 이름을 이 Mac에 설치된 프로필로 연결(RAW만) |
 | 캘리브레이션 | 그림자 틴트, 빨강·초록·파랑 원색의 색조·채도 |
 | 화이트밸런스 | RAW: 촬영 시·이름 있는 값·켈빈/틴트를 기준값으로. JPEG 등: 증분 색온도(×25 K)·틴트. 자동은 적용하지 않음 |
 
-현재 흑백 믹서, 렌즈 보정, Adobe Color·Vivid 같은 Look 기반 Adobe Raw 프로필과 크리에이티브 프로필, Adobe AI 마스크는 변환하지 않습니다. 이 설정이 포함되면 제외 항목으로 안내합니다.
+현재 흑백 믹서, 렌즈 보정, 크리에이티브 프로필(Artistic·Vintage 등), Adobe AI 마스크는 변환하지 않습니다. 이 설정이 포함되면 제외 항목으로 안내합니다.
 
 화이트밸런스는 사진마다 적용 방식이 다릅니다. Lightroom처럼 RAW에는 켈빈 값, JPEG·HEIC에는 증분 값만 씁니다. 그래서 RAW와 JPEG를 함께 골라 적용하면 두 사진이 서로 다른 값을 받습니다. 켈빈 값은 macOS RAW 현상의 색온도 척도로 그대로 옮기며, Adobe와 색이 다를 수 있다는 안내를 붙입니다. 부분 보정·복구·크롭·LUT도 Lightroom 프리셋에서 가져오지 않습니다.
 
-기본 프로필은 Lighthouse의 색상/흑백 처리로 연결합니다. RAW의 기본 색상은 macOS 현상 엔진을 따릅니다. `Adobe Standard`와 `Camera Vivid` 같은 Camera Matching 이름은 Camera Raw가 이 Mac에 설치한 DCP 파일을 찾아 근사 적용합니다. DCP가 없는 Mac에서는 기본 색상으로 보입니다. Adobe Color 같은 Look 기반 프로필은 재현하지 않으며, 매핑한 프로필에도 엔진 차이 안내를 표시합니다.
+기본 프로필은 Lighthouse의 색상/흑백 처리로 연결합니다. RAW의 기본 색상은 macOS 현상 엔진을 따릅니다. `Adobe Color` 같은 Adobe Raw 프로필, `Adobe Standard`, `Camera Vivid` 같은 Camera Matching 이름은 Camera Raw가 이 Mac에 설치한 프로필 파일을 찾아 근사 적용합니다. 프로필이 없는 Mac에서는 기본 색상으로 보입니다. 크리에이티브 프로필은 재현하지 않으며, 매핑한 프로필에도 엔진 차이 안내를 표시합니다.
 
 이전 버전에서 가져온 프리셋은 제외된 숫자를 저장하지 않았습니다. **새로 지원하는 항목을 적용하려면 원본 XMP/lrtemplate을 다시 가져오세요.** 같은 이름은 중복을 피하도록 새 이름으로 보관됩니다.
 

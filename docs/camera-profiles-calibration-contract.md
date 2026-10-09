@@ -1,4 +1,4 @@
-# Adobe 카메라 프로필(DCP)·캘리브레이션 계약 v1
+# Adobe 카메라 프로필(DCP)·캘리브레이션 계약 v1.1
 
 2026-10-09 사용자 요청("나머지도 다 구현해줘")에 따른 세 번째 하위 프로젝트다. 처음에는 가능성 확인(스파이크)부터 하기로 했고, 스파이크 결과를 바탕으로 이 세션의 Claude가 범위를 정했다. 성공 기준은 앞의 두 하위 프로젝트와 같다: 같은 프로필·값이 같은 방향과 역할로 보인다. Adobe 현상 엔진과 같은 픽셀은 보장하지 않는다.
 
@@ -13,7 +13,8 @@
 
 - **DCP 프로필(RAW만):** 설치된 Adobe DCP와 사용자 DCP 폴더(`~/Library/Application Support/Adobe/CameraRaw/CameraProfiles`)의 프로필을 사진 카메라에 맞춰 고른다. Lighthouse는 DCP를 복사하거나 배포하지 않고, 사용자의 Mac에 있는 파일을 읽기만 한다.
 - **캘리브레이션(모든 사진):** Lightroom의 그림자 틴트, 빨강·초록·파랑 원색의 색조·채도.
-- 범위 밖: Adobe Color·Vivid 같은 XMP 기반 "Adobe Raw" 프로필(Look), 크리에이티브 프로필, 프로필 양 슬라이더, DCP 없이 Adobe 기본 톤 곡선을 재현하는 것.
+- **Adobe Raw 프로필(v1.1, RAW만):** Adobe Color·Landscape·Monochrome·Neutral·Portrait·Vivid. 아래 절을 따른다.
+- 범위 밖: 크리에이티브 프로필(RGBTable), 프로필 양 슬라이더, DCP 없이 Adobe 기본 톤 곡선을 재현하는 것.
 
 ## 모델과 저장
 
@@ -59,6 +60,18 @@
 - `CameraProfile`: "Adobe Standard"와 "Camera …"는 `cameraProfile`에 그 이름을 넣는다(색상 프로필은 기본 색상). 기존 Default Color/Monochrome 매핑은 그대로다. "Adobe Color" 등 Look 기반 이름은 지금처럼 제외 경고를 낸다. DCP 매핑에는 "카메라 프로필은 이 Mac에 설치된 DCP로 근사하며 Adobe 결과와 다를 수 있습니다." 경고를 붙인다.
 - `ShadowTint`, `RedHue`, `RedSaturation`, `GreenHue`, `GreenSaturation`, `BlueHue`, `BlueSaturation`: -100…100, ÷100. 하나라도 있으면 "캘리브레이션은 Lighthouse 수식으로 근사하며 Adobe 결과와 다를 수 있습니다." 경고.
 
+## Adobe Raw 프로필(v1.1)
+
+2026-10-09 사용자 요청("Adobe Color 프로필도 구현해줘")으로 더했다.
+
+- 위치: `/Library/Application Support/Adobe/CameraRaw/Settings/Adobe/Profiles/Adobe Raw/*.xmp`(Camera Raw 설치본). 읽기만 한다. 파일은 4 MiB 이하, DTD·entity가 있으면 읽지 않는다.
+- 구조(설치본 6종 확인): `PresetType="Look"`, 기준 프로필 `CameraProfile="Adobe Standard"`, `LookTable`이 가리키는 `Table_<MD5>` 문자열, `ToneCurvePV2012`(+R/G/B), 일부는 `Clarity2012`·`Highlights2012`·`Shadows2012`, Monochrome은 `ConvertToGrayscale="True"`.
+- 표 문자열: DNG SDK의 85문자 인코딩(4바이트를 리틀 엔디언 정수로 보고 85진수 5자, 낮은 자리부터) → 앞 4바이트는 압축 전 길이 → zlib. 풀면 리틀 엔디언 `종류(0=LookTable), 버전, 색조·채도·명도 칸 수, (색조 이동·채도·명도) float × 칸, 인코딩`이다. 종류가 0이 아니거나 길이가 맞지 않으면 그 프로필은 쓰지 않는다.
+- 렌더: 사진 카메라의 Adobe Standard DCP 변환 뒤(DCP LookTable 다음)에 이 표를 같은 보간으로 적용해 같은 선형 단계 큐브에 넣는다. Adobe Standard DCP를 찾지 못하면 프로필 전체를 찾지 못한 것으로 보고 macOS 기본으로 그린다.
+- 프로필의 톤 곡선은 현상 직후 sRGB 인코딩 값에 Lighthouse 곡선으로 적용한다(사용자 곡선과 별도). 명료도·하이라이트·섀도는 사용자 값에 더하고(Adobe 단위 ÷100) 범위로 자른다. `ConvertToGrayscale`이면 흑백으로 그린다. 사용자 슬라이더 값은 바꾸지 않는다.
+- 메뉴: Adobe Raw 프로필(이름순) → Adobe Standard → Camera 계열. 프리셋의 `CameraProfile`이 이 여섯 이름이면 같은 이름으로 연결한다.
+- 현상 캐시 키에 Look 파일(경로·수정 시각)과 기준 DCP를 넣는다.
+
 ## 검증
 
 - DCP 파서: 테스트 안에서 만든 작은 DCP(일반 TIFF·`0x4352` 매직, 리틀·빅 엔디언), 잘못된 개수·크기·잘린 파일 거부.
@@ -66,4 +79,5 @@
 - 찾기: 임시 폴더의 Adobe·사용자 구조에서 카메라 이름 일치, 사용자 폴더 우선.
 - 캘리브레이션: 0이면 단위 행렬, 흰색 보존, 색조 방향, 채도 방향, 그림자 틴트 방향, 미리보기·내보내기 일치.
 - 가져오기·앱: 키 범위, CameraProfile 매핑과 경고, 메뉴 선택 1단계 실행 취소.
+- Adobe Raw: 표 인코딩 왕복(테스트에서 만든 표), 잘못된 문자·길이·종류 거부, 곡선·조정값·흑백 읽기, 기준 DCP 없으면 사용 불가, 실제 S9에서 Adobe Color가 Adobe Standard와 다르고 Adobe Monochrome이 무채색.
 - 실제 S9 RW2와 설치된 DCP로 macOS 기본·Adobe Standard·Camera Vivid·Camera Monochrome·Camera Flat을 렌더해 방향(Vivid 채도↑, Monochrome 무채색, Flat 대비↓)을 보고 원본 SHA를 확인한다. DCP 파일은 Git에 넣지 않는다.
