@@ -59,6 +59,7 @@ struct AdvancedColorControls: View {
                 .disabled(rangeAdjustment == ColorRangeAdjustment(band: band))
                 .accessibilityLabel("\(band.koreanName) HSL 초기화")
             ColorGradingControls(edits: edits)
+            CalibrationControls(edits: edits)
 
             Divider()
             Group {

@@ -39,6 +39,33 @@ enum CoreImageKernels {
         }
         """)
 
+    /// 0…range의 선형 값을 `log2(1 + gain·x) / log2(1 + gain·range)`로 0…1에 접는다(DCP 큐브 입력). 음수는 0이다.
+    static let logShape = compile("""
+        [[stitchable]] float4 lighthouseLogShape(coreimage::sample_t pixel, float gain, float range) {
+            float3 x = max(pixel.rgb, float3(0.0));
+            return float4(min(log2(1.0 + gain * x) / log2(1.0 + gain * range), float3(1.0)), pixel.a);
+        }
+        """)
+
+    /// `logShape`의 역(DCP 큐브 출력).
+    static let logUnshape = compile("""
+        [[stitchable]] float4 lighthouseLogUnshape(coreimage::sample_t pixel, float gain, float range) {
+            return float4((exp2(pixel.rgb * log2(1.0 + gain * range)) - 1.0) / gain, pixel.a);
+        }
+        """)
+
+    /// 캘리브레이션 그림자 틴트. 밝기 0.25 아래에 밝기 0인 마젠타(+)·초록(-) 방향을 더한다. 선형 값이며 틴트로 0 아래로 내리지 않는다.
+    static let shadowTint = compile("""
+        [[stitchable]] float4 lighthouseShadowTint(coreimage::sample_t pixel, float amount) {
+            float y = dot(pixel.rgb, float3(0.2126, 0.7152, 0.0722));
+            float t = clamp(y / 0.25, 0.0, 1.0);
+            float weight = 4.0 * clamp(y, 0.0, 0.25) * (1.0 - t) * (1.0 - t);
+            float3 direction = float3(0.7152, -0.2848, 0.7152);
+            float3 changed = pixel.rgb + 0.2 * amount * weight * direction;
+            return float4(max(changed, min(pixel.rgb, float3(0.0))), pixel.a);
+        }
+        """)
+
     /// sRGB 값에 0과 1을 그대로 두는 3차 S자 곡선을 건다(대비). 가운데(0.5)의 기울기는 `1 + strength / 4`이고,
     /// strength가 -2…2(대비 0.5…1.5)이면 곡선이 단조 증가한다. 0…1 밖의 값은 바꾸지 않는다.
     static let contrast = compile("""

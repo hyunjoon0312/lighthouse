@@ -29,6 +29,8 @@ public extension EditSettings {
             ("명료도", clarity != before.clarity),
             ("디헤이즈", dehaze != before.dehaze),
             ("화이트밸런스", whiteBalance != before.whiteBalance),
+            ("카메라 프로필", cameraProfile != before.cameraProfile),
+            ("캘리브레이션", calibration != before.calibration),
             ("색온도", temperatureShift != before.temperatureShift),
             ("틴트", tintShift != before.tintShift),
             ("생동감", vibrance != before.vibrance),

@@ -176,8 +176,10 @@ public enum LightroomPresetImporter {
             scalars[key] = try validatedScalar(raw, key: key)
         }
         var colorProfile: PhotoColorProfile?
+        var cameraProfile: String?
         if let raw = rawScalars["CameraProfile"] {
-            switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            switch trimmed.lowercased() {
             case "default color", "color":
                 colorProfile = .color
                 warnings.append("CameraProfile을 Lighthouse 기본 색상으로 매핑; Adobe/카메라 전용 프로필과 결과가 다를 수 있습니다.")
@@ -185,7 +187,13 @@ public enum LightroomPresetImporter {
                 colorProfile = .monochrome
                 warnings.append("CameraProfile을 Lighthouse 기본 흑백으로 매핑; Adobe/카메라 전용 프로필과 결과가 다를 수 있습니다.")
             default:
-                warnings.append("지원하지 않아 제외: CameraProfile (\(raw))")
+                if LightroomPresetPayload.isDNGProfileName(trimmed), trimmed.count <= 128 {
+                    cameraProfile = trimmed
+                    colorProfile = .color
+                    warnings.append("카메라 프로필은 이 Mac에 설치된 DCP로 근사하며 Adobe 결과와 다를 수 있습니다.")
+                } else {
+                    warnings.append("지원하지 않아 제외: CameraProfile (\(raw))")
+                }
             }
         }
         var whiteBalance: String?
@@ -225,6 +233,9 @@ public enum LightroomPresetImporter {
         if let exposure = scalars["Exposure2012"] ?? scalars["Exposure"], !( -4...4).contains(exposure) {
             warnings.append("노출을 Lighthouse 범위 -4…4로 제한")
         }
+        if scalars.keys.contains(where: { key in LightroomPresetPayload.calibrationKeys.contains { $0.0 == key } }) {
+            warnings.append("캘리브레이션은 Lighthouse 수식으로 근사하며 Adobe 결과와 다를 수 있습니다.")
+        }
         if scalars.keys.contains(where: LightroomPresetPayload.colorGradingKeys.contains) {
             warnings.append("컬러 그레이딩은 Lighthouse 수식으로 근사하며 Adobe 결과와 다를 수 있습니다.")
         }
@@ -233,7 +244,7 @@ public enum LightroomPresetImporter {
         for warning in warnings where !uniqueWarnings.contains(warning) { uniqueWarnings.append(warning) }
         let payload = LightroomPresetPayload(format: format, scalars: scalars, curves: curves,
                                               warnings: uniqueWarnings, colorProfile: colorProfile,
-                                              whiteBalance: whiteBalance)
+                                              whiteBalance: whiteBalance, cameraProfile: cameraProfile)
         do { try payload.validate() } catch LightroomPresetPayloadError.emptySettings {
             throw LightroomPresetImportError.emptyPreset
         }

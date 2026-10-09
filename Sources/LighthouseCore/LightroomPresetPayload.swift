@@ -8,26 +8,33 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
     public var colorProfile: PhotoColorProfile?
     /// Adobe `WhiteBalance` 이름(`whiteBalanceNames` 중 하나). 없으면 화이트밸런스 방식을 바꾸지 않는다.
     public var whiteBalance: String?
+    /// DCP 프로필 이름("Adobe Standard", "Camera …"). 없으면 카메라 프로필을 바꾸지 않는다.
+    public var cameraProfile: String?
 
     public init(format: String, scalars: [String: Double], curves: [String: [CurvePoint]], warnings: [String],
-                colorProfile: PhotoColorProfile? = nil, whiteBalance: String? = nil) {
+                colorProfile: PhotoColorProfile? = nil, whiteBalance: String? = nil, cameraProfile: String? = nil) {
         self.format = format
         self.scalars = scalars
         self.curves = curves
         self.warnings = warnings
         self.colorProfile = colorProfile
         self.whiteBalance = whiteBalance
+        self.cameraProfile = cameraProfile
     }
 
     public func validate() throws {
         guard format == "xmp" || format == "lrtemplate" else {
             throw LightroomPresetPayloadError.invalidFormat(format)
         }
-        guard !scalars.isEmpty || !curves.isEmpty || colorProfile != nil || whiteBalance != nil else {
+        guard !scalars.isEmpty || !curves.isEmpty || colorProfile != nil || whiteBalance != nil
+                || cameraProfile != nil else {
             throw LightroomPresetPayloadError.emptySettings
         }
         if let whiteBalance, !Self.whiteBalanceNames.contains(whiteBalance) {
             throw LightroomPresetPayloadError.invalidScalar("WhiteBalance")
+        }
+        if let cameraProfile, !Self.isDNGProfileName(cameraProfile) || cameraProfile.count > 128 {
+            throw LightroomPresetPayloadError.invalidScalar("CameraProfile")
         }
         for (key, value) in scalars {
             guard let range = Self.scalarRanges[key] else {
@@ -58,7 +65,7 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case format, scalars, curves, warnings, colorProfile, whiteBalance
+        case format, scalars, curves, warnings, colorProfile, whiteBalance, cameraProfile
     }
 
     public init(from decoder: Decoder) throws {
@@ -71,6 +78,8 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
             ? container.decode(PhotoColorProfile.self, forKey: .colorProfile) : nil
         whiteBalance = container.contains(.whiteBalance)
             ? try container.decode(String.self, forKey: .whiteBalance) : nil
+        cameraProfile = container.contains(.cameraProfile)
+            ? try container.decode(String.self, forKey: .cameraProfile) : nil
         do {
             try validate()
         } catch {
@@ -90,6 +99,7 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
         try container.encode(warnings, forKey: .warnings)
         try container.encodeIfPresent(colorProfile, forKey: .colorProfile)
         try container.encodeIfPresent(whiteBalance, forKey: .whiteBalance)
+        try container.encodeIfPresent(cameraProfile, forKey: .cameraProfile)
     }
 
     /// `isRAW`에 따라 화이트밸런스를 다르게 적용한다. RAW는 켈빈 기준값, 다른 파일은 Incremental 이동량을 쓴다.
@@ -98,6 +108,10 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
         applyWhiteBalance(to: &result, isRAW: isRAW)
         if let value = scalars["Texture"] { result.texture = value / 100 }
         if let value = scalars["Dehaze"] { result.dehaze = value / 100 }
+        if let cameraProfile { result.cameraProfile = cameraProfile }
+        for (key, path) in Self.calibrationKeys {
+            if let value = scalars[key] { result.calibration[keyPath: path] = value / 100 }
+        }
         if let value = preferred(modern: "Exposure2012", legacy: "Exposure") {
             result.exposure = min(4, max(-4, value))
         }
@@ -197,6 +211,17 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
         "Daylight": .daylight, "Cloudy": .cloudy, "Shade": .shade, "Tungsten": .tungsten,
         "Fluorescent": .fluorescent, "Flash": .flash,
     ]
+    /// Lighthouse가 설치된 DCP로 찾는 프로필 이름. Adobe Color 같은 Look 기반 프로필은 아니다.
+    static func isDNGProfileName(_ name: String) -> Bool {
+        name == "Adobe Standard" || (name.hasPrefix("Camera ") && name.count > 7)
+    }
+
+    static var calibrationKeys: [(String, WritableKeyPath<CalibrationSettings, Double>)] {
+        [("ShadowTint", \.shadowTint), ("RedHue", \.redHue), ("RedSaturation", \.redSaturation),
+         ("GreenHue", \.greenHue), ("GreenSaturation", \.greenSaturation),
+         ("BlueHue", \.blueHue), ("BlueSaturation", \.blueSaturation)]
+    }
+
     static let whiteBalanceKeys: Set<String> = ["Temperature", "Tint", "IncrementalTemperature", "IncrementalTint"]
 
     private func preferred(modern: String, legacy: String) -> Double? {
@@ -230,6 +255,8 @@ public struct LightroomPresetPayload: Codable, Equatable, Sendable {
             "Texture": -100...100, "Dehaze": -100...100,
             "Temperature": WhiteBalanceBase.temperatureRange, "Tint": WhiteBalanceBase.tintRange,
             "IncrementalTemperature": -100...100, "IncrementalTint": -100...100,
+            "ShadowTint": -100...100, "RedHue": -100...100, "RedSaturation": -100...100,
+            "GreenHue": -100...100, "GreenSaturation": -100...100, "BlueHue": -100...100, "BlueSaturation": -100...100,
         ]
         for band in ColorBand.allCases {
             let suffix = band.adobeSuffix

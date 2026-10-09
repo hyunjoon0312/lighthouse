@@ -173,6 +173,7 @@ struct InspectorView: View {
             .pickerStyle(.segmented)
             .help("기본 색상은 macOS RAW 현상을 기준으로 합니다. Adobe DCP나 카메라 전용 프로필과 색이 다를 수 있습니다.")
             .accessibilityLabel("기본 색상 프로필")
+            if photo.isRAW { cameraProfilePicker }
             if photo.isRAW { whiteBalancePicker }
             adjustment("색온도 이동", \.temperatureShift, range: -2500...2500, format: "%.0f K")
             adjustment("틴트", \.tintShift, range: -100...100, scale: 1)
@@ -687,6 +688,28 @@ struct InspectorView: View {
                          set: { newValue in change(continuous: true) { $0[keyPath: keyPath] = newValue } },
                          end: { model.endContinuousEdit() },
                          reset: { change { $0[keyPath: keyPath] = EditSettings.neutral[keyPath: keyPath] } })
+    }
+
+    /// RAW에 쓸 DCP 프로필. 이 Mac에 설치된 Adobe·사용자 DCP 중 이 카메라에 맞는 것을 보인다.
+    @ViewBuilder private var cameraProfilePicker: some View {
+        let names = model.pipeline.cameraProfileNames(for: photo.url)
+        let missing = edits.cameraProfile.flatMap { names.contains($0) ? nil : $0 }
+        Picker("카메라 프로필", selection: Binding<String?>(
+            get: { edits.cameraProfile },
+            set: { name in change { $0.cameraProfile = name } }
+        )) {
+            Text("macOS 기본").tag(String?.none)
+            ForEach(names, id: \.self) { Text($0).tag(Optional($0)) }
+            if let missing { Text("\(missing) (이 Mac에 없음)").tag(Optional(missing)) }
+        }
+        .pickerStyle(.menu)
+        .font(.caption)
+        .help("Camera Raw가 설치한 DCP를 읽어 Adobe 프로필의 색을 근사합니다. Adobe 결과와 다를 수 있습니다.")
+        .accessibilityLabel("카메라 프로필")
+        if missing != nil {
+            Text("이 Mac에서 프로필을 찾을 수 없어 기본 색상으로 보입니다.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
     }
 
     /// RAW 화이트밸런스 기준값. 목록에 없는 값(프리셋에서 가져온 켈빈)은 사용자 지정으로 보인다.

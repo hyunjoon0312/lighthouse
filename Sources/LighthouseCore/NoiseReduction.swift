@@ -96,6 +96,7 @@ final class NoiseReductionService: @unchecked Sendable {
                 components += [String(describing: edits.rawDevelop), String(edits.exposure),
                                String(edits.temperatureShift), String(edits.tintShift)]
                 if let whiteBalance = edits.whiteBalance { components.append(String(describing: whiteBalance)) }
+                if let name = edits.cameraProfile { components.append("profile:" + name) }
             }
             components += [String(describing: edits.flicker), cacheContext,
                            settings.mode.rawValue, String(settings.amount),

@@ -54,6 +54,7 @@ public final class ImagePipeline: @unchecked Sendable {
     let context: CIContext
     let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
     private let lutStore: LUTStore
+    private let profileLibrary: CameraProfileLibrary
     private let cachesDevelopment: Bool
     private let developmentLock = NSLock()
     private var developedSources: [DevelopedSource] = []
@@ -84,10 +85,23 @@ public final class ImagePipeline: @unchecked Sendable {
 
     /// `cachesDevelopment`는 편집 미리보기용이다. 최근 현상 결과(최대 2장)와 중간 계산을 재사용해
     /// RAW 현상 값(노출·색온도·틴트)이 같은 동안 다른 슬라이더를 다시 현상하지 않고 그린다.
-    public init(lutDirectory: URL = LUTStore.defaultDirectory, cachesDevelopment: Bool = false) {
+    public init(lutDirectory: URL = LUTStore.defaultDirectory, cachesDevelopment: Bool = false,
+                profileLibrary: CameraProfileLibrary = .shared) {
         context = CIContext(options: [.cacheIntermediates: cachesDevelopment])
         lutStore = LUTStore(directory: lutDirectory)
         self.cachesDevelopment = cachesDevelopment
+        self.profileLibrary = profileLibrary
+    }
+
+    /// 이 사진에 저장된 DCP 프로필을 이 Mac에서 찾을 수 있는지. 찾지 못하면 macOS 기본 현상으로 그린다.
+    public func cameraProfileIsAvailable(_ name: String, for url: URL) -> Bool {
+        profileLibrary.profiles(forCamera: profileLibrary.camera(for: url)).contains { $0.name == name }
+    }
+
+    /// 이 사진 카메라에 쓸 수 있는 DCP 프로필 이름. RAW가 아니면 비어 있다.
+    public func cameraProfileNames(for url: URL) -> [String] {
+        guard Self.isRAW(url) else { return [] }
+        return profileLibrary.profiles(forCamera: profileLibrary.camera(for: url)).map(\.name)
     }
 
     public func metadata(for url: URL) throws -> PhotoMetadata {
@@ -548,6 +562,9 @@ public final class ImagePipeline: @unchecked Sendable {
         var key = base
         if Self.isRAW(url) {
             base += "|\(edits.rawDevelop)|\(String(describing: edits.whiteBalance))"
+            if let name = edits.cameraProfile {
+                base += "|profile:\(name)|\(profileLibrary.identity(name: name, camera: profileLibrary.camera(for: url)))"
+            }
             key = base + "|\(edits.exposure)|\(edits.temperatureShift)|\(edits.tintShift)"
         }
         developmentLock.lock()
@@ -592,6 +609,11 @@ public final class ImagePipeline: @unchecked Sendable {
                                           edits: edits)
             raw.neutralTemperature = neutral.temperature
             raw.neutralTint = neutral.tint
+            if let name = edits.cameraProfile,
+               let profile = profileLibrary.linearFilter(name: name, rawURL: url, temperature: Double(neutral.temperature)) {
+                raw.linearSpaceFilter = profile.filter
+                if profile.hasToneCurve { raw.boostAmount = 0 }
+            }
             let develop = edits.rawDevelop
             if raw.isLuminanceNoiseReductionSupported, let amount = develop.luminanceNoiseReduction, amount.isFinite {
                 raw.luminanceNoiseReductionAmount = Float(min(1, max(0, amount)))
@@ -672,6 +694,7 @@ public final class ImagePipeline: @unchecked Sendable {
             }
         }
 
+        image = CalibrationProcessor.apply(edits.calibration, to: image)
         image = applyDehaze(edits.dehaze, to: image)
 
         if edits.colorProfile == .monochrome {
@@ -757,6 +780,9 @@ public final class ImagePipeline: @unchecked Sendable {
             components += [String(describing: edits.rawDevelop), String(edits.exposure),
                            String(edits.temperatureShift), String(edits.tintShift)]
             if let whiteBalance = edits.whiteBalance { components.append(String(describing: whiteBalance)) }
+            if let name = edits.cameraProfile {
+                components.append(name + "|" + profileLibrary.identity(name: name, camera: profileLibrary.camera(for: url)))
+            }
         }
         return components.joined(separator: "|")
     }
