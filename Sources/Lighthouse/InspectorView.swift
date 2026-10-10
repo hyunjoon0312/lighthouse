@@ -12,7 +12,7 @@ struct InspectorView: View {
     private var missingOriginal: some View {
         VStack(alignment: .leading, spacing: 6) {
             Label("원본 파일을 찾을 수 없습니다", systemImage: "exclamationmark.triangle.fill")
-                .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                .font(.caption.weight(.semibold)).foregroundStyle(Palette.warning)
             Text(photo.path).font(.caption2).foregroundStyle(.secondary).lineLimit(2).truncationMode(.middle)
                 .textSelection(.enabled)
             Text("드라이브를 연결하면 다시 확인합니다. 파일을 옮겼다면 새 위치를 알려 주세요. 같은 폴더에서 옮겨진 다른 사진도 함께 찾습니다.")
@@ -21,17 +21,21 @@ struct InspectorView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .background(Palette.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("보정").font(.title3.weight(.semibold))
                         Spacer()
-                        if photo.isRAW { Text("RAW").font(.caption2.weight(.bold)).foregroundStyle(.orange) }
+                        if photo.isRAW {
+                            Text("RAW").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Palette.muted, lineWidth: 1))
+                        }
                         Button { model.createVirtualCopy() } label: { Image(systemName: "plus.square.on.square") }
                             .buttonStyle(.borderless)
                             .help("가상 사본 만들기 (⌘')  같은 원본에 다른 보정을 따로 저장합니다")
@@ -42,27 +46,30 @@ struct InspectorView: View {
                 if model.isMissing(photo) { missingOriginal }
                 if model.selectionUsesSmartPreview {
                     Label("스마트 미리보기 · 원본 없음 · 기본 보정 근사", systemImage: "bolt.horizontal.circle")
-                        .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                        .font(.caption.weight(.semibold)).foregroundStyle(Palette.warning)
                 }
                 HistogramView()
-                ratingRow
-                ColorLabelRow(current: model.commonMarkColorLabel) { model.toggleMarkColorLabel($0) }
-                HStack(spacing: 8) {
-                    flagButton("선택", icon: "flag.fill", flag: .pick)
-                    flagButton("제외", icon: "xmark", flag: .reject)
-                    Button("해제") { model.setFlag(.none) }
-                        .accessibilityLabel("선택과 제외 표시 해제")
-                        .disabled(!model.canClearMarkFlags)
-                }.buttonStyle(.bordered)
-                if model.markTargetPhotos.count > 1 {
-                    Text("별점·표시·라벨은 선택한 \(model.markTargetPhotos.count)장에 함께 적용됩니다.")
-                        .font(.caption2).foregroundStyle(.secondary)
+                InspectorSection("표시 · 키워드", storageKey: "inspector.section.marks") {
+                    ratingRow
+                    ColorLabelRow(current: model.commonMarkColorLabel) { model.toggleMarkColorLabel($0) }
+                    HStack(spacing: 8) {
+                        flagButton("선택", icon: "flag.fill", flag: .pick)
+                        flagButton("제외", icon: "xmark", flag: .reject)
+                        Button("해제") { model.setFlag(.none) }
+                            .accessibilityLabel("선택과 제외 표시 해제")
+                            .disabled(!model.canClearMarkFlags)
+                    }.buttonStyle(.bordered)
+                    if model.markTargetPhotos.count > 1 {
+                        Text("별점·표시·라벨은 선택한 \(model.markTargetPhotos.count)장에 함께 적용됩니다.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if model.hasMixedMarks {
+                        Text("선택한 사진의 별점·표시·라벨 값이 서로 다릅니다.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    DescriptionFields(photo: photo)
                 }
-                if model.hasMixedMarks {
-                    Text("선택한 사진의 별점·표시·라벨 값이 서로 다릅니다.")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                DescriptionFields(photo: photo)
+                Divider()
                 if model.selectedPhotoIDs.count >= 2 {
                     Text("슬라이더는 기준 사진에 적용됩니다.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -70,7 +77,6 @@ struct InspectorView: View {
                         .buttonStyle(.bordered)
                         .accessibilityLabel("선택한 사진에 보정 일괄 적용")
                 }
-                Divider()
                 // 초기화·복사는 세 패널 모두에 걸치므로 패널 탭 위에 둔다.
                 HStack {
                     Button("보정 초기화") { model.updateEdits(.neutral) }.disabled(!edits.isModified)
@@ -91,197 +97,286 @@ struct InspectorView: View {
                 else if model.adjustmentPanel == .local { localControls }
                 else {
                     RetouchControls(photo: photo).disabled(model.selectionUsesSmartPreview)
-                    if model.selectionUsesSmartPreview { Text("복구 작업에는 원본이 필요합니다.").font(.caption2).foregroundStyle(.orange) }
+                    if model.selectionUsesSmartPreview {
+                        Text("복구 작업에는 원본이 필요합니다.").font(.caption2).foregroundStyle(Palette.warning)
+                    }
                 }
                 Divider()
                 EditHistoryPanel(photo: photo)
                 Divider()
-                section("파일 정보")
-                metadataRow("크기", "\(photo.metadata.width) × \(photo.metadata.height)")
-                metadataRow("카메라", photo.metadata.camera)
-                metadataRow("렌즈", photo.metadata.lens)
-                metadataRow("초점거리", photo.metadata.focalLength.map { $0.rounded() == $0 ? "\(Int($0)) mm" : String(format: "%.1f mm", $0) })
-                metadataRow("ISO", photo.metadata.iso.map(String.init))
-                metadataRow("조리개", photo.metadata.aperture.map { String(format: "f/%.1f", $0) })
-                metadataRow("셔터", photo.metadata.shutter.map(PhotoMetadata.shutterText))
-                metadataRow("촬영", photo.metadata.capturedAt?.formatted(date: .abbreviated, time: .shortened))
-                if let record = photo.lastExport {
-                    metadataRow("내보냄", record.exportedAt.formatted(date: .abbreviated, time: .shortened) +
-                                (record.isChanged(photo) ? " · 그 뒤 보정 바뀜" : ""))
-                        .help(record.path)
+                InspectorSection("파일 정보", storageKey: "inspector.section.fileInfo") {
+                    VStack(alignment: .leading, spacing: 5) {
+                        metadataRow("크기", "\(photo.metadata.width) × \(photo.metadata.height)")
+                        metadataRow("카메라", photo.metadata.camera)
+                        metadataRow("렌즈", photo.metadata.lens)
+                        metadataRow("초점거리", photo.metadata.focalLength.map { $0.rounded() == $0 ? "\(Int($0)) mm" : String(format: "%.1f mm", $0) })
+                        metadataRow("ISO", photo.metadata.iso.map(String.init))
+                        metadataRow("조리개", photo.metadata.aperture.map { String(format: "f/%.1f", $0) })
+                        metadataRow("셔터", photo.metadata.shutter.map(PhotoMetadata.shutterText))
+                        metadataRow("촬영", photo.metadata.capturedAt?.formatted(date: .abbreviated, time: .shortened))
+                        if let record = photo.lastExport {
+                            metadataRow("내보냄", record.exportedAt.formatted(date: .abbreviated, time: .shortened) +
+                                        (record.isChanged(photo) ? " · 그 뒤 보정 바뀜" : ""))
+                                .help(record.path)
+                        }
+                    }
+                    Text(photo.path).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
                 }
-                Text(photo.path).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
-                Text("원본 보존 · 보정 자동 저장").font(.caption2.weight(.medium)).foregroundStyle(.orange)
+                Label("원본 보존 · 보정 자동 저장", systemImage: "checkmark.shield")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(18)
+            // 300pt 패널에 슬라이더·단추·메뉴를 한 크기로 촘촘하게 둔다.
+            .controlSize(.small)
+            // 활성 창에서 보조 단추·확인란이 모두 강조색으로 물들지 않게 중립색을 기본으로 둔다.
+            // 고른 표시·도구와 주요 동작 단추에만 강조색을 따로 준다.
+            .tint(Palette.inactive)
         }
-        .background(Color(red: 0.145, green: 0.152, blue: 0.164))
+        .background(Palette.panel)
     }
 
     private func panelButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).font(.caption.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Color.primary : Palette.inactive)
                 .frame(maxWidth: .infinity).padding(.vertical, 7)
-                .background(selected ? Color.orange.opacity(0.22) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .background(selected ? Palette.accent.opacity(0.22) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain).accessibilityLabel(title)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    /// 프리셋을 빛·색상보다 위에 두어 자주 쓰는 색감을 바로 적용한다.
+    /// 보정 묶음. `reset`은 묶음의 값을 기본값으로 돌리는 방법이며, 돌린 값이 지금과 다르면 바뀐 묶음으로 표시한다.
+    private func editSection<Accessory: View, Content: View>(
+        _ title: String, _ key: String, expanded: Bool = false,
+        reset: @escaping (inout EditSettings, EditSettings) -> Void,
+        @ViewBuilder accessory: () -> Accessory, @ViewBuilder content: () -> Content
+    ) -> some View {
+        var cleared = edits
+        reset(&cleared, .neutral)
+        return InspectorSection(title, storageKey: "inspector.section." + key, expandedByDefault: expanded,
+                                modified: cleared != edits, reset: { change { reset(&$0, .neutral) } },
+                                accessory: accessory, content: content)
+    }
+
+    private func editSection<Content: View>(
+        _ title: String, _ key: String, expanded: Bool = false,
+        reset: @escaping (inout EditSettings, EditSettings) -> Void, @ViewBuilder content: () -> Content
+    ) -> some View {
+        editSection(title, key, expanded: expanded, reset: reset, accessory: { EmptyView() }, content: content)
+    }
+
+    /// Lightroom 현상 패널 순서로 묶는다. 자주 쓰는 빛·색상·구도는 처음에 펼쳐 둔다.
     private var globalControls: some View {
-        Group {
-            presetControls
+        VStack(alignment: .leading, spacing: 14) {
+            // 프리셋 적용은 위쪽 "프리셋 적용" 메뉴로도 하므로 처음에는 접어 보정 슬라이더를 위로 올린다.
+            InspectorSection("프리셋", storageKey: "inspector.section.presets", expandedByDefault: false) { presetControls }
             Divider()
-            HStack {
-                section("빛")
-                Spacer()
+            editSection("빛", "light", expanded: true, reset: { edits, neutral in
+                edits.exposure = neutral.exposure; edits.contrast = neutral.contrast
+                edits.highlights = neutral.highlights; edits.shadows = neutral.shadows
+                edits.whites = neutral.whites; edits.blacks = neutral.blacks
+                edits.texture = neutral.texture; edits.clarity = neutral.clarity; edits.dehaze = neutral.dehaze
+            }) {
                 if model.isAutoAdjusting { ProgressView().controlSize(.small) }
                 Button("자동") { model.autoAdjust() }
-                    .font(.caption).buttonStyle(.bordered)
+                    .font(.caption).buttonStyle(.bordered).controlSize(.small)
                     .disabled(model.isAutoAdjusting)
                     .help("노출·색온도·틴트·하이라이트·섀도를 사진에서 정합니다 (⌘U). ⌘Z로 되돌릴 수 있습니다")
                     .accessibilityLabel("자동 보정")
+            } content: {
+                adjustment("노출", \.exposure, range: -4...4, format: "%.2f EV")
+                adjustment("대비", \.contrast, range: 0.5...1.5, scale: 200)
+                adjustment("하이라이트", \.highlights, range: 0...2, scale: 100)
+                adjustment("섀도", \.shadows, range: -1...1, scale: 100)
+                adjustment("흰색", \.whites, range: -1...1, scale: 100)
+                adjustment("검정", \.blacks, range: -1...1, scale: 100)
+                adjustment("텍스처", \.texture, range: -1...1, scale: 100)
+                adjustment("명료도", \.clarity, range: -1...1, scale: 100)
+                adjustment("디헤이즈", \.dehaze, range: -1...1, scale: 100)
             }
-            adjustment("노출", \.exposure, range: -4...4, format: "%.2f EV")
-            adjustment("대비", \.contrast, range: 0.5...1.5, scale: 200)
-            adjustment("하이라이트", \.highlights, range: 0...2, scale: 100)
-            adjustment("섀도", \.shadows, range: -1...1, scale: 100)
-            adjustment("흰색", \.whites, range: -1...1, scale: 100)
-            adjustment("검정", \.blacks, range: -1...1, scale: 100)
-            adjustment("텍스처", \.texture, range: -1...1, scale: 100)
-            adjustment("명료도", \.clarity, range: -1...1, scale: 100)
-            adjustment("디헤이즈", \.dehaze, range: -1...1, scale: 100)
             Divider()
-            HStack {
-                section("색상")
-                Spacer()
-                if model.isAutoAdjusting { ProgressView().controlSize(.small) }
+            editSection("색상", "color", expanded: true, reset: { edits, neutral in
+                edits.colorProfile = neutral.colorProfile; edits.cameraProfile = neutral.cameraProfile
+                edits.profileAmount = neutral.profileAmount; edits.whiteBalance = neutral.whiteBalance
+                edits.temperatureShift = neutral.temperatureShift; edits.tintShift = neutral.tintShift
+                edits.vibrance = neutral.vibrance; edits.saturation = neutral.saturation
+            }) {
                 Button { model.beginWhiteBalancePick() } label: { Label("회색 찍기", systemImage: "eyedropper") }
-                    .font(.caption).buttonStyle(.bordered)
+                    .font(.caption).buttonStyle(.bordered).controlSize(.small)
                     .disabled(model.isAutoAdjusting || model.isMissing(photo))
-                    .help("사진에서 회색·흰색이어야 할 곳을 눌러 색온도·틴트를 맞춥니다. Esc로 취소, ⌘Z로 되돌립니다")
+                    .help("사진에서 회색·흰색이어야 할 곳을 눌러 색온도·틴트를 맞춥니다 (W). Esc로 취소, ⌘Z로 되돌립니다")
                     .accessibilityLabel("흰색 기준 찍기")
+            } content: {
+                Picker("기본 프로필", selection: Binding(
+                    get: { edits.colorProfile },
+                    set: { profile in change { $0.colorProfile = profile } }
+                )) {
+                    Text("기본 색상").tag(PhotoColorProfile.color)
+                    Text("흑백").tag(PhotoColorProfile.monochrome)
+                }
+                .pickerStyle(.segmented)
+                .font(.caption)
+                .help("기본 색상은 macOS RAW 현상을 기준으로 합니다. Adobe DCP나 카메라 전용 프로필과 색이 다를 수 있습니다.")
+                .accessibilityLabel("기본 색상 프로필")
+                cameraProfilePicker
+                if photo.isRAW { whiteBalancePicker }
+                adjustment("색온도 이동", \.temperatureShift, range: -2500...2500, format: "%.0f K")
+                adjustment("틴트", \.tintShift, range: -100...100, scale: 1)
+                adjustment("생동감", \.vibrance, range: -1...1, scale: 100)
+                adjustment("채도", \.saturation, range: 0...2, scale: 100)
             }
-            Picker("기본 프로필", selection: Binding(
-                get: { edits.colorProfile },
-                set: { profile in change { $0.colorProfile = profile } }
-            )) {
-                Text("기본 색상").tag(PhotoColorProfile.color)
-                Text("흑백").tag(PhotoColorProfile.monochrome)
-            }
-            .pickerStyle(.segmented)
-            .help("기본 색상은 macOS RAW 현상을 기준으로 합니다. Adobe DCP나 카메라 전용 프로필과 색이 다를 수 있습니다.")
-            .accessibilityLabel("기본 색상 프로필")
-            cameraProfilePicker
-            if photo.isRAW { whiteBalancePicker }
-            adjustment("색온도 이동", \.temperatureShift, range: -2500...2500, format: "%.0f K")
-            adjustment("틴트", \.tintShift, range: -100...100, scale: 1)
-            adjustment("생동감", \.vibrance, range: -1...1, scale: 100)
-            adjustment("채도", \.saturation, range: 0...2, scale: 100)
-            AdvancedColorControls(edits: edits, allowsFullResolutionEffects: !model.selectionUsesSmartPreview)
             Divider()
-            section("디테일 및 구도")
-            Group {
-                adjustment("선명도", \.sharpness, range: 0...2, scale: 50)
-                NoiseReductionControls(edits: edits)
-                flickerControls
+            editSection("톤 곡선", "curve", reset: { edits, neutral in edits.curves = neutral.curves }) {
+                ToneCurveControls(edits: edits)
             }
-            .disabled(model.selectionUsesSmartPreview)
-            adjustment("비네팅", \.vignette, range: -1...1, scale: 100)
-            HStack {
-                Button { model.rotate(clockwise: false) } label: { Image(systemName: "rotate.left") }
-                    .help("왼쪽으로 90° 회전 (⌘[)")
-                    .accessibilityLabel("반시계 방향으로 90도 회전")
-                Button { model.rotate(clockwise: true) } label: { Image(systemName: "rotate.right") }
-                    .help("오른쪽으로 90° 회전 (⌘])")
-                    .accessibilityLabel("시계 방향으로 90도 회전")
-                Spacer()
-                Button("자유 크롭…") { model.presentCrop() }
-                    .disabled(model.isMissing(photo))
-                    .accessibilityLabel("자유 크롭 및 수평 보정")
-            }.buttonStyle(.bordered)
-            if edits.cropRect != nil || edits.cropAspect != nil || edits.straightenDegrees != 0 {
-                Text(String(format: "크롭 적용 · 수평 %+.1f°", edits.straightenDegrees))
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-            if photo.isRAW { rawDevelopControls.disabled(model.selectionUsesSmartPreview) }
             Divider()
-            HStack {
-                section("LUT")
-                Spacer()
+            editSection("HSL", "hsl", reset: { edits, neutral in edits.colorRanges = neutral.colorRanges }) {
+                HSLControls(edits: edits)
+            }
+            Divider()
+            editSection("컬러 그레이딩", "grading", reset: { edits, neutral in edits.colorGrading = neutral.colorGrading }) {
+                ColorGradingControls(edits: edits)
+            }
+            Divider()
+            editSection("디테일", "detail", reset: { edits, neutral in
+                edits.sharpness = neutral.sharpness; edits.noiseReduction = neutral.noiseReduction
+                edits.flicker = neutral.flicker
+            }) {
+                Group {
+                    adjustment("선명도", \.sharpness, range: 0...2, scale: 50)
+                    NoiseReductionControls(edits: edits)
+                    flickerControls
+                }
+                .disabled(model.selectionUsesSmartPreview)
+                if model.selectionUsesSmartPreview {
+                    Text("선명도·노이즈 감소·LED 띠 보정에는 원본이 필요합니다.")
+                        .font(.caption2).foregroundStyle(Palette.warning)
+                }
+            }
+            Divider()
+            editSection("구도", "geometry", expanded: true, reset: { edits, neutral in
+                edits.rotationQuarterTurns = neutral.rotationQuarterTurns; edits.cropAspect = neutral.cropAspect
+                edits.cropRect = neutral.cropRect; edits.straightenDegrees = neutral.straightenDegrees
+            }) {
+                HStack {
+                    Button { model.rotate(clockwise: false) } label: { Image(systemName: "rotate.left") }
+                        .help("왼쪽으로 90° 회전 (⌘[)")
+                        .accessibilityLabel("반시계 방향으로 90도 회전")
+                    Button { model.rotate(clockwise: true) } label: { Image(systemName: "rotate.right") }
+                        .help("오른쪽으로 90° 회전 (⌘])")
+                        .accessibilityLabel("시계 방향으로 90도 회전")
+                    Spacer()
+                    Button("자유 크롭…") { model.presentCrop() }
+                        .disabled(model.isMissing(photo))
+                        .help("자유 크롭과 수평 보정 (R)")
+                        .accessibilityLabel("자유 크롭 및 수평 보정")
+                }.buttonStyle(.bordered)
+                if edits.cropRect != nil || edits.cropAspect != nil || edits.straightenDegrees != 0 {
+                    Text(String(format: "크롭 적용 · 수평 %+.1f°", edits.straightenDegrees))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            if photo.isRAW {
+                Divider()
+                editSection("RAW 현상", "raw", reset: { edits, neutral in
+                    edits.rawDevelop = neutral.rawDevelop; edits.hdrAmount = neutral.hdrAmount
+                }) {
+                    rawDevelopControls.disabled(model.selectionUsesSmartPreview)
+                }
+            }
+            Divider()
+            editSection("효과", "effects", reset: { edits, neutral in
+                edits.vignette = neutral.vignette; edits.grain = neutral.grain
+            }) {
+                adjustment("비네팅", \.vignette, range: -1...1, scale: 100)
+                GrainControls(edits: edits, allowsFullResolutionEffects: !model.selectionUsesSmartPreview)
+            }
+            Divider()
+            editSection("캘리브레이션", "calibration", reset: { edits, neutral in edits.calibration = neutral.calibration }) {
+                CalibrationControls(edits: edits)
+            }
+            Divider()
+            editSection("LUT", "lut", reset: { edits, neutral in edits.lut = neutral.lut }) {
                 Text("보관 \(model.savedLUTs.count)개").font(.caption2).foregroundStyle(.secondary)
+            } content: {
+                lutControls
             }
-            Button(".cube 추가…") { model.presentLUTImport() }
-                .disabled(model.isLUTImporting || model.isLUTLibraryLoading)
-                .accessibilityLabel("3D LUT 파일 보관 목록에 추가")
-            Picker("보관한 LUT", selection: Binding(
-                get: { edits.lut?.id ?? "" },
-                set: { model.selectSavedLUT($0) }
-            )) {
-                Text("없음").tag("")
-                ForEach(model.savedLUTs) { item in
-                    Text(lutLabel(item)).tag(item.id).disabled(item.error != nil)
-                }
-                if let lut = edits.lut, !model.savedLUTs.contains(where: { $0.id == lut.id }) {
-                    Text("\(lut.name) · 보관 파일 없음").tag(lut.id).disabled(true)
-                }
-            }
+        }
+    }
+
+    @ViewBuilder private var lutControls: some View {
+        Button(".cube 추가…") { model.presentLUTImport() }
+            .buttonStyle(.bordered).controlSize(.small)
             .disabled(model.isLUTImporting || model.isLUTLibraryLoading)
-            .accessibilityLabel("보관한 LUT 선택")
-            if model.isLUTImporting { ProgressView("LUT 확인 중…").font(.caption) }
-            if model.isLUTLibraryLoading { ProgressView("보관한 LUT 확인 중…").font(.caption) }
-            if let error = model.lutLibraryError {
-                Text("보관 목록 오류: \(error)").font(.caption).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel("3D LUT 파일 보관 목록에 추가")
+        Picker("보관한 LUT", selection: Binding(
+            get: { edits.lut?.id ?? "" },
+            set: { model.selectSavedLUT($0) }
+        )) {
+            Text("없음").tag("")
+            ForEach(model.savedLUTs) { item in
+                Text(lutLabel(item)).tag(item.id).disabled(item.error != nil)
             }
-            if let lut = edits.lut {
-                Text(lut.name).font(.caption.weight(.medium)).lineLimit(2)
-                    .accessibilityLabel("적용된 LUT: \(lut.name)")
-                Toggle("LUT 사용", isOn: Binding(
-                    get: { lut.isEnabled },
-                    set: { enabled in model.updateLUT { $0.isEnabled = enabled } }
-                )).font(.caption).accessibilityLabel("LUT 켜기 또는 끄기")
-                localSlider("LUT 강도", value: lut.intensity * 100, range: 0...100, format: "%.0f%%", defaultValue: 100) { percent in
-                    model.updateLUT(continuous: true) { $0.intensity = percent / 100 }
-                }
+            if let lut = edits.lut, !model.savedLUTs.contains(where: { $0.id == lut.id }) {
+                Text("\(lut.name) · 보관 파일 없음").tag(lut.id).disabled(true)
+            }
+        }
+        .font(.caption)
+        .disabled(model.isLUTImporting || model.isLUTLibraryLoading)
+        .accessibilityLabel("보관한 LUT 선택")
+        if model.isLUTImporting { ProgressView("LUT 확인 중…").font(.caption) }
+        if model.isLUTLibraryLoading { ProgressView("보관한 LUT 확인 중…").font(.caption) }
+        if let error = model.lutLibraryError {
+            Text("보관 목록 오류: \(error)").font(.caption).foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if let lut = edits.lut {
+            Text(lut.name).font(.caption.weight(.medium)).lineLimit(2)
+                .accessibilityLabel("적용된 LUT: \(lut.name)")
+            Toggle("LUT 사용", isOn: Binding(
+                get: { lut.isEnabled },
+                set: { enabled in model.updateLUT { $0.isEnabled = enabled } }
+            )).font(.caption).accessibilityLabel("LUT 켜기 또는 끄기")
+            localSlider("LUT 강도", value: lut.intensity * 100, range: 0...100, format: "%.0f%%", defaultValue: 100) { percent in
+                model.updateLUT(continuous: true) { $0.intensity = percent / 100 }
+            }
+            HStack {
                 Button("LUT 제거") { model.removeLUT() }
                     .accessibilityLabel("현재 사진의 LUT 제거")
                 if model.selectedPhotoIDs.count >= 2 {
-                    Button("선택한 \(model.selectedPhotoIDs.count)장에 LUT 적용") { model.applyCurrentLUTToSelection() }
+                    Button("선택한 \(model.selectedPhotoIDs.count)장에 적용") { model.applyCurrentLUTToSelection() }
                         .disabled(model.isLUTImporting || model.isLUTLibraryLoading)
                         .accessibilityLabel("선택한 사진에 현재 LUT만 적용")
                 }
             }
-            if let error = model.lutError {
-                Text("LUT 오류: \(error)").font(.caption).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Text("사진용 SDR sRGB 3D .cube만 지원합니다. V-Log, .vlt, 1D LUT는 지원하지 않습니다.")
-                .font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("참조 사진 색감 맞추기…") { model.presentReferenceMatch() }
-                .accessibilityLabel("참조 사진 색감 맞추기")
+            .buttonStyle(.bordered).controlSize(.small)
         }
+        if let error = model.lutError {
+            Text("LUT 오류: \(error)").font(.caption).foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        Text("사진용 SDR sRGB 3D .cube만 지원합니다. V-Log, .vlt, 1D LUT는 지원하지 않습니다.")
+            .font(.caption2).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        Button("참조 사진 색감 맞추기…") { model.presentReferenceMatch() }
+            .buttonStyle(.bordered).controlSize(.small)
+            .accessibilityLabel("참조 사진 색감 맞추기")
     }
 
     @ViewBuilder private var presetControls: some View {
         HStack {
-            section("프리셋")
-            Spacer()
-        }
-        HStack {
             Button("Lightroom 가져오기…") { model.presentLightroomPresetImport() }
-                .font(.caption).buttonStyle(.borderless)
                 .disabled(model.presetLoadError != nil || model.isPresetImporting)
                 .accessibilityLabel("Lightroom 프리셋 가져오기")
             Button("현재 보정 저장…") {
                 model.presetSheet = PresetSheetRequest(kind: .save, initialName: "")
             }
-            .font(.caption).buttonStyle(.borderless)
             .disabled(model.presetLoadError != nil)
             .accessibilityLabel("현재 보정을 프리셋으로 저장")
         }
+        .buttonStyle(.bordered).controlSize(.small)
         TextField("프리셋 이름 검색", text: $presetSearch)
             .textFieldStyle(.roundedBorder)
             .font(.caption)
@@ -303,25 +398,27 @@ struct InspectorView: View {
             Text("이름이 일치하는 프리셋이 없습니다.")
                 .font(.caption2).foregroundStyle(.secondary)
         } else {
-            ForEach(filteredPresets) { preset in
-                HStack {
-                    Button(preset.name) { model.applyPreset(preset) }
-                        .buttonStyle(.borderless).lineLimit(1)
-                        .help(presetHelp(preset))
-                        .accessibilityLabel("프리셋 \(preset.name) 적용")
-                    Spacer()
-                    Menu {
-                        Button("호환 정보…") { model.presentPresetCompatibility(preset) }
-                        Divider()
-                        Button("이름 변경…") {
-                            model.presetSheet = PresetSheetRequest(kind: .rename(preset.id), initialName: preset.name)
-                        }
-                        Button("삭제", role: .destructive) { model.deletePreset(preset.id) }
-                    } label: { Image(systemName: "ellipsis") }
-                    .menuStyle(.borderlessButton).frame(width: 24)
-                    .accessibilityLabel("\(preset.name) 관리")
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(filteredPresets) { preset in
+                    HStack {
+                        Button(preset.name) { model.applyPreset(preset) }
+                            .buttonStyle(.borderless).tint(Palette.inactive).lineLimit(1)
+                            .help(presetHelp(preset))
+                            .accessibilityLabel("프리셋 \(preset.name) 적용")
+                        Spacer()
+                        Menu {
+                            Button("호환 정보…") { model.presentPresetCompatibility(preset) }
+                            Divider()
+                            Button("이름 변경…") {
+                                model.presetSheet = PresetSheetRequest(kind: .rename(preset.id), initialName: preset.name)
+                            }
+                            Button("삭제", role: .destructive) { model.deletePreset(preset.id) }
+                        } label: { Image(systemName: "ellipsis") }
+                        .menuStyle(.borderlessButton).frame(width: 24)
+                        .accessibilityLabel("\(preset.name) 관리")
+                    }
+                    .font(.caption)
                 }
-                .font(.caption)
             }
             Picker("가져올 때 적용", selection: $model.importPresetID) {
                 Text("없음").tag(UUID?.none)
@@ -344,15 +441,10 @@ struct InspectorView: View {
     }
 
     @ViewBuilder private var rawDevelopControls: some View {
-        Divider()
-        HStack {
-            section("RAW 현상")
-            Spacer()
-            if edits.rawDevelop != RAWDevelopSettings() {
-                Button("자동으로") { change { $0.rawDevelop = RAWDevelopSettings() } }
-                    .font(.caption).buttonStyle(.borderless)
-                    .accessibilityLabel("RAW 현상 설정을 카메라 기본값으로")
-            }
+        if edits.rawDevelop != RAWDevelopSettings() {
+            Button("카메라 기본값으로") { change { $0.rawDevelop = RAWDevelopSettings() } }
+                .buttonStyle(.bordered).controlSize(.small)
+                .accessibilityLabel("RAW 현상 설정을 카메라 기본값으로")
         }
         if let capabilities = model.rawCapabilities {
             if let automatic = capabilities.luminanceNoiseReduction {
@@ -530,6 +622,7 @@ struct InspectorView: View {
                         Text("AI").tag(NoiseReductionMode.ai)
                     }
                     .pickerStyle(.segmented)
+                    .font(.caption)
                     if area.noiseReduction.mode != .off {
                         localSlider("영역 노이즈 감소 강도", value: area.noiseReduction.amount * 100,
                                     range: 0...100, format: "%.0f%%", defaultValue: 35) { value in
@@ -569,6 +662,7 @@ struct InspectorView: View {
                         else { model.chooseLocal(area.id, drawing: true) }
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(Palette.accent)
                     .accessibilityLabel("부분 보정 " + drawTitle)
                 }
             }
@@ -576,37 +670,40 @@ struct InspectorView: View {
     }
 
     @ViewBuilder private var flickerControls: some View {
-        Divider()
         HStack {
-            section("플리커 띠 보정")
+            section("LED 띠 보정")
             Spacer()
             Toggle("사용", isOn: Binding(
                 get: { edits.flicker.isEnabled },
                 set: { enabled in change { $0.flicker.isEnabled = enabled } }
             )).labelsHidden().accessibilityLabel("LED 띠 감소 사용")
         }
-        Picker("띠 방향", selection: Binding(
-            get: { edits.flicker.direction },
-            set: { value in change { $0.flicker.direction = value } }
-        )) {
-            Text("가로").tag(BandDirection.horizontal)
-            Text("세로").tag(BandDirection.vertical)
-        }.pickerStyle(.segmented)
-        localSlider("띠 감소 강도", value: edits.flicker.amount * 100, range: 0...100, format: "%.0f%%", defaultValue: 70) {
-            value in change(continuous: true) { $0.flicker.amount = value / 100 }
+        // 끈 동안에는 방향·세기를 바꿔도 사진에 반영되지 않으므로 잠근다. 자동 분석은 켜면서 값을 채운다.
+        Group {
+            Picker("띠 방향", selection: Binding(
+                get: { edits.flicker.direction },
+                set: { value in change { $0.flicker.direction = value } }
+            )) {
+                Text("가로").tag(BandDirection.horizontal)
+                Text("세로").tag(BandDirection.vertical)
+            }.pickerStyle(.segmented).font(.caption)
+            localSlider("띠 감소 강도", value: edits.flicker.amount * 100, range: 0...100, format: "%.0f%%", defaultValue: 70) {
+                value in change(continuous: true) { $0.flicker.amount = value / 100 }
+            }
+            localSlider("띠 개수", value: edits.flicker.cycles, range: 1...128, format: "%.0f", defaultValue: 8) {
+                value in change(continuous: true) { $0.flicker.cycles = value }
+            }
+            localSlider("위상", value: edits.flicker.phase * 100, range: 0...100, format: "%.0f%%", defaultValue: 0) {
+                value in change(continuous: true) { $0.flicker.phase = value / 100 }
+            }
+            localSlider("밝기 진폭", value: edits.flicker.amplitudeEV, range: 0...2, format: "%.2f EV", defaultValue: 0.25) {
+                value in change(continuous: true) { $0.flicker.amplitudeEV = value }
+            }
+            localSlider("색 띠", value: edits.flicker.colorAmount * 100, range: 0...100, format: "%.0f%%", defaultValue: 0) {
+                value in change(continuous: true) { $0.flicker.colorAmount = value / 100 }
+            }
         }
-        localSlider("띠 개수", value: edits.flicker.cycles, range: 1...128, format: "%.0f", defaultValue: 8) {
-            value in change(continuous: true) { $0.flicker.cycles = value }
-        }
-        localSlider("위상", value: edits.flicker.phase * 100, range: 0...100, format: "%.0f%%", defaultValue: 0) {
-            value in change(continuous: true) { $0.flicker.phase = value / 100 }
-        }
-        localSlider("밝기 진폭", value: edits.flicker.amplitudeEV, range: 0...2, format: "%.2f EV", defaultValue: 0.25) {
-            value in change(continuous: true) { $0.flicker.amplitudeEV = value }
-        }
-        localSlider("색 띠", value: edits.flicker.colorAmount * 100, range: 0...100, format: "%.0f%%", defaultValue: 0) {
-            value in change(continuous: true) { $0.flicker.colorAmount = value / 100 }
-        }
+        .disabled(!edits.flicker.isEnabled)
         HStack {
             Button("띠 자동 분석") { model.analyzeFlicker() }
                 .disabled(model.isAnalyzingFlicker || model.isMissing(photo))
@@ -618,9 +715,6 @@ struct InspectorView: View {
         if let message = model.flickerAnalysisMessage { Text(message).font(.caption).foregroundStyle(.secondary) }
         Text("자동 분석은 실제 무늬를 띠로 오인할 수 있으며 촬영 때 손실된 정보는 복원하지 못합니다.")
             .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        if model.selectionUsesSmartPreview {
-            Text("LED 띠 분석과 보정에는 원본이 필요합니다.").font(.caption2).foregroundStyle(.orange)
-        }
     }
 
     private func toolButton(_ tool: BrushTool, icon: String) -> some View {
@@ -628,7 +722,7 @@ struct InspectorView: View {
             Label(tool.rawValue, systemImage: icon).frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)
-        .tint(model.brushTool == tool ? .orange : .gray)
+        .tint(model.brushTool == tool ? Palette.accent : .gray)
         .accessibilityLabel(tool.rawValue)
     }
 
@@ -649,15 +743,26 @@ struct InspectorView: View {
             ForEach(1...5, id: \.self) { n in
                 Button { model.toggleMarkRating(n) } label: {
                     Image(systemName: rating.map { n <= $0 } == true ? "star.fill" : "star")
-                        .foregroundStyle(rating.map { n <= $0 } == true ? .orange : .gray)
-                }.buttonStyle(.plain).accessibilityLabel("별점 \(n)점")
+                        .foregroundStyle(rating.map { n <= $0 } == true ? Palette.accent : Palette.muted)
+                }.buttonStyle(.plain)
+            }
+        }
+        // 음성 안내에서는 별 다섯 개 대신 하나의 조절 항목으로 읽고 위아래로 바꾼다.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("별점")
+        .accessibilityValue(rating.map { $0 == 0 ? "없음" : "\($0)점" } ?? "여러 값")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: model.setRating(min(5, (rating ?? 0) + 1))
+            case .decrement: model.setRating(max(0, (rating ?? 0) - 1))
+            @unknown default: break
             }
         }
     }
 
     private func flagButton(_ title: String, icon: String, flag: PhotoFlag) -> some View {
         Button { model.setFlag(flag) } label: { Label(title, systemImage: icon) }
-            .tint(model.commonMarkFlag == flag ? .orange : .gray)
+            .tint(model.commonMarkFlag == flag ? Palette.accent : .gray)
             .accessibilityLabel("\(title) 표시")
     }
 

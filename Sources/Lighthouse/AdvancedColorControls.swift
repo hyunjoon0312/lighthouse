@@ -1,27 +1,22 @@
 import SwiftUI
 import LighthouseCore
 
-struct AdvancedColorControls: View {
+/// 톤 곡선: 채널을 골라 점을 끌어 바꾼다. 빈 곳을 누르면 점이 생긴다.
+struct ToneCurveControls: View {
     @EnvironmentObject private var model: LibraryModel
     let edits: EditSettings
-    var allowsFullResolutionEffects = true
     @State private var channel: CurveChannel = .master
     @State private var selectedPoint: Int?
     @State private var draggingPoint: Int?
-    @State private var band: ColorBand = .red
 
     var body: some View {
         Group {
-            Divider()
-            HStack {
-                Text("RGB 곡선").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-                Spacer()
-                Picker("곡선 채널", selection: $channel) {
-                    ForEach(CurveChannel.allCases) { Text($0.title).tag($0) }
-                }
-                .labelsHidden().frame(width: 96)
-                .accessibilityLabel("곡선 채널")
+            Picker("곡선 채널", selection: $channel) {
+                ForEach(CurveChannel.allCases) { Text($0.title).tag($0) }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityLabel("곡선 채널")
             CurveGraph(points: points, tint: channel.color, selectedIndex: $selectedPoint,
                        draggingIndex: $draggingPoint, update: { updatePoints($0, continuous: true) },
                        end: { model.endContinuousEdit() })
@@ -37,57 +32,7 @@ struct AdvancedColorControls: View {
                     .accessibilityLabel("\(channel.title) 곡선 초기화")
             }
             .buttonStyle(.bordered)
-
-            Divider()
-            Text("색상 범위 HSL").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-            Picker("색상 범위", selection: $band) {
-                ForEach(ColorBand.allCases, id: \.self) { Text($0.koreanName).tag($0) }
-            }
-            .accessibilityLabel("HSL 색상 범위")
-            advancedSlider("색조", value: rangeAdjustment.hue, range: -30...30, format: "%+.0f°", defaultValue: 0) {
-                updateRange(\.hue, value: $0, continuous: true)
-            }
-            advancedSlider("채도", value: rangeAdjustment.saturation * 100, range: -100...100, format: "%+.0f%%",
-                           defaultValue: 0) {
-                updateRange(\.saturation, value: $0 / 100, continuous: true)
-            }
-            advancedSlider("명도", value: rangeAdjustment.lightness * 100, range: -100...100, format: "%+.0f%%",
-                           defaultValue: 0) {
-                updateRange(\.lightness, value: $0 / 100, continuous: true)
-            }
-            Button("이 색상 초기화") { resetRange() }
-                .disabled(rangeAdjustment == ColorRangeAdjustment(band: band))
-                .accessibilityLabel("\(band.koreanName) HSL 초기화")
-            ColorGradingControls(edits: edits)
-            CalibrationControls(edits: edits)
-
-            Divider()
-            Group {
-                Text("필름 입자").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-                advancedSlider("양", value: edits.grain.amount * 100, range: 0...100, format: "%.0f%%",
-                           defaultValue: GrainSettings().amount * 100) {
-                let value = $0 / 100
-                updateGrain(continuous: true) { $0.amount = value.isFinite ? min(1, max(0, value)) : 0 }
-            }
-            advancedSlider("크기", value: edits.grain.size, range: 0.5...8, format: "%.1f px",
-                           defaultValue: GrainSettings().size) {
-                let value = $0
-                updateGrain(continuous: true) { $0.size = value.isFinite ? min(8, max(0.5, value)) : 1.5 }
-            }
-            advancedSlider("거칠기", value: edits.grain.roughness * 100, range: 0...100, format: "%.0f%%",
-                           defaultValue: GrainSettings().roughness * 100) {
-                let value = $0 / 100
-                updateGrain(continuous: true) { $0.roughness = value.isFinite ? min(1, max(0, value)) : 0.5 }
-            }
-                HStack {
-                Text("패턴 \(edits.grain.seed)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                Spacer()
-                Button("패턴 새로 만들기") {
-                    updateGrain { $0.seed = UInt32.random(in: 1...UInt32.max) }
-                }
-                .accessibilityLabel("필름 입자 패턴 새로 만들기")
-                }
-            }.disabled(!allowsFullResolutionEffects)
+            .controlSize(.small)
         }
         .onChange(of: channel) { _, _ in selectedPoint = nil; draggingPoint = nil }
     }
@@ -104,10 +49,6 @@ struct AdvancedColorControls: View {
     private var canDeleteSelectedPoint: Bool {
         guard let selectedPoint else { return false }
         return selectedPoint > 0 && selectedPoint < points.count - 1
-    }
-
-    private var rangeAdjustment: ColorRangeAdjustment {
-        edits.colorRanges.first(where: { $0.band == band }) ?? ColorRangeAdjustment(band: band)
     }
 
     private func updatePoints(_ newPoints: [CurvePoint], continuous: Bool = false) {
@@ -129,6 +70,45 @@ struct AdvancedColorControls: View {
         updatePoints(next)
         self.selectedPoint = nil
     }
+}
+
+/// 색상 범위 HSL: 색 하나를 골라 색조·채도·명도를 바꾼다. 바꾼 색에는 점을 붙인다.
+struct HSLControls: View {
+    @EnvironmentObject private var model: LibraryModel
+    let edits: EditSettings
+    @State private var band: ColorBand = .red
+
+    var body: some View {
+        Group {
+            Picker("색상 범위", selection: $band) {
+                ForEach(ColorBand.allCases, id: \.self) { item in
+                    Text(edits.colorRanges.contains { $0.band == item } ? "\(item.koreanName) (바뀜)" : item.koreanName)
+                        .tag(item)
+                }
+            }
+            .font(.caption)
+            .accessibilityLabel("HSL 색상 범위")
+            advancedSlider("색조", value: rangeAdjustment.hue, range: -30...30, format: "%+.0f°", defaultValue: 0) {
+                updateRange(\.hue, value: $0, continuous: true)
+            }
+            advancedSlider("채도", value: rangeAdjustment.saturation * 100, range: -100...100, format: "%+.0f%%",
+                           defaultValue: 0) {
+                updateRange(\.saturation, value: $0 / 100, continuous: true)
+            }
+            advancedSlider("명도", value: rangeAdjustment.lightness * 100, range: -100...100, format: "%+.0f%%",
+                           defaultValue: 0) {
+                updateRange(\.lightness, value: $0 / 100, continuous: true)
+            }
+            Button("이 색상 초기화") { resetRange() }
+                .buttonStyle(.bordered).controlSize(.small)
+                .disabled(rangeAdjustment == ColorRangeAdjustment(band: band))
+                .accessibilityLabel("\(band.koreanName) HSL 초기화")
+        }
+    }
+
+    private var rangeAdjustment: ColorRangeAdjustment {
+        edits.colorRanges.first(where: { $0.band == band }) ?? ColorRangeAdjustment(band: band)
+    }
 
     private func updateRange(_ keyPath: WritableKeyPath<ColorRangeAdjustment, Double>, value: Double,
                              continuous: Bool) {
@@ -147,6 +127,51 @@ struct AdvancedColorControls: View {
         var next = edits
         next.colorRanges.removeAll { $0.band == band }
         model.updateEdits(next)
+    }
+
+    /// 두 번 누르면 `defaultValue`로 돌아간다.
+    private func advancedSlider(_ title: String, value: Double, range: ClosedRange<Double>, format: String,
+                                defaultValue: Double, set: @escaping @MainActor (Double) -> Void) -> some View {
+        SliderRow(title: title, value: value, range: range, valueText: String(format: format, value),
+                  set: { set($0) }, end: { model.endContinuousEdit() },
+                  reset: { set(defaultValue); model.endContinuousEdit() })
+    }
+}
+
+/// 필름 입자. 원본 해상도에서만 의미가 있어 스마트 미리보기에서는 끈다.
+struct GrainControls: View {
+    @EnvironmentObject private var model: LibraryModel
+    let edits: EditSettings
+    var allowsFullResolutionEffects = true
+
+    var body: some View {
+        Group {
+            advancedSlider("입자 양", value: edits.grain.amount * 100, range: 0...100, format: "%.0f%%",
+                           defaultValue: GrainSettings().amount * 100) {
+                let value = $0 / 100
+                updateGrain(continuous: true) { $0.amount = value.isFinite ? min(1, max(0, value)) : 0 }
+            }
+            advancedSlider("입자 크기", value: edits.grain.size, range: 0.5...8, format: "%.1f px",
+                           defaultValue: GrainSettings().size) {
+                let value = $0
+                updateGrain(continuous: true) { $0.size = value.isFinite ? min(8, max(0.5, value)) : 1.5 }
+            }
+            advancedSlider("입자 거칠기", value: edits.grain.roughness * 100, range: 0...100, format: "%.0f%%",
+                           defaultValue: GrainSettings().roughness * 100) {
+                let value = $0 / 100
+                updateGrain(continuous: true) { $0.roughness = value.isFinite ? min(1, max(0, value)) : 0.5 }
+            }
+            HStack {
+                Text("패턴 \(edits.grain.seed)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Spacer()
+                Button("패턴 새로 만들기") {
+                    updateGrain { $0.seed = UInt32.random(in: 1...UInt32.max) }
+                }
+                .buttonStyle(.bordered).controlSize(.small)
+                .accessibilityLabel("필름 입자 패턴 새로 만들기")
+            }
+        }
+        .disabled(!allowsFullResolutionEffects)
     }
 
     private func updateGrain(continuous: Bool = false, _ change: (inout GrainSettings) -> Void) {
@@ -209,7 +234,7 @@ private struct CurveGraph: View {
                     }
                 }.stroke(tint, style: StrokeStyle(lineWidth: 2, lineJoin: .round))
                 ForEach(Array(points.enumerated()), id: \.offset) { index, point in
-                    Circle().fill(index == selectedIndex ? Color.orange : tint)
+                    Circle().fill(index == selectedIndex ? Palette.accent : tint)
                         .overlay(Circle().stroke(.black.opacity(0.7), lineWidth: 1))
                         .frame(width: 10, height: 10).position(screenPoint(point, size: size))
                 }

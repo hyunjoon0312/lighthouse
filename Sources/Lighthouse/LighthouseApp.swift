@@ -6,6 +6,9 @@ import LighthouseCore
 struct LighthouseApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var session = LibrarySession()
+    /// 작업 화면(`WorkspaceView`)과 같은 키로 사이드바·오른쪽 패널을 숨긴다.
+    @AppStorage("showsSidebar") private var showsSidebar = true
+    @AppStorage("showsInspector") private var showsInspector = true
     private var library: LibraryModel { session.library }
 
     var body: some Scene {
@@ -69,6 +72,13 @@ struct LighthouseApp: App {
             }
             // 한 글자 단축키는 글자 칸 입력을 가로채지 않도록 메뉴에 등록하지 않고 이름에만 적는다.
             CommandGroup(before: .toolbar) {
+                Button(showsSidebar ? "사이드바 가리기" : "사이드바 보기") { showsSidebar.toggle() }
+                    .keyboardShortcut("s", modifiers: [.control, .command])
+                    .disabled(library.hasModalPresentation)
+                Button(showsInspector ? "보정 패널 가리기" : "보정 패널 보기") { showsInspector.toggle() }
+                    .keyboardShortcut("i", modifiers: [.option, .command])
+                    .disabled(library.hasModalPresentation)
+                Divider()
                 Button("그리드 (G)") { library.setMode(.grid) }
                     .disabled(library.hasModalPresentation)
                 Button("사진 (E)") { library.setMode(.edit) }

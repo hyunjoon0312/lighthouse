@@ -79,6 +79,19 @@ final class UISnapshotTests: XCTestCase {
         model.setMode(.edit)
         try await render(WorkspaceView(), model, wide, "edit", settle: 3)
         try await render(WorkspaceView(), model, narrow, "edit-narrow")
+        // 보기 메뉴로 사이드바·오른쪽 패널을 숨긴 좁은 창. 다른 장면에 남지 않게 되돌린다.
+        UserDefaults.standard.set(false, forKey: "showsSidebar")
+        UserDefaults.standard.set(false, forKey: "showsInspector")
+        try await render(WorkspaceView(), model, narrow, "edit-no-panels")
+        UserDefaults.standard.removeObject(forKey: "showsSidebar")
+        UserDefaults.standard.removeObject(forKey: "showsInspector")
+        // 경계선을 끌어 넓힌 패널. 좁은 창에서는 가운데가 위쪽 막대 너비보다 좁아지지 않게 줄어든다.
+        UserDefaults.standard.set(320.0, forKey: "sidebarWidth")
+        UserDefaults.standard.set(440.0, forKey: "inspectorWidth")
+        try await render(WorkspaceView(), model, wide, "edit-wide-panels")
+        try await render(WorkspaceView(), model, narrow, "edit-wide-panels-narrow")
+        UserDefaults.standard.removeObject(forKey: "sidebarWidth")
+        UserDefaults.standard.removeObject(forKey: "inspectorWidth")
         // 값 표시와 나눠 보기를 보려고 몇 가지를 바꿔 둔다.
         var edited = lead.edits
         edited.contrast = 1.1; edited.highlights = 0.63; edited.shadows = 0.35; edited.clarity = 0.2
@@ -86,6 +99,13 @@ final class UISnapshotTests: XCTestCase {
         edited.sharpness = 0.6; edited.vignette = -0.3
         model.updateEdits(edited)
         try await render(InspectorView(photo: model.selection ?? lead), model, CGSize(width: 300, height: 3400), "inspector")
+        // 접히는 묶음을 모두 펼친 모습. 다른 장면에 남지 않게 되돌린다.
+        let sectionKeys = ["marks", "presets", "light", "color", "curve", "hsl", "grading", "detail", "geometry", "raw",
+                           "effects", "calibration", "lut", "fileInfo"].map { "inspector.section." + $0 } + ["historyPanelExpanded"]
+        for key in sectionKeys { UserDefaults.standard.set(true, forKey: key) }
+        try await render(InspectorView(photo: model.selection ?? lead), model, CGSize(width: 300, height: 4600),
+                         "inspector-expanded")
+        for key in sectionKeys { UserDefaults.standard.removeObject(forKey: key) }
         model.toggleSplit()
         try await render(WorkspaceView(), model, wide, "split", settle: 3)
         model.toggleSplit()

@@ -5,11 +5,10 @@ import LighthouseCore
 struct EditHistoryPanel: View {
     @EnvironmentObject private var model: LibraryModel
     let photo: PhotoAsset
-    @AppStorage("historyPanelExpanded") private var expanded = false
     @State private var snapshotName = ""
 
     var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
+        InspectorSection("스냅숏 · 보정 기록", storageKey: "historyPanelExpanded", expandedByDefault: false) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     TextField("스냅숏 이름", text: $snapshotName).textFieldStyle(.roundedBorder)
@@ -59,9 +58,7 @@ struct EditHistoryPanel: View {
                     .accessibilityLabel("\(entry.title) 상태로 돌아가기")
                 }
             }
-            .padding(.top, 6)
-        } label: {
-            Text("스냅숏 · 보정 기록").font(.caption.weight(.bold)).foregroundStyle(.secondary)
+            .tint(Palette.inactive)
         }
     }
 

@@ -33,6 +33,7 @@ struct RetouchControls: View {
                     model.isPickingCloneSource = true
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(Palette.accent)
                 .accessibilityLabel("복제 소스 선택")
                 if model.cloneSource != nil {
                     Text("소스가 선택되었습니다. 사진 위를 드래그해 복제하세요.")

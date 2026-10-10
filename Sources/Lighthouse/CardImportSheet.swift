@@ -18,7 +18,7 @@ struct CardImportSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Image(systemName: "sdcard").font(.title2).foregroundStyle(.orange)
+                Image(systemName: "sdcard").font(.title2).foregroundStyle(Palette.accent)
                 Text("카드에서 복사해 가져오기").font(.title2.weight(.semibold))
             }
             Text("카드의 원본은 그대로 두고 사진을 아래 폴더로 복사한 뒤 가져옵니다. 카드를 빼도 계속 보고 보정할 수 있습니다.")

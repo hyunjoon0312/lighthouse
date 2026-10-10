@@ -9,8 +9,6 @@ struct ColorGradingControls: View {
 
     var body: some View {
         Group {
-            Divider()
-            Text("컬러 그레이딩").font(.caption.weight(.bold)).foregroundStyle(.secondary)
             HStack(spacing: 4) {
                 ForEach(ColorGradeRegion.allCases, id: \.self) { item in
                     regionButton(item)
@@ -47,6 +45,7 @@ struct ColorGradingControls: View {
                 update(continuous: true) { $0.balance = value.isFinite ? min(1, max(-1, value / 100)) : 0 }
             }
             Button("\(region.title) 초기화") { resetZone() }
+                .buttonStyle(.bordered).controlSize(.small)
                 .disabled(zone == ColorGradeZone())
                 .accessibilityLabel("\(region.title) 컬러 그레이딩 초기화")
         }
@@ -73,7 +72,7 @@ struct ColorGradingControls: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.accentColor, lineWidth: selected ? 1.5 : 0))
+        .overlay(RoundedRectangle(cornerRadius: 5).stroke(Palette.accent, lineWidth: selected ? 1.5 : 0))
         .accessibilityLabel(item.title)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }

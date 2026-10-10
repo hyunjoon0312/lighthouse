@@ -31,6 +31,7 @@ struct NoiseReductionControls: View {
                 }
             }
             .pickerStyle(.segmented)
+            .font(.caption)
             .accessibilityLabel("노이즈 감소 방식")
 
             SliderRow(title: "노이즈 감소 강도", value: settings.amount * 100, range: 0...100,

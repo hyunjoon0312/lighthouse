@@ -77,7 +77,7 @@ struct ExportSheet: View {
 
     private var header: some View {
         HStack {
-            Image(systemName: "square.and.arrow.up").font(.title2).foregroundStyle(.orange)
+            Image(systemName: "square.and.arrow.up").font(.title2).foregroundStyle(Palette.accent)
             Text("내보내기").font(.title2.weight(.semibold))
             Spacer()
             if showsEditedPreview && previewModel.isPreparing { ProgressView().controlSize(.small) }

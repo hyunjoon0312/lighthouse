@@ -86,6 +86,47 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertEqual(model.selectedID, photos[1].id)
     }
 
+    /// 오른쪽 패널의 묶음 제목을 오른쪽 클릭하면 그 묶음 값만 기본값으로 돌리고, ⌘Z 한 번으로 돌아온다.
+    func testSectionHeaderMenuResetsOnlyThatSection() async throws {
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 1)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
+                              backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        defer { window.contentView = nil }
+        model.select(model.visiblePhotos[0])
+        model.setMode(.edit)
+        var edits = try XCTUnwrap(model.selection).edits
+        edits.exposure = 0.8; edits.contrast = 1.2; edits.vibrance = 0.3
+        model.updateEdits(edits)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        host.layoutSubtreeIfNeeded()
+
+        // 오른쪽 패널(x 1140–1440)을 위에서부터 오른쪽 클릭해 "빛" 제목 줄을 찾는다.
+        let title = "‘빛’ 초기화"
+        let found = try stride(from: 60, to: size.height - 20, by: 4).lazy.compactMap { top -> NSMenu? in
+            let point = NSPoint(x: 1190, y: size.height - top)
+            let event = try XCTUnwrap(NSEvent.mouseEvent(
+                with: .rightMouseDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            let menu = host.hitTest(point)?.menu(for: event) ?? host.menu(for: event)
+            return menu?.indexOfItem(withTitle: title) ?? -1 >= 0 ? menu : nil
+        }.first
+        let menu = try XCTUnwrap(found, "빛 제목 줄의 오른쪽 클릭 메뉴가 없다")
+        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: title)).isEnabled, "바뀐 묶음은 초기화할 수 있다")
+        try choose([title], in: menu)
+        var current = try XCTUnwrap(model.selection).edits
+        XCTAssertEqual(current.exposure, EditSettings.neutral.exposure)
+        XCTAssertEqual(current.contrast, EditSettings.neutral.contrast)
+        XCTAssertEqual(current.vibrance, 0.3, "색상 묶음은 그대로")
+
+        model.undo()
+        current = try XCTUnwrap(model.selection).edits
+        XCTAssertEqual(current.exposure, 0.8)
+        XCTAssertEqual(current.contrast, 1.2)
+    }
+
     /// 사진 보기의 필름 스트립과 여러 장 보기에서는 고른 사진이 여러 장이어도 누른 사진 한 장에 적용하고 그 사진을 기준으로 삼는다.
     func testRightClickInFilmstripAndSurveyActsOnClickedPhoto() async throws {
         let (model, _, _) = try await TestSupport.startedModel(self, photos: 4)

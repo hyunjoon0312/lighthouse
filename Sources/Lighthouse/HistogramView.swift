@@ -32,7 +32,8 @@ struct HistogramView: View {
                         .frame(maxHeight: .infinity)
                 }
             }
-            .frame(height: 78)
+            // 그리드처럼 히스토그램을 계산하지 않는 화면에서는 안내 한 줄 높이로 줄여 아래 항목을 올린다.
+            .frame(height: model.histogram == nil && !model.showsSingleImage ? 30 : 78)
             if let histogram = model.histogram {
                 Text(String(format: "하이라이트 %.1f%% · 섀도 %.1f%% 잘림", histogram.highlightClipped * 100,
                             histogram.shadowClipped * 100))

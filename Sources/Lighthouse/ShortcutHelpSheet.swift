@@ -31,6 +31,7 @@ enum ShortcutGuide {
             Entry(keys: "J", action: "하이라이트·섀도 잘림 표시"),
             Entry(keys: "Z", action: "100% 보기 전환 (가운데 기준)"),
             Entry(keys: "F / Esc", action: "사진만 크게 보기(패널을 숨기고 전체 화면) / 끝내기"),
+            Entry(keys: "⌃⌘S / ⌥⌘I", action: "왼쪽 사이드바 / 오른쪽 보정 패널 가리기·보기"),
         ]),
         Section(title: "표시", entries: [
             Entry(keys: "0–5", action: "별점 설정 (그리드에서 여러 장을 골랐으면 모두에)"),

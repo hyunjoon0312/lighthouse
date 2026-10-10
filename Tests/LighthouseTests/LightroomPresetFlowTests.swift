@@ -259,9 +259,12 @@ final class LightroomPresetFlowTests: XCTestCase {
         model.updateEdits(toneEdits)
         try await renderSnapshot(InspectorView(photo: try XCTUnwrap(model.selection)), model: model,
                                  size: CGSize(width: 300, height: 2100), name: "tone-inspector-300", directory: directory)
-        try await renderSnapshot(AdvancedColorControls(edits: toneEdits)
+        try await renderSnapshot(VStack(alignment: .leading, spacing: 12) {
+            ToneCurveControls(edits: toneEdits)
+            GrainControls(edits: toneEdits)
+        }
             .padding(12)
-            .background(Color(red: 0.145, green: 0.152, blue: 0.164)), model: model,
+            .background(Palette.panel), model: model,
                                  size: CGSize(width: 300, height: 900), name: "tone-advanced-color-grain-300",
                                  directory: directory)
 

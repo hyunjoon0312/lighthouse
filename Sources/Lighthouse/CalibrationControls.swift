@@ -15,9 +15,6 @@ struct CalibrationControls: View {
 
     var body: some View {
         Group {
-            Divider()
-            Text("캘리브레이션").font(.caption.weight(.bold)).foregroundStyle(.secondary)
-                .help("원색의 색조·채도와 그림자 틴트를 바꿉니다. Lighthouse 수식이며 Adobe 결과와 다를 수 있습니다.")
             ForEach(Self.rows, id: \.0) { title, path in
                 let value = edits.calibration[keyPath: path] * 100
                 SliderRow(title: title, value: value, range: -100...100,
@@ -30,7 +27,10 @@ struct CalibrationControls: View {
                 next.calibration = .neutral
                 model.updateEdits(next)
             }
+            .buttonStyle(.bordered).controlSize(.small)
             .disabled(edits.calibration.isNeutral)
+            Text("원색의 색조·채도와 그림자 틴트를 바꿉니다. Lighthouse 수식이라 Adobe 결과와 다를 수 있습니다.")
+                .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
 

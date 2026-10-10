@@ -46,7 +46,7 @@ struct PeopleSheet: View {
             }
         }
         .frame(minWidth: 760, idealWidth: 940, minHeight: 560, idealHeight: 650)
-        .background(Color(red: 0.105, green: 0.112, blue: 0.122))
+        .background(Palette.background)
         .confirmationDialog("사람 이름 삭제", isPresented: Binding(
             get: { deletingPerson != nil },
             set: { if !$0 { deletingPerson = nil } }
@@ -156,7 +156,7 @@ struct PeopleSheet: View {
             Text("\(count)").font(.caption).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(selected ? Color.accentColor.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 8))
+        .background(selected ? Palette.accent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 8))
         .padding(.horizontal, 6)
         .contentShape(Rectangle())
     }
@@ -252,11 +252,11 @@ struct PeopleSheet: View {
             }
         }
         .padding(10)
-        .background(selected ? Color.accentColor.opacity(0.22) : Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
+        .background(selected ? Palette.accent.opacity(0.22) : Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
         .overlay(alignment: .topTrailing) {
             if item.personID == nil {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(selected ? Color.accentColor : .secondary).padding(7)
+                    .foregroundStyle(selected ? Palette.accent : .secondary).padding(7)
             }
         }
         .contentShape(Rectangle())

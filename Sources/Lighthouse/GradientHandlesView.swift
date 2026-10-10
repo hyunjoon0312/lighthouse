@@ -28,7 +28,7 @@ struct GradientHandlesView: View {
             .allowsHitTesting(false)
             ForEach(gradient.handles, id: \.handle) { item in
                 Circle()
-                    .fill(item.handle == .center ? Color.orange : Color.white)
+                    .fill(item.handle == .center ? Palette.accent : Color.white)
                     .overlay(Circle().stroke(Color.black.opacity(0.6), lineWidth: 1))
                     .frame(width: 13, height: 13)
                     .contentShape(Circle().inset(by: -6))

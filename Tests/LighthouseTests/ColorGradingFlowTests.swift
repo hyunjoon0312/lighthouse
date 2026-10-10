@@ -145,7 +145,7 @@ final class ColorGradingFlowTests: XCTestCase {
         model.updateEdits(edits)
         try await renderSnapshot(ColorGradingControls(edits: edits)
             .padding(12)
-            .background(Color(red: 0.145, green: 0.152, blue: 0.164)), model: model,
+            .background(Palette.panel), model: model,
                                  size: CGSize(width: 300, height: 520), name: "color-grading-300", directory: directory)
         try await renderSnapshot(InspectorView(photo: try XCTUnwrap(model.selection)), model: model,
                                  size: CGSize(width: 300, height: 2600), name: "color-grading-inspector-300",

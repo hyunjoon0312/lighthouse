@@ -27,11 +27,11 @@ final class UIEventTests: XCTestCase {
         NSPoint(x: point.x, y: (window.contentView?.bounds.height ?? size.height) - point.y)
     }
 
-    private func mouse(_ window: NSWindow, _ type: NSEvent.EventType, _ point: CGPoint) async throws {
+    private func mouse(_ window: NSWindow, _ type: NSEvent.EventType, _ point: CGPoint, clickCount: Int = 1) async throws {
         let event = try XCTUnwrap(NSEvent.mouseEvent(
             with: type, location: windowPoint(window, point), modifierFlags: [],
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
-            eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1))
+            eventNumber: 0, clickCount: clickCount, pressure: type == .leftMouseUp ? 0 : 1))
         window.sendEvent(event)
         try await Task.sleep(nanoseconds: 60_000_000)
     }
@@ -73,6 +73,31 @@ final class UIEventTests: XCTestCase {
         let screen = window.convertPoint(toScreen: windowPoint(window, point))
         let mainHeight = try XCTUnwrap(NSScreen.screens.first).frame.height
         CGWarpMouseCursorPosition(CGPoint(x: screen.x, y: mainHeight - screen.y))
+    }
+
+    /// 포인터를 창 안의 그 위치로 옮긴 것처럼 추적 영역 소유자에게 마우스 이동을 넘기고, 그때의 커서를 돌려준다.
+    /// 실제로는 창 서버가 활성 앱의 추적 영역에 마우스 이동을 보낸다.
+    private func hover(_ window: NSWindow, _ host: NSView, at point: CGPoint) async throws -> NSCursor {
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .mouseMoved, location: windowPoint(window, point), modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+            eventNumber: 0, clickCount: 0, pressure: 0))
+        for area in host.trackingAreas where area.options.contains(.mouseMoved) {
+            // SwiftUI의 커서 담당(PointerBridge)은 NSResponder가 아니어서 셀렉터로 보낸다.
+            if let owner = area.owner as? NSObject, owner.responds(to: #selector(NSResponder.mouseMoved(with:))) {
+                owner.perform(#selector(NSResponder.mouseMoved(with:)), with: event)
+            }
+        }
+        try await Task.sleep(nanoseconds: 250_000_000)
+        return NSCursor.current
+    }
+
+    /// 테스트 안에서만 앱이 활성인 것처럼 보이게 한다(커서·포인터 올림은 활성 앱에만 반응한다). 돌려받은 함수로 되돌린다.
+    private func pretendActive() throws -> () -> Void {
+        let isActive = try XCTUnwrap(class_getInstanceMethod(NSApplication.self, #selector(getter: NSApplication.isActive)))
+        let alwaysActive: @convention(block) (AnyObject) -> Bool = { _ in true }
+        let original = method_setImplementation(isActive, imp_implementationWithBlock(alwaysActive))
+        return { method_setImplementation(isActive, original) }
     }
 
     /// 위쪽은 푸른 회색, 아래쪽은 붉은 회색인 3:2 사진.
@@ -234,10 +259,8 @@ final class UIEventTests: XCTestCase {
             throw XCTSkip("LIGHTHOUSE_UI_EVENTS를 주면 창을 띄워 회색 찍기 커서를 확인한다.")
         }
         let (model, _, _) = try await TestSupport.startedModel(self, photos: 1)
-        let isActive = try XCTUnwrap(class_getInstanceMethod(NSApplication.self, #selector(getter: NSApplication.isActive)))
-        let alwaysActive: @convention(block) (AnyObject) -> Bool = { _ in true }
-        let original = method_setImplementation(isActive, imp_implementationWithBlock(alwaysActive))
-        defer { method_setImplementation(isActive, original) }
+        let restoreActive = try pretendActive()
+        defer { restoreActive() }
         let window = KeyWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                                backing: .buffered, defer: false)
         let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
@@ -250,20 +273,7 @@ final class UIEventTests: XCTestCase {
         try await TestSupport.wait("render") { model.rendered != nil }
         try await Task.sleep(nanoseconds: 1_000_000_000)
 
-        func cursor(at point: CGPoint) async throws -> NSCursor {
-            let event = try XCTUnwrap(NSEvent.mouseEvent(
-                with: .mouseMoved, location: windowPoint(window, point), modifierFlags: [],
-                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
-                eventNumber: 0, clickCount: 0, pressure: 0))
-            for area in host.trackingAreas where area.options.contains(.mouseMoved) {
-                // SwiftUI의 커서 담당(PointerBridge)은 NSResponder가 아니어서 셀렉터로 보낸다.
-                if let owner = area.owner as? NSObject, owner.responds(to: #selector(NSResponder.mouseMoved(with:))) {
-                    owner.perform(#selector(NSResponder.mouseMoved(with:)), with: event)
-                }
-            }
-            try await Task.sleep(nanoseconds: 250_000_000)
-            return NSCursor.current
-        }
+        func cursor(at point: CGPoint) async throws -> NSCursor { try await hover(window, host, at: point) }
         let photo = CGPoint(x: 680, y: 470), sidebar = CGPoint(x: 100, y: 600)
         let before = try await cursor(at: photo)
         XCTAssertNotEqual(before, .crosshair, "찍기 전에는 보통 커서")
@@ -279,5 +289,82 @@ final class UIEventTests: XCTestCase {
         try await Task.sleep(nanoseconds: 500_000_000)
         let after = try await cursor(at: photo)
         XCTAssertNotEqual(after, .crosshair, "찍기를 끝내면 돌아온다")
+    }
+
+    /// 사이드바 경계선 위에서는 좌우 조절 커서가 되고, 끌면 너비가 바뀌어 기억되며, 두 번 누르면 기본 너비로 돌아온다.
+    func testPanelEdgeDragResizesAndDoubleClickResets() async throws {
+        guard ProcessInfo.processInfo.environment["LIGHTHOUSE_UI_EVENTS"] != nil else {
+            throw XCTSkip("LIGHTHOUSE_UI_EVENTS를 주면 창을 띄워 패널 경계선 끌기를 확인한다.")
+        }
+        UserDefaults.standard.removeObject(forKey: "sidebarWidth")
+        defer { UserDefaults.standard.removeObject(forKey: "sidebarWidth") }
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 2)
+        let restoreActive = try pretendActive()
+        defer { restoreActive() }
+        let window = KeyWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
+                               backing: .buffered, defer: false)
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil); window.contentView = nil }
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        // 기본 사이드바 224pt 오른쪽의 1pt 경계선. 잡는 영역은 양옆으로 넓다.
+        let edge = CGPoint(x: 226, y: 600), inSidebar = CGPoint(x: 100, y: 600)
+        let plain = try await hover(window, host, at: inSidebar)
+        let resize = try await hover(window, host, at: edge)
+        XCTAssertNotEqual(resize, plain, "경계선 위에서는 커서가 바뀐다")
+        XCTAssertNotEqual(resize, .arrow)
+
+        try await mouse(window, .leftMouseDown, edge)
+        for step in 1...6 {
+            try await mouse(window, .leftMouseDragged, CGPoint(x: edge.x + CGFloat(step * 10), y: edge.y))
+        }
+        try await mouse(window, .leftMouseUp, CGPoint(x: edge.x + 60, y: edge.y))
+        try await TestSupport.wait("resize", timeout: 5) {
+            abs(UserDefaults.standard.double(forKey: "sidebarWidth") - 284) < 1
+        }
+
+        let moved = CGPoint(x: edge.x + 60, y: edge.y)
+        try await mouse(window, .leftMouseDown, moved)
+        try await mouse(window, .leftMouseUp, moved)
+        try await mouse(window, .leftMouseDown, moved, clickCount: 2)
+        try await mouse(window, .leftMouseUp, moved, clickCount: 2)
+        try await TestSupport.wait("reset", timeout: 5) {
+            UserDefaults.standard.double(forKey: "sidebarWidth") == PanelLayout.sidebarDefault
+        }
+    }
+
+    /// 그리드 칸의 선택 원은 평소 숨어 있어 누르면 칸을 고르고, 포인터를 올린 칸에서는 보여 눌러 여러 장을 고른다.
+    func testHoverRevealsSelectionToggle() async throws {
+        guard ProcessInfo.processInfo.environment["LIGHTHOUSE_UI_EVENTS"] != nil else {
+            throw XCTSkip("LIGHTHOUSE_UI_EVENTS를 주면 창을 띄워 포인터 올림을 확인한다.")
+        }
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 4)
+        let restoreActive = try pretendActive()
+        defer { restoreActive() }
+        let window = KeyWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
+                               backing: .buffered, defer: false)
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil); window.contentView = nil }
+        let photos = model.visiblePhotos
+        model.select(photos[0])
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        // 1440×900 그리드 첫 줄 칸의 오른쪽 위 선택 원 가운데.
+        func toggle(_ column: Int) -> CGPoint { CGPoint(x: 428 + CGFloat(column) * 221, y: 137) }
+        _ = try await hover(window, host, at: CGPoint(x: 100, y: 600))
+        try await click(window, toggle(2))
+        try await TestSupport.wait("plain click selects tile", timeout: 5) { model.selectedPhotoIDs == [photos[2].id] }
+
+        _ = try await hover(window, host, at: toggle(1))
+        try await click(window, toggle(1))
+        try await TestSupport.wait("hover toggle adds", timeout: 5) {
+            model.selectedPhotoIDs == [photos[2].id, photos[1].id]
+        }
     }
 }

@@ -17,7 +17,7 @@ struct ReferenceMatchSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
-                    Image(systemName: "camera.filters").font(.title2).foregroundStyle(.orange)
+                    Image(systemName: "camera.filters").font(.title2).foregroundStyle(Palette.accent)
                     Text("참조 사진 색감 맞추기").font(.title2.weight(.semibold))
                     Spacer()
                     Button("닫기") { dismiss() }

@@ -16,12 +16,12 @@ struct LightroomPresetImportSheet: View {
                 Button("닫기") { dismiss() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .tint(.orange)
+                    .tint(Palette.accent)
             }
         }
         .padding(24)
         .frame(width: 540)
-        .background(Color(red: 0.145, green: 0.152, blue: 0.164))
+        .background(Palette.panel)
     }
 
     @ViewBuilder
@@ -89,7 +89,7 @@ struct LightroomPresetImportSheet: View {
             }
         }
         .padding(10)
-        .background(Color(red: 0.105, green: 0.112, blue: 0.122), in: RoundedRectangle(cornerRadius: 8))
+        .background(Palette.background, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .contain)
     }
 }

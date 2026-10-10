@@ -2,14 +2,6 @@ import AppKit
 import SwiftUI
 import LighthouseCore
 
-private enum Palette {
-    static let background = Color(red: 0.105, green: 0.112, blue: 0.122)
-    static let panel = Color(red: 0.145, green: 0.152, blue: 0.164)
-    static let canvas = Color(red: 0.085, green: 0.09, blue: 0.10)
-    static let accent = Color(red: 1, green: 0.67, blue: 0.30)
-    static let muted = Color.white.opacity(0.52)
-}
-
 struct WorkspaceView: View {
     @EnvironmentObject private var model: LibraryModel
     @State private var keyMonitor: Any?
@@ -31,6 +23,14 @@ struct WorkspaceView: View {
     @State private var smartRenameTarget: SmartFolder?
     @State private var smartRenameText = ""
     @State private var dropFolderID: UUID?
+    /// 사이드바·오른쪽 패널을 숨겨 사진을 크게 본다(보기 메뉴 ⌃⌘S·⌥⌘I). 다음 실행에도 기억한다.
+    @AppStorage("showsSidebar") private var showsSidebar = true
+    @AppStorage("showsInspector") private var showsInspector = true
+    /// 경계선을 끌어 정한 패널 너비. 다음 실행에도 기억한다.
+    @AppStorage("sidebarWidth") private var sidebarWidth = PanelLayout.sidebarDefault
+    @AppStorage("inspectorWidth") private var inspectorWidth = PanelLayout.inspectorDefault
+    /// 끌기 시작할 때의 패널 너비.
+    @State private var panelDragStart: Double?
 
     var body: some View {
         Group {
@@ -143,7 +143,7 @@ struct WorkspaceView: View {
                         Text(summary).foregroundStyle(Palette.muted)
                     }
                     if let rating = model.selection?.rating, rating > 0 {
-                        Text(String(repeating: "★", count: rating)).foregroundStyle(Palette.accent)
+                        RatingStars(rating: rating)
                     }
                     Text("F 또는 Esc로 나가기").foregroundStyle(Palette.muted)
                 }
@@ -161,29 +161,44 @@ struct WorkspaceView: View {
     }
 
     private var workspace: some View {
+        GeometryReader { proxy in
+            let total = proxy.size.width
+            let widths = PanelLayout.widths(total: total, sidebar: sidebarWidth, inspector: inspectorWidth,
+                                            showsSidebar: showsSidebar, showsInspector: showsInspector)
+            workspaceColumns(total: total, sidebar: widths.sidebar, inspector: widths.inspector)
+        }
+    }
+
+    private func workspaceColumns(total: Double, sidebar sidebarShown: Double, inspector inspectorShown: Double) -> some View {
         HStack(spacing: 0) {
-            sidebar.frame(width: 224)
-            Rectangle().fill(.white.opacity(0.08)).frame(width: 1)
+            if showsSidebar {
+                sidebar.frame(width: sidebarShown)
+                panelResizeHandle("사이드바", width: $sidebarWidth, shown: sidebarShown, range: PanelLayout.sidebarRange,
+                                  defaultWidth: PanelLayout.sidebarDefault, grows: 1, total: total, other: inspectorShown)
+            }
             VStack(spacing: 0) {
                 toolbar
-                Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
-                quickCullingBar
-                Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
-                if !model.photos.isEmpty {
-                    selectionToolbar
-                    Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                Rectangle().fill(Palette.hairline).frame(height: 1)
+                if model.photos.isEmpty {
+                    quickCullingBar
+                } else {
+                    markAndSelectionBar
                 }
+                Rectangle().fill(Palette.hairline).frame(height: 1)
                 if model.filter == .bursts {
                     BurstBar()
-                    Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
+                    Rectangle().fill(Palette.hairline).frame(height: 1)
                 }
                 mainContent.frame(maxWidth: .infinity, maxHeight: .infinity)
                 statusBar
                 // 그리드는 같은 사진을 이미 모두 보여 주므로 필름 스트립을 두지 않는다.
                 if model.mode != .grid && !model.visiblePhotos.isEmpty { filmstrip }
             }
-            Rectangle().fill(.white.opacity(0.08)).frame(width: 1)
-            inspector.frame(width: 300)
+            if showsInspector {
+                panelResizeHandle("보정 패널", width: $inspectorWidth, shown: inspectorShown, range: PanelLayout.inspectorRange,
+                                  defaultWidth: PanelLayout.inspectorDefault, grows: -1, total: total, other: sidebarShown)
+                inspector.frame(width: inspectorShown)
+            }
         }
         .dropDestination(for: URL.self) { urls, _ in model.importDropped(urls) } isTargeted: { fileDropTargeted = $0 }
         .overlay {
@@ -194,6 +209,42 @@ struct WorkspaceView: View {
                     .allowsHitTesting(false)
             }
         }
+    }
+
+    /// 패널 사이 경계선. 끌어서 너비를 바꾸고, 두 번 누르면 기본 너비로 돌아간다.
+    /// `grows`는 오른쪽으로 끌 때 패널이 넓어지면 1, 좁아지면 -1이다.
+    private func panelResizeHandle(_ title: String, width: Binding<Double>, shown: Double, range: ClosedRange<Double>,
+                                   defaultWidth: Double, grows: Double, total: Double, other: Double) -> some View {
+        let dividers = Double((showsSidebar ? 1 : 0) + (showsInspector ? 1 : 0))
+        let set = { (proposed: Double) in
+            width.wrappedValue = PanelLayout.dragged(proposed, range: range, total: total, other: other, dividers: dividers)
+        }
+        return Rectangle().fill(Palette.hairline).frame(width: 1)
+            .overlay {
+                // 1pt 선은 잡기 어려워 양옆으로 넓힌 영역에서 끈다.
+                Color.clear.frame(width: 8).contentShape(Rectangle())
+                    .pointerStyle(.columnResize)
+                    .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { drag in
+                            let start = panelDragStart ?? shown
+                            panelDragStart = start
+                            set(start + grows * drag.translation.width)
+                        }
+                        .onEnded { _ in panelDragStart = nil })
+                    .onTapGesture(count: 2) { width.wrappedValue = defaultWidth }
+                    .help("끌어서 \(title) 너비 조절 · 두 번 누르면 기본 너비")
+            }
+            .zIndex(1)
+            .accessibilityElement()
+            .accessibilityLabel("\(title) 너비")
+            .accessibilityValue("\(Int(shown))포인트")
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: set(shown + 20)
+                case .decrement: set(shown - 20)
+                @unknown default: break
+                }
+            }
     }
 
     private var sidebar: some View {
@@ -312,6 +363,7 @@ struct WorkspaceView: View {
                 Label("카드에서 복사…", systemImage: "sdcard").frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
+            .tint(Palette.inactive)
             .accessibilityLabel("카드에서 복사해 가져오기")
             .disabled(!model.catalogLoaded || model.isImporting || model.isExporting)
             .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 16)
@@ -333,7 +385,7 @@ struct WorkspaceView: View {
                 if let count { Text("\(count)").font(.caption).foregroundStyle(Palette.muted) }
             }
             .font(.system(size: 13, weight: selected ? .semibold : .regular))
-            .foregroundStyle(selected ? Palette.accent : Color.white.opacity(0.82))
+            .foregroundStyle(selected ? Palette.accent : Palette.inactive)
             .padding(.horizontal, 12).padding(.vertical, 9)
             .background(selected ? Palette.accent.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 8))
         }
@@ -345,6 +397,7 @@ struct WorkspaceView: View {
 
     private var toolbar: some View {
         HStack(spacing: 12) {
+            panelToggle(shows: $showsSidebar, icon: "sidebar.left", title: "사이드바", shortcut: "⌃⌘S")
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.filterTitle).font(.system(size: 18, weight: .semibold)).lineLimit(1)
                 Text(toolbarSubtitle).font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
@@ -357,12 +410,24 @@ struct WorkspaceView: View {
                 toolbarControls(compact: true)
             }
             .layoutPriority(1)
+            panelToggle(shows: $showsInspector, icon: "sidebar.right", title: "보정 패널", shortcut: "⌥⌘I")
         }
-        .padding(.horizontal, 16).frame(height: 67).background(Palette.panel)
+        .padding(.horizontal, 16).frame(height: 52).background(Palette.panel)
+    }
+
+    /// 사이드바·오른쪽 패널 보이기 단추. 숨긴 동안에는 강조색으로 보여 되돌릴 곳을 알린다.
+    private func panelToggle(shows: Binding<Bool>, icon: String, title: String, shortcut: String) -> some View {
+        Button { shows.wrappedValue.toggle() } label: {
+            Image(systemName: icon).frame(width: 26, height: 26).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(shows.wrappedValue ? Palette.inactive : Palette.accent)
+        .help("\(title) \(shows.wrappedValue ? "가리기" : "보기") (\(shortcut))")
+        .accessibilityLabel("\(title) \(shows.wrappedValue ? "가리기" : "보기")")
     }
 
     private func toolbarControls(compact: Bool) -> some View {
-        HStack(spacing: compact ? 8 : 12) {
+        HStack(spacing: compact ? 6 : 12) {
             HStack(spacing: 5) {
                 ForEach(WorkspaceMode.allCases, id: \.self) { mode in
                     Button { model.setMode(mode) } label: {
@@ -376,17 +441,19 @@ struct WorkspaceView: View {
                 }
             }
             .padding(3).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-            TextField("파일명·키워드 검색", text: $model.search)
-                .textFieldStyle(.roundedBorder).frame(width: compact ? 120 : 165)
+            // 좁은 창에서는 안내 글자가 잘리지 않게 줄인다. 음성 안내 이름은 같다.
+            TextField(compact ? "검색" : "파일명·키워드 검색", text: $model.search)
+                .textFieldStyle(.roundedBorder).frame(width: compact ? 104 : 165)
+                .accessibilityLabel("파일명·키워드 검색")
             if compact {
                 Menu {
                     Picker("별점", selection: $model.minimumRating) { ratingChoices }.pickerStyle(.inline)
                 } label: {
                     Image(systemName: model.minimumRating > 0 ? "star.fill" : "star")
-                        .foregroundStyle(model.minimumRating > 0 ? Palette.accent : Color.white.opacity(0.82))
+                        .foregroundStyle(model.minimumRating > 0 ? Palette.accent : Palette.inactive)
                 }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .tint(model.minimumRating > 0 ? Palette.accent : Color.white.opacity(0.82))
+                .tint(model.minimumRating > 0 ? Palette.accent : Palette.inactive)
                 .help(model.minimumRating > 0 ? "\(model.minimumRating)★ 이상만 보기" : "별점으로 거르기")
                 .accessibilityLabel("별점으로 거르기")
             } else {
@@ -397,7 +464,7 @@ struct WorkspaceView: View {
                 Image(systemName: model.criteria.isEmpty ? "line.3.horizontal.decrease.circle"
                                                          : "line.3.horizontal.decrease.circle.fill")
                     .font(.title3)
-                    .foregroundStyle(model.criteria.isEmpty ? Color.white.opacity(0.82) : Palette.accent)
+                    .foregroundStyle(model.criteria.isEmpty ? Palette.inactive : Palette.accent)
             }
             .buttonStyle(.plain)
             .help("카메라·렌즈·초점거리·ISO·촬영일로 거르고 스마트 폴더로 저장")
@@ -408,7 +475,7 @@ struct WorkspaceView: View {
                     Picker("정렬", selection: $model.sortOrder) { sortChoices }.pickerStyle(.inline)
                 } label: { Image(systemName: "arrow.up.arrow.down") }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .tint(Color.white.opacity(0.82))
+                    .tint(Palette.inactive)
                     .help("정렬: \(model.sortOrder.title)")
                     .accessibilityLabel("정렬")
             } else {
@@ -429,24 +496,65 @@ struct WorkspaceView: View {
     private var quickCullingBar: some View {
         HStack(spacing: 10) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 5) {
-                    quickFlagButton("전체 표시", flag: nil, help: "표시 조건만 지우고 검색·별점·폴더·다른 조건은 유지합니다")
-                    quickFlagButton("채택", flag: .pick, help: "채택 표시한 사진만 봅니다")
-                    quickFlagButton("미분류", flag: PhotoFlag.none, help: "P·X 표시가 없는 사진만 봅니다. 별점과는 별개입니다")
-                    quickFlagButton("제외", flag: .reject, help: "제외 표시한 사진만 봅니다")
-                }
+                quickFlagButtons
                 quickFlagMenu
             }
             Spacer(minLength: 8)
-            if model.isPresetImporting {
-                ProgressView().controlSize(.small).help("Lightroom 프리셋 확인 중")
-            }
-            presetApplyMenu
+            presetControls
         }
         .font(.caption)
         .padding(.horizontal, 16)
         .frame(height: 34)
         .background(Palette.panel)
+    }
+
+    /// 표시 필터·선택 단추·프리셋을 한 줄에 둬 사진 위 막대를 줄인다.
+    /// 한 줄에 들어가지 않는 좁은 창에서는 표시 필터 줄을 위에 따로 둔다.
+    private var markAndSelectionBar: some View {
+        ViewThatFits(in: .horizontal) {
+            mergedMarkBar(segmentedFlags: true, collapsesOptions: false, showsActiveName: true)
+            mergedMarkBar(segmentedFlags: true, collapsesOptions: true, showsActiveName: true)
+            mergedMarkBar(segmentedFlags: false, collapsesOptions: true, showsActiveName: true)
+            mergedMarkBar(segmentedFlags: false, collapsesOptions: true, showsActiveName: false)
+            VStack(spacing: 0) {
+                quickCullingBar
+                Rectangle().fill(Palette.hairline).frame(height: 1)
+                selectionToolbar
+            }
+        }
+    }
+
+    private func mergedMarkBar(segmentedFlags: Bool, collapsesOptions: Bool, showsActiveName: Bool) -> some View {
+        HStack(spacing: 12) {
+            Group {
+                if segmentedFlags { quickFlagButtons } else { quickFlagMenu }
+            }
+            .font(.caption)
+            Rectangle().fill(Palette.hairline).frame(width: 1, height: 18)
+            selectionControls(collapsesOptions: collapsesOptions, showsActiveName: showsActiveName)
+                .buttonStyle(.borderless)
+                .tint(Palette.inactive)
+            Spacer(minLength: 8)
+            presetControls.font(.caption)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 36).background(Palette.panel)
+    }
+
+    private var quickFlagButtons: some View {
+        HStack(spacing: 5) {
+            quickFlagButton("전체 표시", flag: nil, help: "표시 조건만 지우고 검색·별점·폴더·다른 조건은 유지합니다")
+            quickFlagButton("채택", flag: .pick, help: "채택 표시한 사진만 봅니다")
+            quickFlagButton("미분류", flag: PhotoFlag.none, help: "P·X 표시가 없는 사진만 봅니다. 별점과는 별개입니다")
+            quickFlagButton("제외", flag: .reject, help: "제외 표시한 사진만 봅니다")
+        }
+    }
+
+    @ViewBuilder private var presetControls: some View {
+        if model.isPresetImporting {
+            ProgressView().controlSize(.small).help("Lightroom 프리셋 확인 중")
+        }
+        presetApplyMenu
     }
 
     private func quickFlagButton(_ title: String, flag: PhotoFlag?, help: String) -> some View {
@@ -455,7 +563,7 @@ struct WorkspaceView: View {
             .buttonStyle(.plain)
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(selected ? Palette.accent.opacity(0.20) : .white.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
-            .foregroundStyle(selected ? Palette.accent : Color.white.opacity(0.82))
+            .foregroundStyle(selected ? Palette.accent : Palette.inactive)
             .help(help)
             .accessibilityLabel(title)
             .accessibilityAddTraits(selected ? .isSelected : [])
@@ -547,6 +655,8 @@ struct WorkspaceView: View {
             selectionControls(collapsesOptions: true, showsActiveName: false)
         }
         .buttonStyle(.borderless)
+        // 동작 단추는 중립색으로 두고, 강조색은 선택 장수 같은 상태 표시에만 쓴다.
+        .tint(Palette.inactive)
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 36).background(Palette.panel)
@@ -573,9 +683,11 @@ struct WorkspaceView: View {
                 .accessibilityLabel("썸네일 크기")
             }
             if collapsesOptions {
-                Menu("보기") {
+                Menu {
                     Toggle("RAW+JPEG 한 장으로", isOn: $model.collapsesRAWJPEGPairs)
                     Toggle("표시 후 다음 사진", isOn: $model.autoAdvance)
+                } label: {
+                    Text("보기").foregroundStyle(Palette.inactive)
                 }
                 .fixedSize()
                 .help("RAW+JPEG 한 장으로 · 표시 후 다음 사진")
@@ -596,13 +708,15 @@ struct WorkspaceView: View {
             Button("일괄 적용…") { model.showBatchEdit = true }
                 .accessibilityLabel("선택한 사진에 보정 일괄 적용")
                 .disabled(model.selectedPhotoIDs.count < 2 || model.selection == nil)
-            Menu("폴더에 추가") {
+            Menu {
                 if model.photoFolders.isEmpty { Text("내 폴더가 없습니다") }
                 ForEach(model.photoFolders) { folder in
                     Button(folder.name) { model.addSelectedPhotos(to: folder.id) }
                 }
                 Divider()
                 Button("새 폴더에 추가…") { model.presentCreateFolder() }
+            } label: {
+                Text("폴더에 추가").foregroundStyle(Palette.inactive)
             }
             .fixedSize()
             .disabled(model.selectedPhotoIDs.isEmpty || !model.foldersLoaded)
@@ -749,14 +863,20 @@ struct WorkspaceView: View {
                 }
                 if model.mode == .edit {
                     Button(model.showsSplit ? "나눠 보기 끄기" : "전·후 나눠 보기") { model.toggleSplit() }
+                        .tint(model.showsSplit ? Palette.accent : Palette.inactive)
                         .help("왼쪽은 보정 전, 오른쪽은 보정 후 (Y). 선을 끌어 옮깁니다.")
                 }
                 Button(model.actualSize ? "화면 맞춤" : (model.selectionUsesSmartPreview ? "미리보기 확대" : "100%")) { model.toggleActualSize() }
+                    .tint(model.actualSize ? Palette.accent : Palette.inactive)
+                    .help(model.actualSize ? "화면에 맞춰 보기 (Z)" : "100%로 보기 (Z). 사진을 누른 곳이 가운데 옵니다")
                 Button(model.isOriginal ? "보정 보기" : "원본 보기") { model.toggleOriginal() }
+                    .tint(model.isOriginal ? Palette.accent : Palette.inactive)
+                    .help("보정 전 원본과 번갈아 봅니다 (\\)")
             }
             // 단추 글자는 줄바꿈하지 않고, 좁으면 파일 이름·기준 이름·촬영 정보가 먼저 줄어든다.
             .lineLimit(1)
-            .buttonStyle(.borderless).padding(.horizontal, 20).frame(height: 44)
+            // 켜진 보기 단추만 강조색으로 보인다.
+            .buttonStyle(.borderless).tint(Palette.inactive).padding(.horizontal, 20).frame(height: 36)
             canvasPanes
         }
     }
@@ -1111,6 +1231,7 @@ private struct PhotoTile: View {
     let selected: Bool
     let active: Bool
     let imageHeight: CGFloat
+    @State private var hovering = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -1168,7 +1289,7 @@ private struct PhotoTile: View {
                     if active { Text("기준").font(.caption2.weight(.bold)).foregroundStyle(Palette.accent) }
                 }
                 HStack(spacing: 6) {
-                    Text(photo.rating == 0 ? "별점 없음" : String(repeating: "★", count: photo.rating)).font(.caption).foregroundStyle(photo.rating == 0 ? Palette.muted : Palette.accent)
+                    RatingStars(rating: photo.rating)
                     Spacer()
                     // 오른쪽 위는 다중 선택 단추 자리라, 선택·제외 표시는 별점 줄에 둔다.
                     if photo.flag != .none {
@@ -1203,7 +1324,10 @@ private struct PhotoTile: View {
             .buttonStyle(.plain)
             .accessibilityLabel("\(photo.filename) 다중 선택 토글")
             .padding(11)
+            .selectionToggleVisibility(selected: selected, hovering: hovering,
+                                       multiSelecting: model.selectedPhotoIDs.count > 1)
         }
+        .onHover { hovering = $0 }
         .onAppear { model.requestThumbnail(for: photo) }
         .onChange(of: photo.edits) { _, _ in model.requestThumbnail(for: photo) }
     }
@@ -1243,6 +1367,7 @@ private struct FilmstripTile: View {
     let photo: PhotoAsset
     let selected: Bool
     let active: Bool
+    @State private var hovering = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -1289,7 +1414,10 @@ private struct FilmstripTile: View {
             .buttonStyle(.plain)
             .accessibilityLabel("\(photo.filename) 다중 선택 토글")
             .padding(3)
+            .selectionToggleVisibility(selected: selected, hovering: hovering,
+                                       multiSelecting: model.selectedPhotoIDs.count > 1)
         }
+        .onHover { hovering = $0 }
         .help(photo.displayName)
         .onAppear { model.requestThumbnail(for: photo) }
         .onChange(of: photo.edits) { _, _ in model.requestThumbnail(for: photo) }
@@ -1328,8 +1456,34 @@ private struct BurstBar: View {
             }
         }
         .buttonStyle(.borderless)
+        .tint(Palette.inactive)
         .padding(.horizontal, 20).padding(.vertical, 8)
         .background(Palette.panel)
+    }
+}
+
+/// 별점. 별 글자 대신 SF Symbols로 그리고, 0이면 그리지 않되 줄 높이는 지킨다.
+private struct RatingStars: View {
+    let rating: Int
+
+    var body: some View {
+        HStack(spacing: 1) {
+            ForEach(0..<max(0, rating), id: \.self) { _ in Image(systemName: "star.fill") }
+        }
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundStyle(Palette.accent)
+        .frame(minHeight: 14)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(rating == 0 ? "별점 없음" : "별점 \(rating)")
+    }
+}
+
+private extension View {
+    /// 칸마다 늘 보이던 다중 선택 원을 선택했거나, 포인터가 올라왔거나, 여러 장을 고르는 중일 때만 보인다(사진 앱과 같은 방식).
+    /// 숨긴 동안에는 눌리지 않게 해 칸의 오른쪽 위를 눌러도 뜻하지 않게 선택이 바뀌지 않는다. 칸의 접근성 동작으로는 늘 토글할 수 있다.
+    func selectionToggleVisibility(selected: Bool, hovering: Bool, multiSelecting: Bool) -> some View {
+        let visible = selected || hovering || multiSelecting
+        return opacity(visible ? 1 : 0).allowsHitTesting(visible)
     }
 }
 
@@ -1439,7 +1593,7 @@ private struct SurveyCell: View {
                     Image(systemName: photo.flag == .pick ? "flag.fill" : "xmark.circle.fill")
                         .foregroundStyle(photo.flag == .pick ? Palette.accent : .red)
                 }
-                if photo.rating > 0 { Text(String(repeating: "★", count: photo.rating)).foregroundStyle(Palette.accent) }
+                if photo.rating > 0 { RatingStars(rating: photo.rating) }
                 if let label = photo.colorLabel { Circle().fill(label.color).frame(width: 9, height: 9) }
             }
             .font(.caption)
