@@ -1438,6 +1438,8 @@ private struct PhotoTile: View {
         .onHover { hovering = $0 }
         .onAppear { model.requestThumbnail(for: photo) }
         .onChange(of: photo.edits) { _, _ in model.requestThumbnail(for: photo) }
+        // 메모리가 모자라 비우거나 스마트 미리보기를 만들어 썸네일이 지워져도 보이는 칸은 스크롤 없이 다시 채운다.
+        .onChange(of: model.thumbnail(for: photo) == nil) { _, missing in if missing { model.requestThumbnail(for: photo) } }
     }
 
     /// 끄는 동안 보이는 썸네일. 선택한 여러 장을 끌면 장수를 붙인다.
@@ -1529,6 +1531,7 @@ private struct FilmstripTile: View {
         .help(photo.displayName)
         .onAppear { model.requestThumbnail(for: photo) }
         .onChange(of: photo.edits) { _, _ in model.requestThumbnail(for: photo) }
+        .onChange(of: model.thumbnail(for: photo) == nil) { _, missing in if missing { model.requestThumbnail(for: photo) } }
     }
 }
 
