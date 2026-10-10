@@ -51,23 +51,19 @@ struct InspectorView: View {
                         .font(.caption.weight(.semibold)).foregroundStyle(Palette.warning)
                 }
                 HistogramView()
-                InspectorSection("표시 · 키워드", storageKey: "inspector.section.marks") {
-                    ratingRow
-                    ColorLabelRow(current: model.commonMarkColorLabel) { model.toggleMarkColorLabel($0) }
-                    HStack(spacing: 8) {
-                        flagButton("채택", icon: "flag.fill", flag: .pick)
-                        flagButton("제외", icon: "xmark", flag: .reject)
-                        Button("해제") { model.setFlag(.none) }
-                            .accessibilityLabel("채택·제외 표시 해제")
-                            .disabled(!model.canClearMarkFlags)
-                    }.buttonStyle(.bordered)
-                    if model.markTargetPhotos.count > 1 {
-                        Text("별점·표시·라벨은 선택한 \(model.markTargetPhotos.count)장에 함께 적용됩니다.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                    if model.hasMixedMarks {
-                        Text("선택한 사진의 별점·표시·라벨 값이 서로 다릅니다.")
-                            .font(.caption2).foregroundStyle(.secondary)
+                // 그리드에서는 아래 고르기 막대가 별점·표시·라벨을 맡아(여러 장 안내도 막대에 있다) 이 묶음에는 키워드·설명만 둔다.
+                // 다른 보기에서는 보고 있는 한 장에만 붙는다.
+                let marksHere = model.mode != .grid
+                InspectorSection(marksHere ? "표시 · 키워드" : "키워드 · 설명", storageKey: "inspector.section.marks") {
+                    if marksHere {
+                        HStack(spacing: 3) {
+                            Text("별점").font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
+                            Spacer()
+                            MarkRatingStars()
+                        }
+                        ColorLabelRow(current: model.commonMarkColorLabel, names: model.colorLabelNames,
+                                      choose: { model.toggleMarkColorLabel($0) }, rename: { model.showColorLabelNames = true })
+                        MarkFlagButtons()
                     }
                     DescriptionFields(photo: photo)
                 }
@@ -157,7 +153,7 @@ struct InspectorView: View {
         var cleared = edits
         reset(&cleared, .neutral)
         return InspectorSection(title, storageKey: "inspector.section." + key, expandedByDefault: expanded,
-                                modified: cleared != edits, reset: { change { reset(&$0, .neutral) } },
+                                modified: cleared != edits, soloGroup: true, reset: { change { reset(&$0, .neutral) } },
                                 accessory: accessory, content: content)
     }
 
@@ -734,37 +730,6 @@ struct InspectorView: View {
         if let defaultValue { reset = { set(defaultValue); model.endContinuousEdit() } }
         return SliderRow(title: title, value: value, range: range, valueText: String(format: format, value),
                          set: { set($0) }, end: { model.endContinuousEdit() }, reset: reset)
-    }
-
-    private var ratingRow: some View {
-        let rating = model.commonMarkRating
-        return HStack(spacing: 3) {
-            Text("별점").font(.caption).foregroundStyle(.secondary)
-            Spacer()
-            ForEach(1...5, id: \.self) { n in
-                Button { model.toggleMarkRating(n) } label: {
-                    Image(systemName: rating.map { n <= $0 } == true ? "star.fill" : "star")
-                        .foregroundStyle(rating.map { n <= $0 } == true ? Palette.accent : Palette.muted)
-                }.buttonStyle(.plain)
-            }
-        }
-        // 음성 안내에서는 별 다섯 개 대신 하나의 조절 항목으로 읽고 위아래로 바꾼다.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("별점")
-        .accessibilityValue(rating.map { $0 == 0 ? "없음" : "\($0)점" } ?? "여러 값")
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: model.setRating(min(5, (rating ?? 0) + 1))
-            case .decrement: model.setRating(max(0, (rating ?? 0) - 1))
-            @unknown default: break
-            }
-        }
-    }
-
-    private func flagButton(_ title: String, icon: String, flag: PhotoFlag) -> some View {
-        Button { model.setFlag(flag) } label: { Label(title, systemImage: icon) }
-            .tint(model.commonMarkFlag == flag ? Palette.accent : .gray)
-            .accessibilityLabel("\(title) 표시")
     }
 
     private func section(_ title: String) -> some View {

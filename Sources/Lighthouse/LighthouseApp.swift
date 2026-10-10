@@ -90,7 +90,10 @@ struct LighthouseApp: App {
                 Divider()
                 Button(library.showsSplit ? "나눠 보기 끄기 (Y)" : "보정 전·후 나눠 보기 (Y)") { library.toggleSplit() }
                     .disabled(library.selection == nil || library.hasModalPresentation)
-                Button(library.isOriginal ? "보정 보기 (\\)" : "원본 보기 (\\)") { library.toggleOriginal() }
+                // 문자열 리터럴 이름은 Markdown으로 읽혀 `\)`의 \가 사라지므로 그대로 쓴다.
+                Button { library.toggleOriginal() } label: {
+                    Text(verbatim: library.isOriginal ? "보정 보기 (\\)" : "원본 보기 (\\)")
+                }
                     .disabled(library.selection == nil || library.hasModalPresentation)
                 Button(library.actualSize ? "화면 맞춤 (Z)" : (library.selectionUsesSmartPreview ? "미리보기 확대 (Z)" : "100% 보기 (Z)")) { library.toggleActualSize() }
                     .disabled(library.selection == nil || !library.showsSingleImage || library.hasModalPresentation)
@@ -98,6 +101,8 @@ struct LighthouseApp: App {
                     .disabled(library.hasModalPresentation)
                 Button(library.isFocusView ? "사진만 보기 끝내기 (F)" : "사진만 보기 (F)") { library.toggleFocusView() }
                     .disabled(library.selection == nil || library.hasModalPresentation)
+                Toggle("얼굴 확대 보기", isOn: Binding(get: { library.showsFaceCloseups }, set: { library.showsFaceCloseups = $0 }))
+                    .disabled(library.hasModalPresentation)
                 Divider()
             }
             CommandMenu("사진") {
@@ -125,12 +130,16 @@ struct LighthouseApp: App {
                 .disabled(library.selection == nil || library.hasModalPresentation)
                 Menu("색상 라벨") {
                     ForEach(PhotoColorLabel.allCases, id: \.self) { label in
-                        Button(label.title + (label.keyHint.map { " (\($0))" } ?? "")) { library.markFromKeyboard(toggleLabel: label) }
+                        Button(library.labelMenuTitle(label) + (label.keyHint.map { " (\($0))" } ?? "")) { library.markFromKeyboard(toggleLabel: label) }
+                            .disabled(library.selection == nil)
                     }
                     Divider()
                     Button("라벨 떼기") { library.setColorLabel(nil) }
+                        .disabled(library.selection == nil)
+                    Divider()
+                    Button("라벨 이름 정하기…") { library.showColorLabelNames = true }
                 }
-                .disabled(library.selection == nil || library.hasModalPresentation)
+                .disabled(library.hasModalPresentation)
                 Divider()
                 Button("자동 보정") { library.autoAdjust() }
                     .keyboardShortcut("u", modifiers: .command)
@@ -197,6 +206,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationPending = false
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// 라이브러리 창은 하나라 macOS가 붙이는 창 탭 메뉴(탭 막대 보기·모든 탭 보기 등)를 두지 않는다. 창을 만들기 전에 꺼야 한다.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.activate(ignoringOtherApps: true)

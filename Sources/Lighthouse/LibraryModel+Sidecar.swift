@@ -105,9 +105,11 @@ extension LibraryModel {
             if announce { operationMessage = "XMP 사이드카 0개 씀" }
             return
         }
+        sidecarWritesInFlight += requests.count
         sidecarQueue.async {
             let results = Self.writeSidecarRequests(requests)
             DispatchQueue.main.async {
+                self.sidecarWritesInFlight -= requests.count
                 self.finishSidecarWrites(results, announce: announce)
             }
         }

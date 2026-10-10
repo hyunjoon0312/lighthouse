@@ -164,3 +164,13 @@ Astra가 설계, 파일별 구현 계약, 최종 통합·이미지·UI 검증을
 `EditSettings.noiseReduction`에 끔·일반·AI와 강도를 저장한다. 이전 카탈로그는 끔으로 읽고, 전체 보정 복사·일괄 적용·실행 취소·스냅샷에 같은 값을 사용한다. 일반 방식은 Core Image, AI는 번들에 포함한 MIT 라이선스 FFDNet 모델을 Core ML로 실행한다. 사진과 모델 추론은 Mac 안에 머문다.
 
 AI는 방향을 적용한 원본 해상도의 RGB 이미지를 겹치는 타일로 처리한다. 투명도와 범위 밖 하이라이트 잔차를 보존하고 결과 한 장을 재사용한다. RAW 노출·화이트밸런스·현상 옵션은 캐시를 갱신하지만 이후 대비·LUT·출력 크기는 다시 추론하지 않는다. 모델 누락이나 추론 실패는 오류로 표시한다. 사용자 안내는 [노이즈 감소](denoise.md), 저장·색·타일·번들 경계는 [구현 계약](denoise-contract.md)을 따른다.
+
+## 앱 전반 점검 뒤 개선 (2026-10-10)
+
+- 앱 묶음 `Info.plist`에 `CFBundleDevelopmentRegion`·`CFBundleLocalizations`를 `ko`로 밝힌다. 밝히지 않으면 한국어 Mac에서도 macOS가 그리는 메뉴 항목(편집·윈도우·서비스·종료 등)·열기 창·Foundation 오류 설명이 영어로 나왔다. 라이브러리 창은 하나라 `NSWindow.allowsAutomaticWindowTabbing`을 꺼 창 탭 메뉴를 두지 않는다. SwiftUI는 문자열 리터럴 이름을 Markdown으로 읽어 `(\)`의 `\`를 지우므로 그런 이름은 `Text(verbatim:)`으로 쓴다(`SystemLanguageTests`가 화면 문자열을 검사).
+- 색상 라벨 이름(빨강 → 블로그)은 Lightroom 라벨 세트처럼 Mac 설정(`colorLabelNames`)에 둔다. 카탈로그·XMP의 라벨 값은 그대로 색이다.
+- 히스토그램 끌기: 너비의 0–10% 검정, –33% 섀도, –67% 노출, –90% 하이라이트, 나머지 흰색. 히스토그램 너비만큼 끌면 해당 슬라이더 범위의 절반만큼 바뀌며, 끌기 한 번은 연속 편집 한 단계(`updateEdits(continuous:)` → `endContinuousEdit()`)다.
+- 얼굴 확대(`FaceCloseupAnalyzer`): 보정 전 원본 미리보기(긴 변 2048px, 방향 적용)에서 Vision 얼굴 사각형을 큰 것부터 최대 12개 찾고, Core Image 얼굴 검출기의 눈 깜빡임 판정을 겹침(IoU 0.3 이상)으로 짝지어 두 눈을 감았는지 본다(`PhotoQualityAnalyzer.eyesClosed`와 같은 판정). 흐림은 얼굴 영역을 긴 변 128px 회색으로 맞춘 16px 칸 라플라시안 분산의 상위 1/4 평균을 같은 사진의 얼굴끼리만 비교해, 가장 선명한 얼굴의 0.2배 미만일 때만 표시한다. 서로 다른 사람의 선명한 얼굴도 조명·피부에 따라 3배까지 차이 나서(표본 1409 대 452) 낮게 잡았고, 장면마다 질감이 달라 얼굴 하나뿐인 사진은 판단하지 않는다. 결과는 저장하지 않고 원본 경로별로 최근 24장을 기억하며, 사진을 넘기면 시작 전인 분석을 건너뛴다. 얼굴을 누르면 `PhotoGeometry.displayPoint(fromSource:)`로 회전·수평·크롭을 거친 화면 위치를 100%로 연다.
+- 한 묶음만 펴기(Lightroom의 Solo Mode): 오른쪽 패널의 보정 묶음(`editSection`으로 만든 빛~LUT)만 대상이다. 묶음마다 펼침 상태를 따로 기억하는 `inspector.section.*` 설정은 그대로 두고, `inspector.soloMode`가 켜져 있으면 보정 묶음 하나를 펼 때 그린 적 있는 다른 보정 묶음의 설정을 접힘으로 쓴다(`InspectorSolo`). 표시·키워드, 프리셋, 스냅숏, 파일 정보 묶음은 따로 둔다.
+- 그리드 고르기 막대(`CullingBar`): 사용자 결정에 따라 그리드의 오른쪽 패널은 보정 패널로 두고 별점·채택·라벨은 그리드 아래 막대가 맡는다(Lightroom 라이브러리 아래 도구 막대처럼). 막대와 사진 보기 오른쪽 패널은 같은 단추(`MarkRatingStars`·`MarkFlagButtons`·`ColorLabelRow`)를 쓰고 대상은 `markTargetPhotos`(그리드는 고른 사진 모두, 사진 보기는 현재 사진)다. 그리드에서는 오른쪽 패널의 첫 묶음이 "키워드 · 설명"만 남는다.
+- 뒤에서 도는 작업 표시: `LibraryModel.backgroundActivities`가 가져오기·내보내기·Drive 업로드·얼굴 찾기·베스트 컷 분석·LED 띠 분석·묶음 작업(`workflowKind`로 이름)·XMP 사이드카 쓰기(`sidecarWritesInFlight`)·LUT/Lightroom 프리셋 가져오기의 상태를 모아 이름·진행·중지 가능 여부를 만들고, 중지는 각 작업의 기존 중지로 간다. 화면은 사진 아래 상태 줄에 0.8초 넘게 이어지는 작업만 보여 깜박이지 않게 하고, 위쪽 막대는 1100pt 창에서 남는 폭이 없어 쓰지 않는다. 자동 보정·자동 마스크처럼 그 자리에서 결과를 기다리는 짧은 작업과 라이브러리를 열 때 읽는 LUT 목록은 넣지 않는다.

@@ -369,6 +369,34 @@ final class UIEventTests: XCTestCase {
     }
 
     /// 단추와 사이드바 줄은 그림이 없는 빈 곳을 눌러도 동작한다. 보이는 모양 전체가 누름 영역이다.
+    /// 그리드 아래 고르기 막대의 채택 단추는 고른 사진 모두에 붙고, 고르지 않은 사진은 그대로다.
+    func testCullingBarMarksAllSelectedPhotos() async throws {
+        guard ProcessInfo.processInfo.environment["LIGHTHOUSE_UI_EVENTS"] != nil else {
+            throw XCTSkip("LIGHTHOUSE_UI_EVENTS를 주면 창을 띄워 고르기 막대를 누른다.")
+        }
+        for key in ["showsSidebar", "sidebarWidth"] { UserDefaults.standard.removeObject(forKey: key) }
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 3)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
+                              backing: .buffered, defer: false)
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil); window.contentView = nil }
+        let photos = model.visiblePhotos
+        model.select(photos[0])
+        model.togglePhotoSelection(photos[1])
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        // 가운데 열은 사이드바(224pt)와 경계선 뒤에서 시작하고, 막대(36pt)는 창 맨 아래에 있다. 첫 단추가 채택이다.
+        let height = window.contentView?.bounds.height ?? size.height
+        try await click(window, CGPoint(x: 225 + 16 + 14, y: height - 18))
+        try await TestSupport.wait("picked", timeout: 5) {
+            Set(model.photos.filter { $0.flag == .pick }.map(\.id)) == [photos[0].id, photos[1].id]
+        }
+        XCTAssertNotEqual(model.photos.first { $0.id == photos[2].id }?.flag, .pick)
+    }
+
     func testButtonsAndSidebarRowsAcceptClicksAcrossTheirShape() async throws {
         guard ProcessInfo.processInfo.environment["LIGHTHOUSE_UI_EVENTS"] != nil else {
             throw XCTSkip("LIGHTHOUSE_UI_EVENTS를 주면 창을 띄워 누름 영역을 확인한다.")

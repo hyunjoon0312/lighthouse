@@ -73,6 +73,18 @@ final class UISnapshotTests: XCTestCase {
         model.select(photos[0])
         try await render(WorkspaceView(), model, wide, "grid", settle: 3)
         try await render(WorkspaceView(), model, narrow, "grid-narrow")
+        // 두 장을 고른 고르기 막대와 뒤에서 도는 작업 표시·목록. 상태만 꾸며 그리고 되돌린다.
+        model.togglePhotoSelection(photos[1])
+        model.isAnalyzingFaces = true
+        model.faceAnalysisCompleted = 34
+        model.faceAnalysisTotal = 120
+        model.sidecarWritesInFlight = 2
+        try await render(WorkspaceView(), model, narrow, "grid-activity", settle: 2)
+        try await render(BackgroundActivityList(drive: model.driveUpload), model, CGSize(width: 320, height: 190),
+                         "activity-list")
+        model.isAnalyzingFaces = false
+        model.sidecarWritesInFlight = 0
+        model.togglePhotoSelection(photos[1])
 
         let lead = model.photos.first(where: \.isRAW) ?? photos[0]
         model.select(lead)

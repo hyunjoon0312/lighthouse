@@ -206,6 +206,32 @@ final class GoogleDriveUploadTests: XCTestCase {
         XCTAssertEqual(attemptedNames, ["wait-first-edited.jpg"])
     }
 
+    /// 업로드 창을 닫아도 위쪽 작업 표시에 몇 장째인지 보이고, 목록의 중지로 멈춘다.
+    func testUploadAppearsAsBackgroundActivityAndStops() async throws {
+        let first = try makePhoto(name: "activity-first.jpg").0
+        let second = try makePhoto(name: "activity-second.jpg").0
+        let service = DriveServiceSpy(suspendingNames: ["activity-first.jpg"])
+        let drive = makeModel(service: service)
+        let library = LibraryModel(dataDirectory: try TestSupport.temporaryDirectory(self), driveUpload: drive)
+
+        drive.upload(photos: [first, second], content: .original, options: ExportOptions())
+        for _ in 0..<200 {
+            if await service.attemptedNames.count == 1 { break }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let activity = try XCTUnwrap(library.backgroundActivities.first { $0.kind == .driveUpload })
+        XCTAssertEqual(activity.title, "Google Drive 업로드")
+        XCTAssertEqual(activity.detail, "0/2장")
+        XCTAssertEqual(activity.progress, 0)
+        XCTAssertTrue(activity.canCancel)
+
+        library.cancelBackgroundActivity(.driveUpload)
+        try await wait(drive)
+        XCTAssertNil(library.backgroundActivities.first { $0.kind == .driveUpload })
+        let attemptedNames = await service.attemptedNames
+        XCTAssertEqual(attemptedNames, ["activity-first.jpg"], "멈춘 뒤에는 다음 사진을 보내지 않는다")
+    }
+
     private func makeModel(service: DriveServiceSpy) -> GoogleDriveUploadModel {
         let model = GoogleDriveUploadModel(service: service, authorization: DriveAuthorizationStub())
         model.selectedFolderID = "folder-1"

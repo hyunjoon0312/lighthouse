@@ -86,6 +86,32 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertEqual(model.selectedID, photos[1].id)
     }
 
+    /// 색상 라벨 메뉴는 붙인 이름을 함께 보이고(블로그 · 빨강), 이름을 정하는 창을 연다.
+    func testLabelSubmenuShowsNamesAndOffersRenaming() async throws {
+        UserDefaults.standard.removeObject(forKey: "colorLabelNames")
+        defer { UserDefaults.standard.removeObject(forKey: "colorLabelNames") }
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 2)
+        model.setColorLabelNames([.red: "블로그"])
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
+                              backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        defer { window.contentView = nil }
+        let photos = model.visiblePhotos
+        model.select(photos[0])
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        host.layoutSubtreeIfNeeded()
+
+        let labels = try XCTUnwrap(menu(window, host, column: 0).item(withTitle: "색상 라벨")?.submenu)
+        XCTAssertEqual(labels.items.filter { !$0.isSeparatorItem }.map(\.title),
+                       ["블로그 · 빨강", "노랑", "초록", "파랑", "보라", "라벨 떼기", "라벨 이름 정하기…"])
+        try choose(["색상 라벨", "블로그 · 빨강"], in: menu(window, host, column: 0))
+        XCTAssertEqual(model.photo(withID: photos[0].id)?.colorLabel, .red)
+        try choose(["색상 라벨", "라벨 이름 정하기…"], in: menu(window, host, column: 0))
+        XCTAssertTrue(model.showColorLabelNames)
+    }
+
     /// 오른쪽 패널의 묶음 제목을 오른쪽 클릭하면 그 묶음 값만 기본값으로 돌리고, ⌘Z 한 번으로 돌아온다.
     func testSectionHeaderMenuResetsOnlyThatSection() async throws {
         let (model, _, _) = try await TestSupport.startedModel(self, photos: 1)
@@ -125,6 +151,47 @@ final class ContextMenuTests: XCTestCase {
         current = try XCTUnwrap(model.selection).edits
         XCTAssertEqual(current.exposure, 0.8)
         XCTAssertEqual(current.contrast, 1.2)
+    }
+
+    /// 보정 묶음 제목 줄의 "한 묶음만 펴기"를 켜면 그 묶음만 펴고 다른 보정 묶음을 접는다. 표시·키워드 묶음은 그대로다.
+    func testSectionHeaderMenuTurnsOnSoloMode() async throws {
+        let keys = ["light", "color", "geometry", "marks"].map { "inspector.section." + $0 }
+        let clear = { for key in keys + [InspectorSolo.settingKey] { UserDefaults.standard.removeObject(forKey: key) } }
+        clear()
+        defer { clear() }
+        UserDefaults.standard.set(false, forKey: "inspector.section.light")
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 1)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
+                              backing: .buffered, defer: false)
+        let host = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        defer { window.contentView = nil }
+        model.select(model.visiblePhotos[0])
+        model.setMode(.edit)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        host.layoutSubtreeIfNeeded()
+
+        // 접어 둔 "빛" 제목 줄에서 켠다.
+        let title = "한 묶음만 펴기"
+        let found = try stride(from: 60, to: size.height - 20, by: 4).lazy.compactMap { top -> NSMenu? in
+            let point = NSPoint(x: 1190, y: size.height - top)
+            let event = try XCTUnwrap(NSEvent.mouseEvent(
+                with: .rightMouseDown, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            let menu = host.hitTest(point)?.menu(for: event) ?? host.menu(for: event)
+            return menu?.indexOfItem(withTitle: "‘빛’ 초기화") ?? -1 >= 0 ? menu : nil
+        }.first
+        let menu = try XCTUnwrap(found, "빛 제목 줄의 오른쪽 클릭 메뉴가 없다")
+        XCTAssertEqual(try XCTUnwrap(menu.item(withTitle: title)).state, .off)
+        try choose([title], in: menu)
+
+        let defaults = UserDefaults.standard
+        XCTAssertTrue(defaults.bool(forKey: InspectorSolo.settingKey))
+        XCTAssertTrue(defaults.bool(forKey: "inspector.section.light"), "누른 묶음은 펼친다")
+        XCTAssertFalse(defaults.bool(forKey: "inspector.section.color"), "다른 보정 묶음은 접는다")
+        XCTAssertFalse(defaults.bool(forKey: "inspector.section.geometry"))
+        XCTAssertNil(defaults.object(forKey: "inspector.section.marks"), "표시·키워드 묶음은 건드리지 않는다")
     }
 
     /// 사진 보기의 필름 스트립과 여러 장 보기에서는 고른 사진이 여러 장이어도 누른 사진 한 장에 적용하고 그 사진을 기준으로 삼는다.

@@ -20,10 +20,12 @@ struct PhotoContextMenu: View {
         }
         Menu("색상 라벨") {
             ForEach(PhotoColorLabel.allCases, id: \.self) { label in
-                Button(label.title) { act { model.setColorLabel(label) } }
+                Button(model.labelMenuTitle(label)) { act { model.setColorLabel(label) } }
             }
             Divider()
             Button("라벨 떼기") { act { model.setColorLabel(nil) } }
+            Divider()
+            Button("라벨 이름 정하기…") { model.showColorLabelNames = true }
         }
         Menu("폴더에 추가") {
             ForEach(model.photoFolders) { folder in

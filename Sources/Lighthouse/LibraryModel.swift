@@ -216,6 +216,8 @@ final class LibraryModel: ObservableObject {
     @Published var flickerAnalysisMessage: String?
     @Published var workflowProgress = 0.0
     @Published var isRunningWorkflow = false
+    /// 지금 도는 묶음 작업의 종류. 뒤에서 도는 작업 표시에 이름을 보인다.
+    @Published var workflowKind: WorkflowKind?
     @Published var workflowMessage: String?
     @Published var similarPhotoResult: SimilarPhotoResult?
     @Published var smartPreviewRecords: [UUID: SmartPreviewRecord] = [:]
@@ -324,6 +326,30 @@ final class LibraryModel: ObservableObject {
     @Published var autoAdvance = UserDefaults.standard.bool(forKey: "autoAdvanceAfterMark") {
         didSet { UserDefaults.standard.set(autoAdvance, forKey: "autoAdvanceAfterMark") }
     }
+    /// 색상 라벨마다 사용자가 붙인 쓰임 이름(빨강 → 블로그). 없으면 색 이름을 쓴다. Lightroom 라벨 세트처럼 Mac 환경설정에 둔다.
+    @Published private(set) var colorLabelNames: [PhotoColorLabel: String] = Dictionary(uniqueKeysWithValues:
+        (UserDefaults.standard.dictionary(forKey: "colorLabelNames") as? [String: String] ?? [:])
+            .compactMap { key, name in PhotoColorLabel(rawValue: key).map { ($0, name) } }) {
+        didSet {
+            UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: colorLabelNames.map { ($0.key.rawValue, $0.value) }),
+                                      forKey: "colorLabelNames")
+        }
+    }
+    @Published var showColorLabelNames = false
+    /// 사진 보기 오른쪽에 얼굴 확대 줄을 보인다(얼굴이 있는 사진만). Mac 환경설정에 둔다.
+    @Published var showsFaceCloseups = UserDefaults.standard.object(forKey: "showsFaceCloseups") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(showsFaceCloseups, forKey: "showsFaceCloseups")
+            refreshFaceCloseups()
+        }
+    }
+    /// 지금 사진의 얼굴 확대 결과. 다른 사진으로 바뀌면 다시 분석하거나 기억해 둔 결과를 쓴다.
+    @Published var faceCloseups: FaceCloseupResult?
+    /// 100% 보기에서 보이는 자리를 `zoomAnchor`로 옮기라는 요청(얼굴 확대에서 얼굴을 누름).
+    @Published var zoomRequest = 0
+    var faceCloseupCache: [String: FaceCloseupResult] = [:]
+    var faceCloseupCacheOrder: [String] = []
+    var faceCloseupCancellation: CancellationFlag?
     /// 별점·라벨·키워드·설명을 원본 옆 XMP 사이드카로 쓴다. 켜면 지금 사진 전체를 한 번 쓴다.
     @Published var writesXMPSidecars = UserDefaults.standard.bool(forKey: "writesXMPSidecars") {
         didSet {
@@ -332,6 +358,8 @@ final class LibraryModel: ObservableObject {
             if writesXMPSidecars { writeAllSidecars() } else { disableSidecarWrites() }
         }
     }
+    /// 지금 쓰고 있는 XMP 사이드카 장수. 뒤에서 도는 작업 표시에 쓴다.
+    @Published var sidecarWritesInFlight = 0
     let canvas = CanvasStrokeState()
     var gridColumnCount = 1
 
@@ -380,6 +408,7 @@ final class LibraryModel: ObservableObject {
     let saveQueue = DispatchQueue(label: "com.rian.lighthouse.catalog", qos: .utility)
     let splitQueue = DispatchQueue(label: "com.rian.lighthouse.split", qos: .userInitiated)
     let surveyQueue = DispatchQueue(label: "com.rian.lighthouse.survey", qos: .userInitiated)
+    let faceCloseupQueue = DispatchQueue(label: "com.rian.lighthouse.facecloseups", qos: .userInitiated)
     let autoAdjustQueue = DispatchQueue(label: "com.rian.lighthouse.auto", qos: .userInitiated)
     let sidecarQueue = DispatchQueue(label: "com.rian.lighthouse.sidecar", qos: .utility)
     let faceQueue = DispatchQueue(label: "com.rian.lighthouse.faces", qos: .utility)
@@ -544,7 +573,8 @@ final class LibraryModel: ObservableObject {
     var canRedo: Bool { editHistory.canRedo }
     var hasModalPresentation: Bool {
         showBatchEdit || showExport || showCardImport || showShortcuts || showPeople || presetSheet != nil || lightroomPresetSheet != nil || referenceMatchSource != nil || folderSheetRequest != nil ||
-            cropSource != nil || catalogRemoval != nil || showSimilarPhotos || showSmartPreviews || showLibraryBackup || showLibraryRestore || rangeMaskRequest != nil
+            cropSource != nil || catalogRemoval != nil || showSimilarPhotos || showSmartPreviews || showLibraryBackup || showLibraryRestore || rangeMaskRequest != nil ||
+            showColorLabelNames
     }
     var selectedLocal: LocalAdjustment? { selection?.edits.localAdjustments.first { $0.id == selectedLocalID } }
     var canDrawLocal: Bool {
@@ -1328,4 +1358,24 @@ struct CatalogRemoval: Equatable {
     var photos: [PhotoAsset]
     var hiddenCompanions: Int
     var isCopiesOnly: Bool { photos.allSatisfy(\.isVirtualCopy) }
+}
+
+// MARK: - 색상 라벨 이름
+
+extension LibraryModel {
+    /// 화면에 쓰는 라벨 이름. 사용자가 붙인 이름이 없으면 색 이름이다.
+    func labelName(_ label: PhotoColorLabel) -> String { colorLabelNames[label] ?? label.title }
+
+    /// 메뉴·조건 목록의 항목 이름. 이름을 붙였으면 어느 색인지도 함께 보인다(블로그 · 빨강).
+    func labelMenuTitle(_ label: PhotoColorLabel) -> String {
+        colorLabelNames[label].map { "\($0) · \(label.title)" } ?? label.title
+    }
+
+    /// 앞뒤 공백을 지우고 빈 이름은 버리며, 메뉴·패널에 들어가게 20자까지만 남긴다.
+    func setColorLabelNames(_ names: [PhotoColorLabel: String]) {
+        colorLabelNames = names.compactMapValues { name in
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : String(trimmed.prefix(20))
+        }
+    }
 }

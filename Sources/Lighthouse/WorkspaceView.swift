@@ -57,6 +57,7 @@ struct WorkspaceView: View {
         .sheet(isPresented: $model.showBatchEdit) { BatchEditSheet() }
         .sheet(isPresented: $model.showCardImport) { CardImportSheet() }
         .sheet(isPresented: $model.showShortcuts) { ShortcutHelpSheet() }
+        .sheet(isPresented: $model.showColorLabelNames) { ColorLabelNamesSheet() }
         .sheet(isPresented: $model.showPeople) { PeopleSheet() }
         .sheet(item: $model.presetSheet) { request in PresetSheet(request: request) }
         .sheet(item: $model.lightroomPresetSheet) { request in LightroomPresetImportSheet(request: request) }
@@ -193,8 +194,15 @@ struct WorkspaceView: View {
                 }
                 mainContent.frame(maxWidth: .infinity, maxHeight: .infinity)
                 statusBar
-                // 그리드는 같은 사진을 이미 모두 보여 주므로 필름 스트립을 두지 않는다.
-                if model.mode != .grid && !model.visiblePhotos.isEmpty { filmstrip }
+                // 그리드는 같은 사진을 이미 모두 보여 주므로 필름 스트립 대신 고르기 막대를 둔다(오른쪽 패널은 보정용).
+                if !model.visiblePhotos.isEmpty {
+                    if model.mode == .grid {
+                        Rectangle().fill(Palette.hairline).frame(height: 1)
+                        CullingBar()
+                    } else {
+                        filmstrip
+                    }
+                }
             }
             if showsInspector {
                 panelResizeHandle("보정 패널", width: $inspectorWidth, shown: inspectorShown, range: PanelLayout.inspectorRange,
@@ -298,7 +306,7 @@ struct WorkspaceView: View {
                                        selected: model.filter == .smart(folder.id)) {
                                 model.filter = .smart(folder.id)
                             }
-                            .help(folder.criteria.summary().joined(separator: " · "))
+                            .help(folder.criteria.summary(labelName: model.labelName).joined(separator: " · "))
                             Menu {
                                 Button("이름 변경…") { smartRenameText = folder.name; smartRenameTarget = folder }
                                 Button("삭제", role: .destructive) { model.deleteSmartFolder(folder.id) }
@@ -634,8 +642,8 @@ struct WorkspaceView: View {
     /// 보이는 장수와, 걸린 조건(스마트 폴더·조건 창)의 요약.
     private var toolbarSubtitle: String {
         var parts = ["\(model.visiblePhotos.count)장 표시"]
-        if let smart = model.smartFolderCriteria { parts += smart.summary() }
-        parts += model.criteria.summary()
+        if let smart = model.smartFolderCriteria { parts += smart.summary(labelName: model.labelName) }
+        parts += model.criteria.summary(labelName: model.labelName)
         return parts.joined(separator: " · ")
     }
 
@@ -743,7 +751,7 @@ struct WorkspaceView: View {
         } else if !model.catalogLoaded {
             ProgressView("카탈로그 여는 중…").frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.canvas)
         } else if model.photos.isEmpty {
-            emptyState("사진을 가져오세요", icon: "photo.on.rectangle.angled", detail: "폴더나 파일을 선택해 시작하세요. JPEG, HEIC, TIFF와 RAW 파일을 지원합니다.")
+            emptyLibrary
         } else if model.visiblePhotos.isEmpty {
             emptyListState
         } else if model.mode == .grid {
@@ -778,7 +786,7 @@ struct WorkspaceView: View {
                               actionTitle: "검색·조건 지우기", action: model.clearTemporaryFilters)
         }
         let detail: String = switch model.filter {
-        case .picks: "P 키나 오른쪽 패널의 선택 단추로 표시한 사진이 여기에 모입니다."
+        case .picks: "P 키나 오른쪽 패널의 채택 단추로 표시한 사진이 여기에 모입니다."
         case .rejects: "X 키로 제외한 사진이 여기에 모입니다."
         case .edited: "보정한 사진이 여기에 모입니다."
         case .bursts: "1초 안에 이어 찍은 사진이 없습니다."
@@ -800,11 +808,56 @@ struct WorkspaceView: View {
             if let actionTitle, let action {
                 Button(actionTitle, action: action).buttonStyle(.borderedProminent)
             }
-            if model.photos.isEmpty && model.loadError == nil {
-                Button("파일 또는 폴더 선택") { model.presentImport() }.buttonStyle(.borderedProminent).accessibilityLabel("파일 또는 폴더 선택해 가져오기").padding(.top, 8)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.canvas)
+    }
+
+    /// 사진이 하나도 없는 첫 화면. 가져오는 세 가지 길(파일·폴더, 메모리 카드, 끌어 놓기)과 원본 보존을 먼저 알리고,
+    /// 가져온 뒤의 흐름(고르기 → 보정 → 내보내기)을 단축키와 함께 짧게 보여 준다.
+    private var emptyLibrary: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "photo.on.rectangle.angled").font(.system(size: 50, weight: .ultraLight)).foregroundStyle(Palette.accent)
+            Text("사진을 가져오세요").font(.title2.weight(.semibold))
+            Text("원본 파일은 제자리에 그대로 두고, 별점·보정은 Lighthouse에만 저장합니다.")
+                .font(.subheadline).foregroundStyle(Palette.muted).multilineTextAlignment(.center).frame(maxWidth: 460)
+            HStack(spacing: 10) {
+                Button("파일 또는 폴더 선택…") { model.presentImport() }
+                    .buttonStyle(.borderedProminent).tint(Palette.accent)
+                    .accessibilityLabel("파일 또는 폴더 선택해 가져오기")
+                    .help("사진 가져오기 (⌘O)")
+                Button("메모리 카드에서 복사…") { model.showCardImport = true }
+                    // 보조 단추는 사이드바의 카드 단추처럼 중립색이다(본 창 강조색이 테두리 단추 글자에 물들지 않게).
+                    .buttonStyle(.bordered).tint(Palette.inactive)
+                    .accessibilityLabel("메모리 카드에서 복사해 가져오기")
+                    .help("카드의 사진을 사진 폴더로 복사한 뒤 가져옵니다. 카드를 빼도 계속 편집할 수 있습니다 (⇧⌘O)")
+            }
+            .disabled(model.isImporting || model.isExporting)
+            .padding(.top, 4)
+            VStack(spacing: 3) {
+                Text("Finder에서 사진이나 폴더를 이 창으로 끌어 놓아도 됩니다.")
+                Text("JPEG·HEIC·PNG·TIFF와 RAW(RW2 등)를 지원합니다.")
+            }
+            .font(.caption).foregroundStyle(Palette.muted)
+            // 가져온 뒤 바로 쓰는 흐름. 순서가 곧 작업 순서라 번호를 붙인다.
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
+                emptyLibraryStep(1, "고르기", "P 채택 · X 제외 · 1–5 별점")
+                emptyLibraryStep(2, "보정", "E 사진 보기 · ⌘U 자동 보정")
+                emptyLibraryStep(3, "내보내기", "⇧⌘E")
+            }
+            .font(.caption)
+            .padding(.top, 18)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.canvas)
+    }
+
+    private func emptyLibraryStep(_ number: Int, _ title: String, _ keys: String) -> some View {
+        GridRow {
+            Text("\(number)").monospacedDigit().foregroundStyle(Palette.muted)
+            Text(title).fontWeight(.semibold)
+            Text(keys).foregroundStyle(Palette.muted)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private var grid: some View {
@@ -871,6 +924,14 @@ struct WorkspaceView: View {
                         .accessibilityLabel("이 사진을 기준으로 삼기")
                 }
                 if model.mode == .edit {
+                    // 얼굴 확대 줄을 켜고 끈다. 켜 두면 얼굴이 있는 사진에서만 오른쪽에 나타나며 찾은 얼굴 수를 단추에 적는다.
+                    Button(faceCloseupCount.map { "얼굴 \($0)" } ?? "얼굴") { model.showsFaceCloseups.toggle() }
+                        // 켜 두는 설정이라 늘 강조하지 않고, 얼굴 줄이 실제로 보일 때만 강조색으로 보인다.
+                        .tint(faceCloseupCount != nil ? Palette.accent : Palette.inactive)
+                        .disabled(missing)
+                        .help("얼굴 확대: 사진 속 얼굴을 크게 모아 보이고 감은 눈·다른 얼굴보다 흐린 얼굴을 알립니다")
+                        // 음성 이름은 보이는 글자("얼굴 2") 그대로 두고 켜짐·꺼짐은 값으로 알린다.
+                        .accessibilityValue(model.showsFaceCloseups ? "얼굴 확대 켜짐" : "얼굴 확대 꺼짐")
                     Button(model.showsSplit ? "나눠 보기 끄기" : "전·후 나눠 보기") { model.toggleSplit() }
                         .tint(model.showsSplit ? Palette.accent : Palette.inactive)
                         .disabled(missing)
@@ -880,17 +941,36 @@ struct WorkspaceView: View {
                     .tint(model.actualSize ? Palette.accent : Palette.inactive)
                     .disabled(missing)
                     .help(model.actualSize ? "화면에 맞춰 보기 (Z)" : "100%로 보기 (Z). 사진을 누른 곳이 가운데 옵니다")
-                Button(model.isOriginal ? "보정 보기" : "원본 보기") { model.toggleOriginal() }
+                // 비교 보기에는 기준 쪽 원본 단추가 따로 있어 이 단추가 오른쪽(현재) 사진 것임을 밝힌다.
+                Button(model.mode == .compare ? (model.isOriginal ? "현재 보정 보기" : "현재 원본 보기")
+                                              : (model.isOriginal ? "보정 보기" : "원본 보기")) { model.toggleOriginal() }
                     .tint(model.isOriginal ? Palette.accent : Palette.inactive)
                     .disabled(missing)
-                    .help("보정 전 원본과 번갈아 봅니다 (\\)")
+                    .help(Text(verbatim: "보정 전 원본과 번갈아 봅니다 (\\)"))
             }
             // 단추 글자는 줄바꿈하지 않고, 좁으면 파일 이름·기준 이름·촬영 정보가 먼저 줄어든다.
             .lineLimit(1)
             // 켜진 보기 단추만 강조색으로 보인다.
             .buttonStyle(.borderless).tint(Palette.inactive).padding(.horizontal, 20).frame(height: 36)
-            canvasPanes
+            HStack(spacing: 0) {
+                canvasPanes
+                if let closeups = visibleFaceCloseups { FaceCloseupStrip(result: closeups) }
+            }
         }
+        .onChange(of: [model.selection?.path ?? "", model.mode.rawValue], initial: true) { model.refreshFaceCloseups() }
+    }
+
+    /// 지금 사진에서 찾은 얼굴 수. 얼굴 확대가 꺼져 있거나 아직 모으지 않았으면 nil이다.
+    private var faceCloseupCount: Int? {
+        guard model.showsFaceCloseups, let result = model.faceCloseups, result.path == model.selection?.path,
+              !result.faces.isEmpty else { return nil }
+        return result.faces.count
+    }
+
+    /// 사진 보기에서 얼굴이 있는 사진에만 얼굴 확대 줄을 보인다(사진만 크게 보기에서는 숨긴다).
+    private var visibleFaceCloseups: FaceCloseupResult? {
+        guard model.mode == .edit, !model.isFocusView, faceCloseupCount != nil else { return nil }
+        return model.faceCloseups
     }
 
     private var canvasPanes: some View {
@@ -920,6 +1000,8 @@ struct WorkspaceView: View {
                             .onAppear { scrollToZoomAnchor(zoomable, content: content, viewport: geometry.size) }
                             .onChange(of: content) { _, size in scrollToZoomAnchor(zoomable, content: size, viewport: geometry.size) }
                             .onChange(of: geometry.size) { _, size in scrollToZoomAnchor(zoomable, content: content, viewport: size) }
+                            // 이미 100%일 때 얼굴 확대에서 다른 얼굴을 누르면 그 자리로 옮긴다.
+                            .onChange(of: model.zoomRequest) { _, _ in scroll(zoomable, to: model.zoomAnchor) }
                             .onScrollGeometryChange(for: CGPoint.self) { scroll in
                                 CGPoint(x: (scroll.contentOffset.x + scroll.containerSize.width / 2) / max(1, scroll.contentSize.width),
                                         y: (scroll.contentOffset.y + scroll.containerSize.height / 2) / max(1, scroll.contentSize.height))
@@ -1060,30 +1142,31 @@ struct WorkspaceView: View {
     }
 
     /// 가져오기·내보내기 진행과 안내. 필름 스트립이 없는 그리드에서도 보인다.
-    @ViewBuilder private var statusBar: some View {
-        if model.isImporting || model.isExporting || model.operationMessage != nil {
-            VStack(spacing: 0) {
-                if model.isImporting || model.isExporting {
-                    HStack {
-                        ProgressView(value: model.operationProgress).tint(Palette.accent)
-                        if model.isImporting && model.canCancelImport {
-                            Button(model.isCancellingImport ? "중지하는 중…" : "중지") { model.cancelImport() }
-                                .disabled(model.isCancellingImport)
-                                .controlSize(.small)
-                                .accessibilityLabel("가져오기 중지")
-                                .help("현재 파일은 끝까지 처리하고, 완료된 가져오기 항목은 유지한 뒤 나머지를 중지합니다.")
-                        }
+    /// 사진 아래 상태 줄: 가져오기·내보내기 진행, 뒤에서 도는 다른 작업, 안내. 보일 것이 없으면 높이가 0이다.
+    private var statusBar: some View {
+        VStack(spacing: 0) {
+            if model.isImporting || model.isExporting {
+                HStack {
+                    ProgressView(value: model.operationProgress).tint(Palette.accent)
+                    if model.isImporting && model.canCancelImport {
+                        Button(model.isCancellingImport ? "중지하는 중…" : "중지") { model.cancelImport() }
+                            .disabled(model.isCancellingImport)
+                            .controlSize(.small)
+                            .accessibilityLabel("가져오기 중지")
+                            .help("현재 파일은 끝까지 처리하고, 완료된 가져오기 항목은 유지한 뒤 나머지를 중지합니다.")
                     }
-                    .padding(.horizontal, 16).padding(.top, 4)
                 }
-                if let message = model.operationMessage {
-                    HStack { Text(message).lineLimit(2); Spacer(); Button { model.operationMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("안내 닫기") }
-                        .font(.caption).foregroundStyle(Palette.muted).padding(.horizontal, 16).padding(.vertical, 6)
-                }
+                .padding(.horizontal, 16).padding(.top, 4)
             }
-            .frame(maxWidth: .infinity)
-            .background(Palette.panel)
+            // 얼굴 찾기·XMP 쓰기처럼 뒤에서 도는 작업. 가져오기·내보내기는 위 줄이 보인다.
+            BackgroundActivityRow(drive: model.driveUpload)
+            if let message = model.operationMessage {
+                HStack { Text(message).lineLimit(2); Spacer(); Button { model.operationMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("안내 닫기") }
+                    .font(.caption).foregroundStyle(Palette.muted).padding(.horizontal, 16).padding(.vertical, 6)
+            }
         }
+        .frame(maxWidth: .infinity)
+        .background(Palette.panel)
     }
 
     private var filmstrip: some View {
@@ -1109,7 +1192,12 @@ struct WorkspaceView: View {
         if let photo = model.selection {
             InspectorView(photo: photo)
         } else {
-            VStack { Text("사진을 선택하세요").foregroundStyle(Palette.muted) }.frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.panel)
+            // 빈 라이브러리에서는 고를 사진이 없으니 이 패널이 무엇을 하는 곳인지 알린다.
+            VStack {
+                Text(model.photos.isEmpty ? "사진을 가져오면 여기에서 별점·키워드와 보정을 다룹니다." : "사진을 선택하세요")
+                    .font(.callout).foregroundStyle(Palette.muted).multilineTextAlignment(.center).padding(.horizontal, 28)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.panel)
         }
     }
 
@@ -1311,7 +1399,7 @@ private struct PhotoTile: View {
                             .foregroundStyle(photo.flag == .pick ? Palette.accent : .red)
                     }
                     if let label = photo.colorLabel {
-                        Circle().fill(label.color).frame(width: 10, height: 10).help("\(label.title) 라벨")
+                        Circle().fill(label.color).frame(width: 10, height: 10).help("\(model.labelName(label)) 라벨")
                     }
                 }
             }

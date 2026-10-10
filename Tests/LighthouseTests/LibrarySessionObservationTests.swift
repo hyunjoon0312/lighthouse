@@ -57,8 +57,10 @@ final class LibrarySessionObservationTests: XCTestCase {
 
         let session = LibrarySession(initialDirectory: firstDirectory)
         session.library.start()
+        // 열자마자 LUT 목록 읽기가 뒤에서 이어지고, 그동안에는 라이브러리 전환을 막는다. 다 끝난 뒤 전환한다.
         try await TestSupport.wait("first library") {
             session.library.catalogLoaded && session.library.foldersLoaded && session.library.photos.count == 1
+                && !session.library.hasConflictingWorkflow
         }
         let previousLibrary = session.library
         var notificationCount = 0

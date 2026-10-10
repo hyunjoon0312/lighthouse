@@ -82,6 +82,7 @@ extension LibraryModel {
         let cancellation = CancellationFlag()
         workflowCancellation = cancellation
         isRunningWorkflow = true
+        workflowKind = .rangeMask
         workflowMessage = nil
         batchQueue.async { [pipeline] in
             let result = Result { try pipeline.rangeMask(url: URL(fileURLWithPath: request.path), selection: range) }
@@ -138,6 +139,7 @@ extension LibraryModel {
         let cancellation = CancellationFlag()
         workflowCancellation = cancellation
         isRunningWorkflow = true
+        workflowKind = .batchAutoMask
         workflowProgress = 0
         workflowMessage = nil
         batchWorkflowReport = nil
@@ -195,6 +197,7 @@ extension LibraryModel {
         let cancellation = CancellationFlag()
         workflowCancellation = cancellation
         isRunningWorkflow = true
+        workflowKind = .similarPhotos
         workflowProgress = 0
         similarPhotoResult = nil
         batchQueue.async { [pipeline] in
@@ -263,6 +266,7 @@ extension LibraryModel {
         let cancellation = CancellationFlag()
         workflowCancellation = cancellation
         isRunningWorkflow = true
+        workflowKind = .smartPreviews
         workflowProgress = 0
         smartPreviewFailures = []
         batchQueue.async { [smartPreviewStore, pipeline] in
@@ -316,6 +320,7 @@ extension LibraryModel {
         let cancellation = CancellationFlag()
         workflowCancellation = cancellation
         isRunningWorkflow = true
+        workflowKind = .archiveCheck
         workflowMessage = nil
         batchQueue.async {
             let result = Result { try LibraryArchive.inspect(at: url) }
@@ -344,6 +349,7 @@ extension LibraryModel {
         let cancellation = CancellationFlag()
         workflowCancellation = cancellation
         isRunningWorkflow = true
+        workflowKind = .backup
         workflowProgress = 0
         batchQueue.async { [dataDirectory] in
             let result = Result {
@@ -387,6 +393,7 @@ extension LibraryModel {
         workflowCancellation = cancellation
         restoredLibraryDirectory = nil
         isRunningWorkflow = true
+        workflowKind = .restore
         workflowProgress = 0
         batchQueue.async {
             let result = Result {

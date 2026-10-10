@@ -28,4 +28,27 @@ final class ColorLabelFlowTests: XCTestCase {
         model.setColorLabel(.purple)
         XCTAssertTrue(model.visiblePhotos.isEmpty, "라벨을 바꾸면 조건에서 빠진다")
     }
+
+    /// 라벨에 쓰임을 이름으로 붙이면(빨강 → 블로그) 메뉴·조건 요약에 이름으로 보이고, 라이브러리를 다시 열어도 남는다.
+    func testLabelNamesShowInMenusAndSummaryAndPersist() async throws {
+        UserDefaults.standard.removeObject(forKey: "colorLabelNames")
+        defer { UserDefaults.standard.removeObject(forKey: "colorLabelNames") }
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 1)
+        model.setColorLabelNames([.red: "  블로그  ", .green: " ", .blue: String(repeating: "가", count: 30)])
+        XCTAssertEqual(model.colorLabelNames, [.red: "블로그", .blue: String(repeating: "가", count: 20)],
+                       "앞뒤 공백과 빈 이름은 버리고 20자로 줄인다")
+        XCTAssertEqual(model.labelName(.red), "블로그")
+        XCTAssertEqual(model.labelName(.green), "초록", "이름이 없으면 색 이름")
+        XCTAssertEqual(model.labelMenuTitle(.red), "블로그 · 빨강")
+        XCTAssertEqual(model.labelMenuTitle(.green), "초록")
+        var criteria = model.criteria
+        criteria.colorLabel = .red
+        XCTAssertEqual(criteria.summary(labelName: model.labelName), ["블로그 라벨"])
+
+        // 새 모델은 Mac 환경설정에서 이름을 읽는다(TestSupport.startedModel은 시작할 때 설정을 지우므로 직접 만든다).
+        let reopened = LibraryModel()
+        XCTAssertEqual(reopened.labelName(.red), "블로그", "Mac 환경설정에 남는다")
+        reopened.setColorLabelNames([:])
+        XCTAssertEqual(reopened.labelMenuTitle(.red), "빨강")
+    }
 }

@@ -54,7 +54,8 @@ public struct PhotoCriteria: Codable, Equatable, Sendable {
     }
 
     /// 화면에 보이는 조건 요약("S9 · 20–35mm · ISO ~800"). 조건이 없으면 빈 배열.
-    public func summary(calendar: Calendar = .current) -> [String] {
+    /// `labelName`은 사용자가 라벨에 붙인 이름(빨강 → 블로그)을 돌려준다.
+    public func summary(calendar: Calendar = .current, labelName: (PhotoColorLabel) -> String = { $0.title }) -> [String] {
         var parts: [String] = []
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty { parts.append("‘\(text)’") }
@@ -65,7 +66,7 @@ public struct PhotoCriteria: Codable, Equatable, Sendable {
         case PhotoFlag.none?: parts.append("표시 없음")
         case nil: break
         }
-        if let colorLabel { parts.append("\(colorLabel.title) 라벨") }
+        if let colorLabel { parts.append("\(labelName(colorLabel)) 라벨") }
         if let camera { parts.append(camera) }
         if let lens { parts.append(lens) }
         if let range = Self.rangeText(minimumFocalLength.map(Self.number), maximumFocalLength.map(Self.number)) {

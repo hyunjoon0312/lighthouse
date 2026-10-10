@@ -35,7 +35,7 @@ struct CriteriaPopover: View {
                     Text("라벨")
                     Picker("라벨", selection: $model.criteria.colorLabel) {
                         Text("모두").tag(PhotoColorLabel?.none)
-                        ForEach(PhotoColorLabel.allCases, id: \.self) { Text($0.title).tag(PhotoColorLabel?.some($0)) }
+                        ForEach(PhotoColorLabel.allCases, id: \.self) { Text(model.labelMenuTitle($0)).tag(PhotoColorLabel?.some($0)) }
                     }
                     .labelsHidden()
                 }

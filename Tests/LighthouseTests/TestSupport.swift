@@ -111,7 +111,7 @@ enum TestSupport {
     /// 모델이 기억하는 화면 설정을 지워 테스트마다 같은 상태에서 시작한다(xctest의 기본 설정 영역만 바뀐다).
     static func resetModelDefaults() {
         for key in ["autoAdvanceAfterMark", "collapseRAWJPEGPairs", "comparePinnedEdits", "importPresetID", "photoSortOrder",
-                    "writesXMPSidecars"] {
+                    "writesXMPSidecars", "colorLabelNames", "showsFaceCloseups"] {
             UserDefaults.standard.removeObject(forKey: key)
         }
     }

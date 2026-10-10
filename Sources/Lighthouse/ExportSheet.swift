@@ -57,6 +57,9 @@ struct ExportSheet: View {
             scope = model.selectedPhotos.count >= 2 ? .selected : .current
             changed = model.changedSinceExport
             requestPreview(debounce: false)
+            // 창이 열리면 AppKit이 첫 글자 칸(파일 이름 규칙)을 전체 선택해 두어 글자를 치면 규칙이 지워진다.
+            // 열릴 때는 아무 칸도 고르지 않는다.
+            DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) }
         }
         .onChange(of: model.isExporting) { _, exporting in if !exporting { changed = model.changedSinceExport } }
         .onReceive(model.driveUpload.$isBusy) { driveBusy = $0 }
