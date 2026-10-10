@@ -696,3 +696,11 @@ impeccable `critique`로 앞선 수정(269007b) 뒤 앱 전체를 다시 봤다(
 - `UISnapshotTests`에 `help`·`help-culling`·`help-shortcuts`·`help-search` 장면을 더해 확인했다. 빈 라이브러리 화면에 "도움말 보기 (⌘?)"가 보인다.
 - 최종 트리: 전체 `swift test`(얼굴 표본 포함) 452개, 실패 0개(11개 건너뜀 — 창 이벤트 테스트는 `LIGHTHOUSE_UI_EVENTS` 없이 건너뜀), `LIGHTHOUSE_UI_EVENTS=1 swift test --filter UIEventTests` 8개 통과, `swift build -c release` 통과(경고 없음).
 - 확인하지 않은 것: 화면이 잠겨(`CGSSessionScreenIsLocked`) 실제 앱에서 도움말 메뉴(⌘?)·검색 칸 입력·빈 라이브러리 링크를 눌러 보지 못했다. 메뉴 연결은 코드로, 창 모양은 스냅숏으로 확인했다. VoiceOver 낭독도 듣지 않았다.
+
+### ⌘?가 단축키 창을 여는 문제 — 2026-10-10
+
+사용자가 실제 앱에서 ⌘?를 누르자 도움말 대신 단축키 창이 열렸다. QA 앱(별도 번들)의 메뉴를 접근성 API로 읽으니 "Lighthouse 도움말" 항목에 단축키가 비어 있었다(`.keyboardShortcut("?", modifiers: .command)`를 SwiftUI가 붙이지 않음). ⌘⇧/가 바로 옆 "단축키 보기"의 ⌘/로 넘어간 것이다. 한 글자 단축키처럼 창의 키 감시가 "/" 키 자리(44)와 ⌘⇧를 메뉴보다 먼저 받아 도움말을 열게 했고(글자 칸에 입력하는 중에도), 메뉴 이름은 다른 항목처럼 "Lighthouse 도움말 (⌘?)"로 적었다.
+
+- 새 `HelpGuideTests.testCommandQuestionMarkIsTheHelpKey`(⌘⇧/만 도움말, ?는 단축키, ⌘/는 메뉴)와 `testKeyMonitorOpensHelpForCommandQuestionMark`(실제 `WorkspaceView`의 키 감시에 `NSApp.sendEvent`로 ⌘⇧/를 보내 도움말이 열리고 단축키 창은 열리지 않음). 앞 테스트는 함수가 없어 컴파일 실패로, 뒤 테스트는 고친 줄을 잠시 끈 상태에서 실패하는 것을 본 뒤 통과했다. 처음에는 이벤트를 `nextEvent`로 꺼내 시험했는데 키 감시는 `sendEvent`에서만 불려 고친 뒤에도 실패해, 이 테스트가 감시를 지나지 않는다는 것을 알고 바꿨다.
+- 최종 트리: 전체 `swift test`(얼굴 표본 포함) 454개. 첫 실행에서 `HDRFlowTests.testPreviewIsHDROnCapableScreenAndThumbnailStaysSDR`가 썸네일 대기 60초 시간 초과로 실패했다(이전 점검에서도 한 번 있었던 간헐 실패). 따로 세 번은 모두 1.4초 안팎에 통과했고, 다시 돌린 전체 실행은 실패 0개(11개 건너뜀)였다. 썸네일 경로는 이번 변경과 관계없다. 썸네일 기억(NSCache)이 메모리 압박에 비워진 뒤 다시 요청되지 않는 경우로 보이나 확인하지는 않았다. `swift build -c release` 통과(경고 없음).
+- 확인하지 않은 것: 사용자가 Mac을 쓰는 중이라 QA 앱을 앞으로 띄우거나 실제 키를 보내지 않았다(QA 앱을 띄우면 스스로 맨 앞으로 오고, 앞서 확인용으로 한 번 앞으로 올렸다). 창 이벤트 테스트(`UIEventTests`)도 실제 마우스 포인터를 옮겨 이번에는 돌리지 않았다(이번 변경은 키 처리만 건드린다). 실제 앱에서 ⌘?는 사용자 확인이 필요하다.

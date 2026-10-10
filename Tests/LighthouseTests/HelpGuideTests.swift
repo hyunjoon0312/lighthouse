@@ -1,4 +1,5 @@
-import Foundation
+import AppKit
+import SwiftUI
 @testable import Lighthouse
 import XCTest
 
@@ -41,6 +42,36 @@ final class HelpGuideTests: XCTestCase {
                 XCTAssertTrue(source.contains("(\"" + item), "\(path): 메뉴에 '\(item)' 항목이 없다")
             }
         }
+    }
+
+    /// ⌘?(⇧⌘/)는 "/" 키 자리로 읽어 도움말을 연다. 메뉴에 두면 SwiftUI가 이 단축키를 붙이지 않아 ⌘/(단축키 보기)로 넘어갔다.
+    func testCommandQuestionMarkIsTheHelpKey() {
+        XCTAssertTrue(HelpGuide.isHelpKey(keyCode: 44, modifiers: [.command, .shift]))
+        XCTAssertTrue(HelpGuide.isHelpKey(keyCode: 44, modifiers: [.command, .shift, .capsLock]), "Caps Lock은 상관없다")
+        XCTAssertFalse(HelpGuide.isHelpKey(keyCode: 44, modifiers: [.shift]), "?는 단축키 창")
+        XCTAssertFalse(HelpGuide.isHelpKey(keyCode: 44, modifiers: [.command]), "⌘/는 단축키 메뉴")
+        XCTAssertFalse(HelpGuide.isHelpKey(keyCode: 44, modifiers: [.command, .shift, .option]))
+        XCTAssertFalse(HelpGuide.isHelpKey(keyCode: 43, modifiers: [.command, .shift]), "다른 키")
+    }
+
+    /// 창의 키 감시가 ⌘?(⇧⌘/)를 메뉴보다 먼저 받아 도움말을 열고, 단축키 창(⌘/)으로 넘기지 않는다.
+    func testKeyMonitorOpensHelpForCommandQuestionMark() async throws {
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 1)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.contentView = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+        defer { window.contentView = nil }
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [.command, .shift], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, characters: "?", charactersIgnoringModifiers: "?",
+            isARepeat: false, keyCode: 44))
+        // 키 감시는 앱이 이벤트를 나눠 보낼 때(sendEvent) 메뉴 단축키보다 먼저 본다.
+        NSApp.sendEvent(event)
+        XCTAssertTrue(model.showHelp)
+        XCTAssertFalse(model.showShortcuts)
+        model.showHelp = false
     }
 
     /// 도움말 창이 떠 있는 동안에는 뒤 창의 한 글자 단축키가 동작하지 않는다(검색 칸에 입력할 수 있게).

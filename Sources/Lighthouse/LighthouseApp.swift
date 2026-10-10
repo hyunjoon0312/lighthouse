@@ -193,8 +193,8 @@ struct LighthouseApp: App {
                     .disabled(library.clipboard == nil || library.selection == nil || library.hasModalPresentation)
             }
             CommandGroup(replacing: .help) {
-                Button("Lighthouse 도움말") { library.showHelp = true }
-                    .keyboardShortcut("?", modifiers: .command)
+                // ⌘?는 창의 키 감시가 받는다(SwiftUI가 이 메뉴 단축키를 붙이지 않는다). 한 글자 키처럼 이름에 적는다.
+                Button("Lighthouse 도움말 (⌘?)") { library.showHelp = true }
                     .disabled(library.hasModalPresentation)
                 Button("단축키 보기 (?)") { library.showShortcuts = true }
                     .keyboardShortcut("/", modifiers: .command)

@@ -1260,6 +1260,11 @@ struct WorkspaceView: View {
                 return nil
             }
             if NSApp.modalWindow != nil || model.hasModalPresentation { return event }
+            // ⌘?는 글자 칸에 입력하는 중에도 도움말을 연다(메뉴로 넘기면 ⌘/ 단축키 보기가 받는다).
+            if HelpGuide.isHelpKey(keyCode: event.keyCode, modifiers: event.modifierFlags) {
+                model.showHelp = true
+                return nil
+            }
             if event.keyCode == 53, NSApp.keyWindow?.firstResponder is NSTextView {
                 NSApp.keyWindow?.makeFirstResponder(nil)
                 return nil

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// 앱 안 도움말. README의 사용 흐름을 주제별 짧은 항목으로 옮긴 것이다. 메뉴 경로는 `menus`에 따로 적어
@@ -138,6 +139,12 @@ enum HelpGuide {
                  body: "얼굴 찾기·XMP 쓰기·업로드처럼 시간이 걸리는 작업은 사진 아래 줄에 무엇이 얼마나 진행됐는지 보이고, 작업 보기에서 진행과 중지 단추를 봅니다."),
         ]),
     ]
+
+    /// ⌘?(⇧⌘/)는 도움말이다. 한글 입력 상태에서도 같게 "/" 키 자리(44)로 읽는다. SwiftUI는 이 메뉴 단축키를 붙이지 않아
+    /// 메뉴에만 두면 ⌘/(단축키 보기)로 넘어가므로 창의 키 감시가 메뉴보다 먼저 받는다.
+    static func isHelpKey(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        keyCode == 44 && modifiers.intersection([.command, .control, .option, .shift]) == [.command, .shift]
+    }
 
     /// 검색 결과 한 줄. 단축키 표에서 찾은 줄은 `keys`가 있다.
     struct Match: Identifiable, Hashable {
