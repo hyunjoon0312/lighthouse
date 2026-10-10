@@ -397,6 +397,33 @@ final class UIEventTests: XCTestCase {
         XCTAssertNotEqual(model.photos.first { $0.id == photos[2].id }?.flag, .pick)
     }
 
+    /// 사진 보기에서도 필름 스트립 위 고르기 막대로 보고 있는 사진에만 붙인다.
+    func testCullingBarInPhotoViewMarksTheCurrentPhoto() async throws {
+        guard ProcessInfo.processInfo.environment["LIGHTHOUSE_UI_EVENTS"] != nil else {
+            throw XCTSkip("LIGHTHOUSE_UI_EVENTS를 주면 창을 띄워 사진 보기의 고르기 막대를 누른다.")
+        }
+        for key in ["showsSidebar", "sidebarWidth"] { UserDefaults.standard.removeObject(forKey: key) }
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 2)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
+                              backing: .buffered, defer: false)
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil); window.contentView = nil }
+        let photos = model.visiblePhotos
+        model.select(photos[1])
+        model.setMode(.edit)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        // 막대(36pt)는 필름 스트립(106pt) 바로 위에 있고, 첫 단추가 채택이다.
+        let height = window.contentView?.bounds.height ?? size.height
+        try await click(window, CGPoint(x: 225 + 16 + 14, y: height - 106 - 18))
+        try await TestSupport.wait("picked", timeout: 5) { model.photos.first { $0.id == photos[1].id }?.flag == .pick }
+        XCTAssertNotEqual(model.photos.first { $0.id == photos[0].id }?.flag, .pick, "보고 있는 사진에만 붙는다")
+        XCTAssertFalse(model.actualSize, "사진을 누른 것이 아니다")
+    }
+
     func testButtonsAndSidebarRowsAcceptClicksAcrossTheirShape() async throws {
         guard ProcessInfo.processInfo.environment["LIGHTHOUSE_UI_EVENTS"] != nil else {
             throw XCTSkip("LIGHTHOUSE_UI_EVENTS를 주면 창을 띄워 누름 영역을 확인한다.")

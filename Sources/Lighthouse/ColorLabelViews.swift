@@ -66,7 +66,7 @@ struct ColorLabelNamesSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("라벨 이름").font(.title3.weight(.semibold))
-            Text("색마다 쓰임을 적어 두면 오른쪽 패널·메뉴·조건에 이름으로 보입니다(예: 빨강 → 블로그). 비워 두면 색 이름을 씁니다.")
+            Text("색마다 쓰임을 적어 두면 고르기 막대·메뉴·조건에 이름으로 보입니다(예: 빨강 → 블로그). 비워 두면 색 이름을 씁니다.")
                 .font(.callout).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
                 ForEach(PhotoColorLabel.allCases, id: \.self) { label in

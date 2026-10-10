@@ -96,7 +96,7 @@ extension InspectorSection where Accessory == EmptyView {
 }
 
 /// 보정 묶음의 "한 묶음만 펴기"(Lightroom의 Solo Mode). 켜 두면 보정 묶음 하나를 펼 때 다른 보정 묶음을 접어
-/// 긴 오른쪽 패널을 짧게 쓴다. 표시·키워드, 프리셋, 스냅숏, 파일 정보 묶음은 따로 둔다.
+/// 긴 오른쪽 패널을 짧게 쓴다. 키워드·설명, 프리셋, 스냅숏, 파일 정보 묶음은 따로 둔다.
 @MainActor
 enum InspectorSolo {
     static let settingKey = "inspector.soloMode"

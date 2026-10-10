@@ -22,6 +22,6 @@ final class InspectorSoloTests: XCTestCase {
         InspectorSolo.expand(light, among: [light, color], defaults: defaults)
         XCTAssertTrue(defaults.bool(forKey: light))
         XCTAssertFalse(defaults.bool(forKey: color), "켜져 있으면 다른 보정 묶음을 접는다")
-        XCTAssertTrue(defaults.bool(forKey: marks), "보정 묶음이 아닌 표시·키워드 묶음은 그대로 둔다")
+        XCTAssertTrue(defaults.bool(forKey: marks), "보정 묶음이 아닌 키워드·설명 묶음은 그대로 둔다")
     }
 }

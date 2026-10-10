@@ -153,7 +153,7 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertEqual(current.contrast, 1.2)
     }
 
-    /// 보정 묶음 제목 줄의 "한 묶음만 펴기"를 켜면 그 묶음만 펴고 다른 보정 묶음을 접는다. 표시·키워드 묶음은 그대로다.
+    /// 보정 묶음 제목 줄의 "한 묶음만 펴기"를 켜면 그 묶음만 펴고 다른 보정 묶음을 접는다. 키워드·설명 묶음은 그대로다.
     func testSectionHeaderMenuTurnsOnSoloMode() async throws {
         let keys = ["light", "color", "geometry", "marks"].map { "inspector.section." + $0 }
         let clear = { for key in keys + [InspectorSolo.settingKey] { UserDefaults.standard.removeObject(forKey: key) } }
@@ -191,7 +191,7 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertTrue(defaults.bool(forKey: "inspector.section.light"), "누른 묶음은 펼친다")
         XCTAssertFalse(defaults.bool(forKey: "inspector.section.color"), "다른 보정 묶음은 접는다")
         XCTAssertFalse(defaults.bool(forKey: "inspector.section.geometry"))
-        XCTAssertNil(defaults.object(forKey: "inspector.section.marks"), "표시·키워드 묶음은 건드리지 않는다")
+        XCTAssertNil(defaults.object(forKey: "inspector.section.marks"), "키워드·설명 묶음은 건드리지 않는다")
     }
 
     /// 사진 보기의 필름 스트립과 여러 장 보기에서는 고른 사진이 여러 장이어도 누른 사진 한 장에 적용하고 그 사진을 기준으로 삼는다.

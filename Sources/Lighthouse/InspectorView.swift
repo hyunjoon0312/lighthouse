@@ -51,20 +51,8 @@ struct InspectorView: View {
                         .font(.caption.weight(.semibold)).foregroundStyle(Palette.warning)
                 }
                 HistogramView()
-                // 그리드에서는 아래 고르기 막대가 별점·표시·라벨을 맡아(여러 장 안내도 막대에 있다) 이 묶음에는 키워드·설명만 둔다.
-                // 다른 보기에서는 보고 있는 한 장에만 붙는다.
-                let marksHere = model.mode != .grid
-                InspectorSection(marksHere ? "표시 · 키워드" : "키워드 · 설명", storageKey: "inspector.section.marks") {
-                    if marksHere {
-                        HStack(spacing: 3) {
-                            Text("별점").font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
-                            Spacer()
-                            MarkRatingStars()
-                        }
-                        ColorLabelRow(current: model.commonMarkColorLabel, names: model.colorLabelNames,
-                                      choose: { model.toggleMarkColorLabel($0) }, rename: { model.showColorLabelNames = true })
-                        MarkFlagButtons()
-                    }
+                // 별점·표시·라벨은 사진 아래 고르기 막대가 맡고 이 묶음에는 키워드·설명만 둔다.
+                InspectorSection("키워드 · 설명", storageKey: "inspector.section.marks") {
                     DescriptionFields(photo: photo)
                 }
                 Divider()

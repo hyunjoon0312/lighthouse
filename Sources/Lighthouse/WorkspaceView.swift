@@ -194,14 +194,12 @@ struct WorkspaceView: View {
                 }
                 mainContent.frame(maxWidth: .infinity, maxHeight: .infinity)
                 statusBar
-                // 그리드는 같은 사진을 이미 모두 보여 주므로 필름 스트립 대신 고르기 막대를 둔다(오른쪽 패널은 보정용).
+                // 고르기 막대는 모든 보기에서 사진 아래에 둔다(오른쪽 패널은 보정용).
+                // 그리드는 같은 사진을 이미 모두 보여 주므로 필름 스트립을 두지 않는다.
                 if !model.visiblePhotos.isEmpty {
-                    if model.mode == .grid {
-                        Rectangle().fill(Palette.hairline).frame(height: 1)
-                        CullingBar()
-                    } else {
-                        filmstrip
-                    }
+                    Rectangle().fill(Palette.hairline).frame(height: 1)
+                    CullingBar()
+                    if model.mode != .grid { filmstrip }
                 }
             }
             if showsInspector {
@@ -786,7 +784,7 @@ struct WorkspaceView: View {
                               actionTitle: "검색·조건 지우기", action: model.clearTemporaryFilters)
         }
         let detail: String = switch model.filter {
-        case .picks: "P 키나 오른쪽 패널의 채택 단추로 표시한 사진이 여기에 모입니다."
+        case .picks: "P 키나 고르기 막대의 채택 단추로 표시한 사진이 여기에 모입니다."
         case .rejects: "X 키로 제외한 사진이 여기에 모입니다."
         case .edited: "보정한 사진이 여기에 모입니다."
         case .bursts: "1초 안에 이어 찍은 사진이 없습니다."
@@ -1194,7 +1192,7 @@ struct WorkspaceView: View {
         } else {
             // 빈 라이브러리에서는 고를 사진이 없으니 이 패널이 무엇을 하는 곳인지 알린다.
             VStack {
-                Text(model.photos.isEmpty ? "사진을 가져오면 여기에서 별점·키워드와 보정을 다룹니다." : "사진을 선택하세요")
+                Text(model.photos.isEmpty ? "사진을 가져오면 여기에서 키워드·설명과 보정을 다룹니다." : "사진을 선택하세요")
                     .font(.callout).foregroundStyle(Palette.muted).multilineTextAlignment(.center).padding(.horizontal, 28)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.panel)

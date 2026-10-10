@@ -55,8 +55,9 @@ struct MarkFlagButtons: View {
     }
 }
 
-/// 그리드 아래 고르기 막대(Lightroom 라이브러리 아래 도구 막대처럼). 고른 사진 모두에 채택·제외·별점·라벨을 붙이며
-/// P·X·U·1–5·6–9 키와 같다. 그리드의 오른쪽 패널은 보정에 쓴다.
+/// 사진 아래 고르기 막대(Lightroom 라이브러리·사진 보기 아래 도구 막대처럼). 그리드에서는 고른 사진 모두에,
+/// 사진·비교·여러 장 보기에서는 보고 있는 한 장에 채택·제외·별점·라벨을 붙이며 P·X·U·1–5·6–9 키와 같다.
+/// 오른쪽 패널은 보정과 키워드·설명에 쓴다.
 struct CullingBar: View {
     @EnvironmentObject private var model: LibraryModel
 
@@ -85,7 +86,9 @@ struct CullingBar: View {
                 .fixedSize()
             Spacer(minLength: 12)
             if showsStatus {
-                Text(status).font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
+                Text(Self.status(targets: model.markTargetPhotos.count, selected: model.selectedPhotoIDs.count,
+                                 mixed: model.hasMixedMarks))
+                    .font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
             }
         }
     }
@@ -94,11 +97,12 @@ struct CullingBar: View {
         Rectangle().fill(Palette.hairline).frame(width: 1, height: 18)
     }
 
-    /// 몇 장에 붙는지, 아니면 같은 일을 하는 키를 알린다.
-    private var status: String {
-        let count = model.markTargetPhotos.count
-        if count == 0 { return "사진을 고르면 별점·표시·라벨을 붙입니다" }
-        if count == 1 { return "P 채택 · X 제외 · U 해제 · 1–5 별점 · 6–9 라벨" }
-        return "고른 \(count)장에 함께 붙입니다" + (model.hasMixedMarks ? " · 값이 서로 다름" : "")
+    /// 무엇에 붙는지 알린다. 그리드에서 여러 장을 골랐으면 그 장수를, 다른 보기에서 여러 장을 골랐으면 보고 있는
+    /// 한 장에만 붙는다는 것을, 한 장이면 같은 일을 하는 키를 보인다.
+    static func status(targets: Int, selected: Int, mixed: Bool) -> String {
+        if targets == 0 { return "사진을 고르면 별점·표시·라벨을 붙입니다" }
+        if targets > 1 { return "고른 \(targets)장에 함께 붙입니다" + (mixed ? " · 값이 서로 다름" : "") }
+        if selected > 1 { return "현재 사진에만 붙습니다 · P·X·U·1–5·6–9 키와 같음" }
+        return "P 채택 · X 제외 · U 해제 · 1–5 별점 · 6–9 라벨"
     }
 }
