@@ -140,6 +140,10 @@ final class UISnapshotTests: XCTestCase {
         try await render(ExportSheet(), model, CGSize(width: 1000, height: 820), "export", settle: 3)
         try await render(CriteriaPopover(), model, CGSize(width: 380, height: 560), "criteria")
         try await render(ShortcutHelpSheet(), model, CGSize(width: 600, height: 600), "shortcuts")
+        try await render(HelpSheet(), model, CGSize(width: 820, height: 600), "help")
+        try await render(HelpSheet(topic: "고르기"), model, CGSize(width: 820, height: 600), "help-culling")
+        try await render(HelpSheet(topic: "단축키"), model, CGSize(width: 820, height: 600), "help-shortcuts")
+        try await render(HelpSheet(query: "라벨"), model, CGSize(width: 820, height: 600), "help-search")
         try await render(CardImportSheet(), model, CGSize(width: 620, height: 560), "card-import")
         try await render(PresetSheet(request: PresetSheetRequest(kind: .save, initialName: "")), model,
                          CGSize(width: 480, height: 420), "preset")

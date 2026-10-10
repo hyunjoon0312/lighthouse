@@ -50,6 +50,7 @@ enum ShortcutGuide {
             Entry(keys: "⌘R", action: "Finder에서 원본 보기"),
             Entry(keys: "⇧⌘E", action: "내보내기"),
             Entry(keys: "? / ⌘/", action: "단축키 보기"),
+            Entry(keys: "⌘?", action: "Lighthouse 도움말 (주제별 사용 안내·검색)"),
         ]),
     ]
 }
@@ -66,24 +67,30 @@ struct ShortcutHelpSheet: View {
             }
             Text("한글 입력 상태에서도 같은 자리의 키로 동작합니다. 글자 칸에 입력하는 동안에는 한 글자 단축키가 동작하지 않습니다.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(ShortcutGuide.sections) { section in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(section.title).font(.caption.weight(.bold)).foregroundStyle(.secondary)
-                            ForEach(section.entries) { entry in
-                                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                    Text(entry.keys).font(.body.monospaced()).frame(width: 130, alignment: .leading)
-                                    Text(entry.action).fixedSize(horizontal: false, vertical: true)
-                                }
-                                .accessibilityElement(children: .combine)
-                            }
+            ScrollView { ShortcutGuideList() }
+        }
+        .padding(22)
+        .frame(width: 560, height: 560)
+    }
+}
+
+/// 단축키 표. 단축키 창과 도움말 창이 함께 쓴다.
+struct ShortcutGuideList: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(ShortcutGuide.sections) { section in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(section.title).font(.caption.weight(.bold)).foregroundStyle(.secondary)
+                    ForEach(section.entries) { entry in
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(entry.keys).font(.body.monospaced()).frame(width: 130, alignment: .leading)
+                            Text(entry.action).fixedSize(horizontal: false, vertical: true)
                         }
+                        .accessibilityElement(children: .combine)
                     }
                 }
             }
         }
-        .padding(22)
-        .frame(width: 560, height: 560)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

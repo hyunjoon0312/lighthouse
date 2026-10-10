@@ -683,3 +683,16 @@ impeccable `critique`로 앞선 수정(269007b) 뒤 앱 전체를 다시 봤다(
 - `UISnapshotTests`로 사진 보기(1440·1100pt), 비교, 여러 장 보기의 막대와 필름 스트립, "키워드 · 설명"만 남은 오른쪽 패널을 확인했다.
 - 최종 트리: 전체 `swift test`(얼굴 표본 포함) 448개, 실패 0개(11개 건너뜀 — 창 이벤트 테스트는 `LIGHTHOUSE_UI_EVENTS` 없이 건너뜀), `LIGHTHOUSE_UI_EVENTS=1 swift test --filter UIEventTests` 8개 통과, `swift build -c release` 통과(경고 없음).
 - 확인하지 않은 것: 화면이 잠겨(`CGSSessionScreenIsLocked`) 실제 앱에서 확인하지 못했다(사진 보기 막대의 별점·라벨 클릭, 비교·여러 장 보기의 막대, 세로가 낮은 창에서 줄어든 사진 크기). VoiceOver 낭독도 듣지 않았다.
+
+## 앱 안 도움말 — 2026-10-10
+
+사용자 요청: 앱 안 도움말을 넣는다(점검에서 도움말 항목이 "앱 안 도움말 없음"으로 낮았다).
+
+- 도움말 › **Lighthouse 도움말**(⌘?)과 빈 라이브러리의 "도움말 보기"가 도움말 창을 연다. 왼쪽 주제(시작하기·고르기·찾기·정리·보정·내보내기·저장과 안전·단축키), 오른쪽 항목, 위쪽 검색으로 되어 있다. 항목 40개는 README의 사용 흐름과 실제 메뉴·코드(예: 바뀐 사진 다시 내보내기는 이전 파일이 앱이 쓴 그대로일 때만 휴지통으로 옮긴다)를 보고 썼고, 항목마다 하는 메뉴를 "메뉴: 파일 › …"로 적었다. 단축키 주제는 단축키 창과 같은 표를 쓰며 표와 README에 ⌘?를 더했다.
+
+검증:
+
+- 새 `HelpGuideTests` 4개: 주제마다 항목 셋 이상·제목 중복 없음, 검색(여러 낱말, 대소문자, 단축키 줄, 빈 검색), 도움말에 적힌 메뉴 경로 24개가 `LighthouseApp.swift`의 실제 메뉴 이름과 같은지, 도움말 창이 떠 있는 동안 한 글자 단축키가 막히는지. 도움말 코드가 없는 상태에서 컴파일 실패로 시작했다. `ShortcutGuideTests`(README 표와 같은 키), `SymbolNameTests`(주제 아이콘), `SystemLanguageTests`(Markdown)도 통과했다.
+- `UISnapshotTests`에 `help`·`help-culling`·`help-shortcuts`·`help-search` 장면을 더해 확인했다. 빈 라이브러리 화면에 "도움말 보기 (⌘?)"가 보인다.
+- 최종 트리: 전체 `swift test`(얼굴 표본 포함) 452개, 실패 0개(11개 건너뜀 — 창 이벤트 테스트는 `LIGHTHOUSE_UI_EVENTS` 없이 건너뜀), `LIGHTHOUSE_UI_EVENTS=1 swift test --filter UIEventTests` 8개 통과, `swift build -c release` 통과(경고 없음).
+- 확인하지 않은 것: 화면이 잠겨(`CGSSessionScreenIsLocked`) 실제 앱에서 도움말 메뉴(⌘?)·검색 칸 입력·빈 라이브러리 링크를 눌러 보지 못했다. 메뉴 연결은 코드로, 창 모양은 스냅숏으로 확인했다. VoiceOver 낭독도 듣지 않았다.

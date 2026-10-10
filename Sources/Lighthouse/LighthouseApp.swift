@@ -193,6 +193,9 @@ struct LighthouseApp: App {
                     .disabled(library.clipboard == nil || library.selection == nil || library.hasModalPresentation)
             }
             CommandGroup(replacing: .help) {
+                Button("Lighthouse 도움말") { library.showHelp = true }
+                    .keyboardShortcut("?", modifiers: .command)
+                    .disabled(library.hasModalPresentation)
                 Button("단축키 보기 (?)") { library.showShortcuts = true }
                     .keyboardShortcut("/", modifiers: .command)
                     .disabled(library.hasModalPresentation)

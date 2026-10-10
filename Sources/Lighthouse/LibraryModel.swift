@@ -206,6 +206,8 @@ final class LibraryModel: ObservableObject {
     @Published var showBatchEdit = false
     @Published var showCardImport = false
     @Published var showShortcuts = false
+    /// 앱 안 도움말 창(도움말 › Lighthouse 도움말).
+    @Published var showHelp = false
     @Published var showPeople = false
     @Published var showSimilarPhotos = false
     @Published var showSmartPreviews = false
@@ -574,7 +576,7 @@ final class LibraryModel: ObservableObject {
     var hasModalPresentation: Bool {
         showBatchEdit || showExport || showCardImport || showShortcuts || showPeople || presetSheet != nil || lightroomPresetSheet != nil || referenceMatchSource != nil || folderSheetRequest != nil ||
             cropSource != nil || catalogRemoval != nil || showSimilarPhotos || showSmartPreviews || showLibraryBackup || showLibraryRestore || rangeMaskRequest != nil ||
-            showColorLabelNames
+            showColorLabelNames || showHelp
     }
     var selectedLocal: LocalAdjustment? { selection?.edits.localAdjustments.first { $0.id == selectedLocalID } }
     var canDrawLocal: Bool {

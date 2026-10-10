@@ -57,6 +57,7 @@ struct WorkspaceView: View {
         .sheet(isPresented: $model.showBatchEdit) { BatchEditSheet() }
         .sheet(isPresented: $model.showCardImport) { CardImportSheet() }
         .sheet(isPresented: $model.showShortcuts) { ShortcutHelpSheet() }
+        .sheet(isPresented: $model.showHelp) { HelpSheet() }
         .sheet(isPresented: $model.showColorLabelNames) { ColorLabelNamesSheet() }
         .sheet(isPresented: $model.showPeople) { PeopleSheet() }
         .sheet(item: $model.presetSheet) { request in PresetSheet(request: request) }
@@ -844,6 +845,10 @@ struct WorkspaceView: View {
             }
             .font(.caption)
             .padding(.top, 18)
+            Button("도움말 보기 (⌘?)") { model.showHelp = true }
+                .buttonStyle(.borderless).font(.caption).foregroundStyle(Palette.muted)
+                .help("가져오기·고르기·보정·내보내기를 주제별로 읽고 낱말로 찾습니다")
+                .padding(.top, 4)
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.canvas)
