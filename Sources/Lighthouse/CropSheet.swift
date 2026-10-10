@@ -67,7 +67,10 @@ struct CropSheet: View {
                     Spacer()
                     Text(String(format: "%+.1f°", angle)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
-                Slider(value: $angle, in: -20...20).accessibilityLabel("수평 보정 각도")
+                Slider(value: $angle, in: -20...20)
+                    // 0이 가운데라 왼쪽부터 강조색으로 채우면 손대지 않아도 기운 것처럼 보인다(SliderRow와 같은 중립 회색).
+                    .tint(Color(white: 0.3))
+                    .accessibilityLabel("수평 보정 각도")
             }
             HStack {
                 Picker("크롭 비율", selection: $ratio) {
@@ -82,7 +85,7 @@ struct CropSheet: View {
                     model.applyCrop(source: source, crop: crop, straightenDegrees: angle)
                     dismiss()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.borderedProminent).tint(Palette.accent)
                 .disabled(!preview.isReady(for: angle) || preview.error != nil)
             }
         }

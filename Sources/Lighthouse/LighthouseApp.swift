@@ -109,7 +109,7 @@ struct LighthouseApp: App {
                 Button("얼굴 찾기 · 관리…") { library.showPeople = true }
                     .disabled(!library.catalogLoaded || library.hasModalPresentation)
                 Divider()
-                Button("선택 표시 (P)") { library.markFromKeyboard(flag: .pick) }
+                Button("채택 표시 (P)") { library.markFromKeyboard(flag: .pick) }
                     .disabled(library.selection == nil || library.hasModalPresentation)
                 Button("제외 표시 (X)") { library.markFromKeyboard(flag: .reject) }
                     .disabled(library.selection == nil || library.hasModalPresentation)

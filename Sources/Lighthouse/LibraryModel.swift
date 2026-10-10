@@ -527,7 +527,7 @@ final class LibraryModel: ObservableObject {
     var filterTitle: String {
         switch filter {
         case .all: "전체 사진"
-        case .picks: "선택됨"
+        case .picks: "채택됨"
         case .rejects: "제외됨"
         case .edited: "보정됨"
         case .bursts: "연속 촬영"
@@ -576,7 +576,7 @@ final class LibraryModel: ObservableObject {
     var counts: LibraryCounts {
         if let countsCache { return countsCache }
         var computed = LibraryCounts()
-        // 사진마다 속한 목록(전체·선택·제외·보정·연속 촬영)을 비트로 한 번만 구한다. JPEG 짝은 RAW와 같은 목록에서 뺀다.
+        // 사진마다 속한 목록(전체·채택·제외·보정·연속 촬영)을 비트로 한 번만 구한다. JPEG 짝은 RAW와 같은 목록에서 뺀다.
         let companions = activeCompanions
         let positions = burstIndex.positions
         var masks = [UUID: UInt8](minimumCapacity: photos.count)

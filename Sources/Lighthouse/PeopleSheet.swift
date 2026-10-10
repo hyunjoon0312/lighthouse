@@ -200,7 +200,7 @@ struct PeopleSheet: View {
                 Button("사진 보기") { model.showPhotos(for: person.id) }
                 Picker("목록", selection: $tab) {
                     ForEach(PeopleTab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.segmented).frame(maxWidth: 300)
+                }.pickerStyle(.segmented).tint(Palette.accent).frame(maxWidth: 300)
                 Spacer()
                 Button("이름 삭제…", role: .destructive) { deletingPerson = person }
             } else {
@@ -274,7 +274,7 @@ struct PeopleSheet: View {
                     Button("선택한 얼굴 확인") {
                         model.assignFaces(selectedFaceIDs, to: selectedPersonID)
                         selectedFaceIDs.removeAll()
-                    }.buttonStyle(.borderedProminent)
+                    }.buttonStyle(.borderedProminent).tint(Palette.accent)
                 } else if selectedPersonID == nil {
                     HStack {
                         TextField("새 사람 이름", text: $newName).textFieldStyle(.roundedBorder).frame(maxWidth: 220)

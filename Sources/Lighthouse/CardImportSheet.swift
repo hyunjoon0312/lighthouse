@@ -45,7 +45,7 @@ struct CardImportSheet: View {
                                           organizeByDate: organizeByDate)
                     dismiss()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.borderedProminent).tint(Palette.accent)
                 .disabled(source == nil || foundCount == nil || foundCount == 0 || model.isImporting || model.isExporting)
             }
         }

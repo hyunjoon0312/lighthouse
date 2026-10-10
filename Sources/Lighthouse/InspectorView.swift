@@ -36,7 +36,9 @@ struct InspectorView: View {
                                 .padding(.horizontal, 5).padding(.vertical, 2)
                                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Palette.muted, lineWidth: 1))
                         }
-                        Button { model.createVirtualCopy() } label: { Image(systemName: "plus.square.on.square") }
+                        Button { model.createVirtualCopy() } label: {
+                            Image(systemName: "plus.square.on.square").frame(width: 22, height: 22).contentShape(Rectangle())
+                        }
                             .buttonStyle(.borderless)
                             .help("가상 사본 만들기 (⌘')  같은 원본에 다른 보정을 따로 저장합니다")
                             .accessibilityLabel("가상 사본 만들기")
@@ -53,10 +55,10 @@ struct InspectorView: View {
                     ratingRow
                     ColorLabelRow(current: model.commonMarkColorLabel) { model.toggleMarkColorLabel($0) }
                     HStack(spacing: 8) {
-                        flagButton("선택", icon: "flag.fill", flag: .pick)
+                        flagButton("채택", icon: "flag.fill", flag: .pick)
                         flagButton("제외", icon: "xmark", flag: .reject)
                         Button("해제") { model.setFlag(.none) }
-                            .accessibilityLabel("선택과 제외 표시 해제")
+                            .accessibilityLabel("채택·제외 표시 해제")
                             .disabled(!model.canClearMarkFlags)
                     }.buttonStyle(.bordered)
                     if model.markTargetPhotos.count > 1 {
@@ -71,11 +73,10 @@ struct InspectorView: View {
                 }
                 Divider()
                 if model.selectedPhotoIDs.count >= 2 {
-                    Text("슬라이더는 기준 사진에 적용됩니다.")
+                    Text("슬라이더는 현재 사진에 적용됩니다.")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("선택한 \(model.selectedPhotoIDs.count)장에 일괄 적용…") { model.showBatchEdit = true }
                         .buttonStyle(.bordered)
-                        .accessibilityLabel("선택한 사진에 보정 일괄 적용")
                 }
                 // 초기화·복사는 세 패널 모두에 걸치므로 패널 탭 위에 둔다.
                 HStack {
@@ -207,7 +208,7 @@ struct InspectorView: View {
                     .font(.caption).buttonStyle(.bordered).controlSize(.small)
                     .disabled(model.isAutoAdjusting || model.isMissing(photo))
                     .help("사진에서 회색·흰색이어야 할 곳을 눌러 색온도·틴트를 맞춥니다 (W). Esc로 취소, ⌘Z로 되돌립니다")
-                    .accessibilityLabel("흰색 기준 찍기")
+                    .accessibilityLabel("회색 찍기")
             } content: {
                 Picker("기본 프로필", selection: Binding(
                     get: { edits.colorProfile },
@@ -310,7 +311,7 @@ struct InspectorView: View {
         Button(".cube 추가…") { model.presentLUTImport() }
             .buttonStyle(.bordered).controlSize(.small)
             .disabled(model.isLUTImporting || model.isLUTLibraryLoading)
-            .accessibilityLabel("3D LUT 파일 보관 목록에 추가")
+            .help("3D LUT(.cube) 파일을 보관 목록에 추가합니다")
         Picker("보관한 LUT", selection: Binding(
             get: { edits.lut?.id ?? "" },
             set: { model.selectSavedLUT($0) }
@@ -338,7 +339,7 @@ struct InspectorView: View {
             Toggle("LUT 사용", isOn: Binding(
                 get: { lut.isEnabled },
                 set: { enabled in model.updateLUT { $0.isEnabled = enabled } }
-            )).font(.caption).accessibilityLabel("LUT 켜기 또는 끄기")
+            )).font(.caption)
             localSlider("LUT 강도", value: lut.intensity * 100, range: 0...100, format: "%.0f%%", defaultValue: 100) { percent in
                 model.updateLUT(continuous: true) { $0.intensity = percent / 100 }
             }
@@ -369,12 +370,12 @@ struct InspectorView: View {
         HStack {
             Button("Lightroom 가져오기…") { model.presentLightroomPresetImport() }
                 .disabled(model.presetLoadError != nil || model.isPresetImporting)
-                .accessibilityLabel("Lightroom 프리셋 가져오기")
+                .help("Lightroom 프리셋(.xmp·.lrtemplate)을 가져옵니다")
             Button("현재 보정 저장…") {
                 model.presetSheet = PresetSheetRequest(kind: .save, initialName: "")
             }
             .disabled(model.presetLoadError != nil)
-            .accessibilityLabel("현재 보정을 프리셋으로 저장")
+            .help("현재 보정을 프리셋으로 저장합니다")
         }
         .buttonStyle(.bordered).controlSize(.small)
         TextField("프리셋 이름 검색", text: $presetSearch)
@@ -508,9 +509,9 @@ struct InspectorView: View {
         Group {
             HStack {
                 Button("피사체 선택") { model.addAutomaticLocal(background: false) }
-                    .accessibilityLabel("자동 피사체 마스크 만들기")
+                    .help("피사체를 찾아 자동 마스크를 만듭니다")
                 Button("배경 선택") { model.addAutomaticLocal(background: true) }
-                    .accessibilityLabel("자동 배경 마스크 만들기")
+                    .help("피사체를 뺀 배경으로 자동 마스크를 만듭니다")
             }
             .disabled(model.isAutoMasking || model.isMissing(photo))
             HStack {
@@ -676,7 +677,7 @@ struct InspectorView: View {
             Toggle("사용", isOn: Binding(
                 get: { edits.flicker.isEnabled },
                 set: { enabled in change { $0.flicker.isEnabled = enabled } }
-            )).labelsHidden().accessibilityLabel("LED 띠 감소 사용")
+            )).labelsHidden().accessibilityLabel("LED 띠 보정 사용")
         }
         // 끈 동안에는 방향·세기를 바꿔도 사진에 반영되지 않으므로 잠근다. 자동 분석은 켜면서 값을 채운다.
         Group {

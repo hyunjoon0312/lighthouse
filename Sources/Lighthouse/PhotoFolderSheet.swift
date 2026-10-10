@@ -35,7 +35,7 @@ struct PhotoFolderSheet: View {
                 Spacer()
                 Button("취소") { dismiss() }
                 Button(isCreate ? "만들기" : "이름 변경", action: commit)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.borderedProminent).tint(Palette.accent)
             }
         }
         .padding(24).frame(width: 440)

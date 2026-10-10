@@ -138,7 +138,7 @@ extension LibraryModel {
         burstMessage = "추천 컷 \(ordered.count)장을 선택했습니다."
     }
 
-    /// 분석한 묶음에서 추천 컷은 선택(P), 나머지는 제외(X)로 표시한다. 이미 표시한 사진은 그대로 둔다.
+    /// 분석한 묶음에서 추천 컷은 채택(P), 나머지는 제외(X)로 표시한다. 이미 표시한 사진은 그대로 둔다.
     /// 한 번에 실행 취소된다.
     func markBurstRecommendations() {
         guard catalogLoaded, loadError == nil else { return }

@@ -37,11 +37,15 @@ struct BatchEditSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("보정 일괄 적용").font(.title2.weight(.semibold))
             if let snapshot {
-                Text("기준 사진: \(snapshot.sourceName)").font(.subheadline)
-                Text("선택한 \(snapshot.targets.count)장의 사진에 원하는 보정 항목을 복사합니다.")
+                Text("현재 사진: \(snapshot.sourceName)").font(.subheadline)
+                Text("현재 사진의 보정 중 고른 항목을 선택한 \(snapshot.targets.count)장에 복사합니다.")
                     .font(.caption).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 9) {
-                    Toggle("전체 보정 (빛·색·카메라 프로필·캘리브레이션·화이트밸런스·텍스처·명료도·디헤이즈·생동감·비네팅·곡선·HSL·컬러 그레이딩·선명도·노이즈 감소·입자·RAW 현상)", isOn: $copyGlobal)
+                    // 담기는 항목이 길어 한 줄로 자르지 않고 줄을 바꾼다.
+                    Toggle(isOn: $copyGlobal) {
+                        Text("전체 보정 (빛·색·카메라 프로필·캘리브레이션·화이트밸런스·텍스처·명료도·디헤이즈·생동감·비네팅·곡선·HSL·컬러 그레이딩·선명도·노이즈 감소·입자·RAW 현상)")
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Toggle("LUT", isOn: $copyLUT)
                     if snapshot.edits.lut == nil {
                         Text("LUT를 포함하면 대상 사진의 LUT가 해제됩니다.")
@@ -70,7 +74,7 @@ struct BatchEditSheet: View {
                 }
                 // 창이 내용 크기에 맞춰지면 스크롤 영역이 0으로 줄어 목록이 보이지 않으므로 줄 수만큼 높이를 준다.
                 .frame(height: min(150, CGFloat(snapshot.targets.count) * 20))
-                Text("원본 파일, 별점과 선택·제외 표시는 바뀌지 않습니다.")
+                Text("원본 파일, 별점과 채택·제외 표시는 바뀌지 않습니다.")
                     .font(.caption2).foregroundStyle(.secondary)
                 if model.isRunningWorkflow {
                     ProgressView(value: model.workflowProgress)
@@ -103,7 +107,7 @@ struct BatchEditSheet: View {
                         if !reRecognizeAutomaticMasks || !copyLocal ||
                             !snapshot.edits.localAdjustments.contains(where: { $0.automaticMaskKind != nil }) { dismiss() }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.borderedProminent).tint(Palette.accent)
                     .disabled(components.isEmpty || model.isRunningWorkflow)
                 }
             } else {

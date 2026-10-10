@@ -35,7 +35,7 @@ enum ShortcutGuide {
         ]),
         Section(title: "표시", entries: [
             Entry(keys: "0–5", action: "별점 설정 (그리드에서 여러 장을 골랐으면 모두에)"),
-            Entry(keys: "P / X / U", action: "선택 / 제외 / 표시 해제 (그리드에서 여러 장을 골랐으면 모두에)"),
+            Entry(keys: "P / X / U", action: "채택 / 제외 / 표시 해제 (그리드에서 여러 장을 골랐으면 모두에)"),
             Entry(keys: "6–9", action: "색상 라벨 빨강 / 노랑 / 초록 / 파랑 (같은 키를 다시 누르면 떼기)"),
             Entry(keys: "Delete", action: "카탈로그에서 빼기(확인 후, 원본 파일은 그대로, ⌘Z로 되돌리기) · 내 폴더에서는 그 폴더에서만 빼기"),
         ]),

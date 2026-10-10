@@ -60,7 +60,7 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertEqual(first.items.filter { !$0.isSeparatorItem }.map(\.title),
                        ["별점", "표시", "색상 라벨", "폴더에 추가", "사진 보기에서 열기", "가상 사본 만들기",
                         "Finder에서 원본 보기", "내보내기…", "카탈로그에서 빼기…"])
-        // 고르지 않은 사진을 누르면 그 사진만 기준 사진이 되어 바뀐다.
+        // 고르지 않은 사진을 누르면 그 사진만 현재 사진이 되어 바뀐다.
         try choose(["별점", "★★★"], in: first)
         XCTAssertEqual(model.selectedID, photos[1].id)
         XCTAssertEqual(current(1)?.rating, 3)
@@ -69,7 +69,7 @@ final class ContextMenuTests: XCTestCase {
         // 고른 사진 중 하나를 누르면 고른 사진 모두에 붙는다.
         model.togglePhotoSelection(photos[2])
         try await Task.sleep(nanoseconds: 300_000_000)
-        try choose(["표시", "선택"], in: menu(window, host, column: 2))
+        try choose(["표시", "채택"], in: menu(window, host, column: 2))
         XCTAssertEqual((0..<4).map { current($0)?.flag }, [PhotoFlag.none, .pick, .pick, PhotoFlag.none])
 
         // 고른 것 밖의 사진은 그 사진만.

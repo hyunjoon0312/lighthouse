@@ -49,7 +49,7 @@ struct ReferenceMatchSheet: View {
 
                 HStack(spacing: 12) {
                     Text("강도").frame(width: 65, alignment: .leading)
-                    Slider(value: $model.strength, in: 0...1, step: 0.01)
+                    Slider(value: $model.strength, in: 0...1, step: 0.01).tint(Palette.accent)
                         .onChange(of: model.strength) { _, _ in model.updateStrength() }
                         .disabled(model.sourcePreview == nil || model.isAnalyzing || model.isWriting)
                         .accessibilityLabel("색감 맞추기 강도")
@@ -88,7 +88,7 @@ struct ReferenceMatchSheet: View {
                     Button("LUT만 보관") { store(apply: false) }
                         .disabled(!model.canWrite)
                     Button("보관하고 현재 사진에 적용") { store(apply: true) }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.borderedProminent).tint(Palette.accent)
                         .disabled(!model.canWrite)
                 }
             }

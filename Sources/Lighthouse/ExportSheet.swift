@@ -163,7 +163,7 @@ struct ExportSheet: View {
                     guard let directory else { return }
                     model.export(scope: scope, options: options, directory: directory, prepared: previewModel.preview)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.borderedProminent).tint(Palette.accent)
                 .disabled(!canStartLocalExport)
             }
         }
@@ -193,6 +193,7 @@ struct ExportSheet: View {
                 ForEach(ExportDestination.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
+            .tint(Palette.accent)
             .disabled(model.isExporting || driveBusy)
             if destination == .mac { reexportBox.disabled(model.isImporting || model.isExporting) }
             Picker("대상", selection: $scope) {
@@ -250,7 +251,7 @@ struct ExportSheet: View {
             if options.format.usesQuality {
                 HStack {
                     Text("품질")
-                    Slider(value: $options.quality, in: 0.4...1).accessibilityLabel("압축 품질")
+                    Slider(value: $options.quality, in: 0.4...1).tint(Palette.accent).accessibilityLabel("압축 품질")
                     Text("\(Int(options.quality * 100))%").monospacedDigit().frame(width: 40)
                 }
             } else {
@@ -259,7 +260,6 @@ struct ExportSheet: View {
             }
             Toggle("위치(GPS) 정보 포함", isOn: $options.includeLocation)
                 .help("촬영일·카메라·렌즈 정보와 키워드·설명은 항상 넣습니다. 위치는 켠 경우에만 포함합니다.")
-                .accessibilityLabel("내보낸 파일에 위치 정보 포함")
             Divider()
             filenameSettings
             Divider()
@@ -308,12 +308,12 @@ struct ExportSheet: View {
             HStack {
                 Text("크기").font(.caption)
                 Slider(value: Binding(get: { watermark.size }, set: { options.watermark?.size = $0 }),
-                       in: 0.01...0.1).accessibilityLabel("워터마크 크기")
+                       in: 0.01...0.1).tint(Palette.accent).accessibilityLabel("워터마크 크기")
             }
             HStack {
                 Text("불투명도").font(.caption)
                 Slider(value: Binding(get: { watermark.opacity }, set: { options.watermark?.opacity = $0 }),
-                       in: 0.2...1).accessibilityLabel("워터마크 불투명도")
+                       in: 0.2...1).tint(Palette.accent).accessibilityLabel("워터마크 불투명도")
             }
         }
     }

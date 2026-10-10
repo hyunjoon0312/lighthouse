@@ -113,6 +113,9 @@ struct WorkspaceView: View {
         } message: {
             Text("폴더만 삭제하며 사진과 보정은 보관됩니다.")
         }
+        // 시트는 위 강조색 범위 밖이라 그대로 두면 macOS 파란색을 쓴다. 보조 단추가 많아 중립색을 기본으로 두고,
+        // 주요 단추·세그먼트·0에서 차오르는 슬라이더만 각 시트에서 강조색을 준다(본 창의 보정 패널과 같은 규칙).
+        .tint(Palette.inactive)
         .onAppear {
             installKeys()
             installPinch()
@@ -179,12 +182,11 @@ struct WorkspaceView: View {
             VStack(spacing: 0) {
                 toolbar
                 Rectangle().fill(Palette.hairline).frame(height: 1)
-                if model.photos.isEmpty {
-                    quickCullingBar
-                } else {
+                // 빈 라이브러리에서는 거를 사진이 없어 표시 필터 줄을 두지 않는다(프리셋 가져오기는 파일 메뉴에 있다).
+                if !model.photos.isEmpty {
                     markAndSelectionBar
+                    Rectangle().fill(Palette.hairline).frame(height: 1)
                 }
-                Rectangle().fill(Palette.hairline).frame(height: 1)
                 if model.filter == .bursts {
                     BurstBar()
                     Rectangle().fill(Palette.hairline).frame(height: 1)
@@ -256,7 +258,7 @@ struct WorkspaceView: View {
             .padding(.horizontal, 20).padding(.top, 24).padding(.bottom, 30)
             sectionLabel("라이브러리")
             sidebarRow("전체 사진", icon: "square.grid.2x2", count: model.counts.total, selected: model.filter == .all) { model.filter = .all }
-            sidebarRow("선택됨", icon: "flag", count: model.counts.picks, selected: model.filter == .picks) { model.filter = .picks }
+            sidebarRow("채택됨", icon: "flag", count: model.counts.picks, selected: model.filter == .picks) { model.filter = .picks }
             sidebarRow("제외됨", icon: "xmark.circle", count: model.counts.rejects, selected: model.filter == .rejects) { model.filter = .rejects }
             sidebarRow("보정됨", icon: "slider.horizontal.3", count: model.counts.edited, selected: model.filter == .edited) { model.filter = .edited }
             sidebarRow("연속 촬영", icon: "square.stack.3d.down.right", count: model.counts.bursts, selected: model.filter == .bursts) { model.filter = .bursts }
@@ -266,12 +268,9 @@ struct WorkspaceView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     sectionLabel("사람").padding(.top, 20)
-                    Button { model.showPeople = true } label: {
-                        Label("얼굴 찾기 · 관리…", systemImage: "person.crop.square.badge.plus")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 18).padding(.vertical, 8)
+                    sidebarRow("얼굴 찾기 · 관리…", icon: "person.2.crop.square.stack", count: nil, selected: false) {
+                        model.showPeople = true
                     }
-                    .buttonStyle(.plain)
                     .disabled(!model.catalogLoaded)
                     if let error = model.peopleLoadError {
                         Text("사람 정보 오류: \(error)").font(.caption2).foregroundStyle(.red)
@@ -312,10 +311,12 @@ struct WorkspaceView: View {
                     HStack {
                         sectionLabel("내 폴더")
                         Spacer()
-                        Button { model.presentCreateFolder() } label: { Image(systemName: "plus") }
+                        Button { model.presentCreateFolder() } label: {
+                            Image(systemName: "plus").frame(width: 24, height: 24).contentShape(Rectangle())
+                        }
                             .buttonStyle(.plain).accessibilityLabel("새 폴더 만들기")
                             .disabled(!model.foldersLoaded)
-                            .padding(.trailing, 18)
+                            .padding(.trailing, 12)
                     }.padding(.top, 20)
                     if let error = model.folderLoadError {
                         Text("폴더 오류: \(error)").font(.caption2).foregroundStyle(.red)
@@ -388,6 +389,8 @@ struct WorkspaceView: View {
             .foregroundStyle(selected ? Palette.accent : Palette.inactive)
             .padding(.horizontal, 12).padding(.vertical, 9)
             .background(selected ? Palette.accent.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 8))
+            // 고르지 않은 줄도 여백·빈 곳까지 눌리게 한다(.plain은 그림이 있는 곳만 누름을 받는다).
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -434,6 +437,7 @@ struct WorkspaceView: View {
                         Image(systemName: mode.icon)
                             .frame(width: compact ? 30 : 34, height: 28)
                             .background(model.mode == mode ? Palette.accent.opacity(0.20) : .clear, in: RoundedRectangle(cornerRadius: 6))
+                            .contentShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain).help(mode.rawValue)
                     .accessibilityLabel("\(mode.rawValue) 보기")
@@ -465,11 +469,15 @@ struct WorkspaceView: View {
                                                          : "line.3.horizontal.decrease.circle.fill")
                     .font(.title3)
                     .foregroundStyle(model.criteria.isEmpty ? Palette.inactive : Palette.accent)
+                    .frame(width: 22, height: 24).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("카메라·렌즈·초점거리·ISO·촬영일로 거르고 스마트 폴더로 저장")
             .accessibilityLabel(model.criteria.isEmpty ? "조건으로 거르기" : "조건으로 거르기, 조건 걸림")
-            .popover(isPresented: $showsCriteria, arrowEdge: .bottom) { CriteriaPopover().environmentObject(model) }
+            .popover(isPresented: $showsCriteria, arrowEdge: .bottom) {
+                // 팝오버는 본 창의 강조색 범위 안이라 보조 단추까지 주황이 되지 않게 중립색을 준다.
+                CriteriaPopover().environmentObject(model).tint(Palette.inactive)
+            }
             if compact {
                 Menu {
                     Picker("정렬", selection: $model.sortOrder) { sortChoices }.pickerStyle(.inline)
@@ -647,7 +655,7 @@ struct WorkspaceView: View {
         return "원본 파일은 지우거나 옮기지 않고, 보정·별점·폴더 정보만 카탈로그에서 지웁니다. ⌘Z로 되돌릴 수 있습니다(앱을 다시 열면 되돌릴 수 없고, 다시 가져오면 보정 없이 새로 들어옵니다)." + companions
     }
 
-    /// 선택한 사진에 쓰는 단추. 창이 좁으면 보기 설정을 "보기" 메뉴로 접고, 더 좁으면 기준 사진 이름을 뺀다.
+    /// 선택한 사진에 쓰는 단추. 창이 좁으면 보기 설정을 "옵션" 메뉴로 접고, 더 좁으면 현재 사진 이름을 뺀다.
     private var selectionToolbar: some View {
         ViewThatFits(in: .horizontal) {
             selectionControls(collapsesOptions: false, showsActiveName: true)
@@ -666,8 +674,9 @@ struct WorkspaceView: View {
         HStack(spacing: 12) {
             Text("\(model.selectedPhotoIDs.count)장 선택")
                 .font(.caption.weight(.semibold)).foregroundStyle(Palette.accent)
-            if showsActiveName, let name = model.selection?.displayName {
-                Text("기준: \(name)").font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
+            // 사진·비교 보기는 바로 아래 머리 줄에 이름이 있어 그리드·여러 장 보기에서만 보인다.
+            if showsActiveName, model.mode == .grid || model.mode == .survey, let name = model.selection?.displayName {
+                Text("현재: \(name)").font(.caption).foregroundStyle(Palette.muted).lineLimit(1)
             }
             Button("전체 선택") { model.selectAllVisible() }
                 .accessibilityLabel("보이는 사진 전체 선택")
@@ -687,20 +696,18 @@ struct WorkspaceView: View {
                     Toggle("RAW+JPEG 한 장으로", isOn: $model.collapsesRAWJPEGPairs)
                     Toggle("표시 후 다음 사진", isOn: $model.autoAdvance)
                 } label: {
-                    Text("보기").foregroundStyle(Palette.inactive)
+                    Text("옵션").foregroundStyle(Palette.inactive)
                 }
                 .fixedSize()
                 .help("RAW+JPEG 한 장으로 · 표시 후 다음 사진")
-                .accessibilityLabel("보기 설정")
+                .accessibilityLabel("보기 옵션")
             } else {
                 Toggle("RAW+JPEG 한 장으로", isOn: $model.collapsesRAWJPEGPairs)
                     .toggleStyle(.checkbox)
                     .help("RAW와 함께 찍힌 JPEG를 숨기고 RAW만 보여 줍니다. JPEG는 카탈로그에 남아 있으며 끄면 다시 보입니다.")
-                    .accessibilityLabel("RAW와 JPEG를 한 장으로 보기")
                 Toggle("표시 후 다음 사진", isOn: $model.autoAdvance)
                     .toggleStyle(.checkbox)
                     .help("P·X·U·0–5 키로 표시하면 다음 사진으로 넘어갑니다")
-                    .accessibilityLabel("표시 후 자동으로 다음 사진")
             }
             Button("선택 해제") { model.clearPhotoSelection() }
                 .accessibilityLabel("사진 선택 해제")
@@ -724,7 +731,7 @@ struct WorkspaceView: View {
             if case .collection = model.filter {
                 Button("이 폴더에서 빼기") { model.removeSelectedPhotosFromCurrentFolder() }
                     .disabled(model.selectedPhotoIDs.isEmpty || !model.foldersLoaded)
-                    .accessibilityLabel("선택한 사진을 현재 폴더에서 빼기")
+                    .accessibilityLabel("선택한 사진을 이 폴더에서 빼기")
             }
         }
         .fixedSize()
@@ -756,7 +763,7 @@ struct WorkspaceView: View {
                     .frame(maxWidth: 420, maxHeight: 320).opacity(0.55)
             }
             Label("원본 파일을 찾을 수 없습니다", systemImage: "exclamationmark.triangle.fill")
-                .font(.headline).foregroundStyle(Palette.accent)
+                .font(.headline).foregroundStyle(Palette.warning)
             Text("저장해 둔 작은 미리보기입니다. 드라이브를 연결하면 다시 확인하고, 파일을 옮겼다면 새 위치를 알려 주세요.")
                 .font(.caption).foregroundStyle(Palette.muted).multilineTextAlignment(.center).frame(maxWidth: 360)
             Button("위치 다시 찾기…") { model.presentRelocate(for: photo) }.buttonStyle(.bordered)
@@ -794,7 +801,7 @@ struct WorkspaceView: View {
                 Button(actionTitle, action: action).buttonStyle(.borderedProminent)
             }
             if model.photos.isEmpty && model.loadError == nil {
-                Button("파일 또는 폴더 선택") { model.presentImport() }.buttonStyle(.borderedProminent).accessibilityLabel("파일 또는 폴더 가져오기").padding(.top, 8)
+                Button("파일 또는 폴더 선택") { model.presentImport() }.buttonStyle(.borderedProminent).accessibilityLabel("파일 또는 폴더 선택해 가져오기").padding(.top, 8)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(Palette.canvas)
@@ -838,7 +845,9 @@ struct WorkspaceView: View {
     }
 
     private var editorCanvas: some View {
-        VStack(spacing: 0) {
+        // 원본이 없으면 저장해 둔 작은 미리보기만 있어 나눠 보기·100%·원본 보기가 할 일이 없다.
+        let missing = model.selection.map { model.isMissing($0) } ?? false
+        return VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Button { model.move(-1) } label: { Image(systemName: "chevron.left") }.accessibilityLabel("이전 사진").disabled(model.visiblePhotos.first?.id == model.selectedID)
                 Button { model.move(1) } label: { Image(systemName: "chevron.right") }.accessibilityLabel("다음 사진").disabled(model.visiblePhotos.last?.id == model.selectedID)
@@ -859,18 +868,21 @@ struct WorkspaceView: View {
                     Button("이 사진을 기준으로") { model.makeCurrentPinned() }
                         .disabled(model.selectedID == pinned.id)
                         .help("지금 사진을 왼쪽 기준으로 옮기고 다음 사진과 비교합니다")
-                        .accessibilityLabel("지금 사진을 비교 기준으로 삼기")
+                        .accessibilityLabel("이 사진을 기준으로 삼기")
                 }
                 if model.mode == .edit {
                     Button(model.showsSplit ? "나눠 보기 끄기" : "전·후 나눠 보기") { model.toggleSplit() }
                         .tint(model.showsSplit ? Palette.accent : Palette.inactive)
+                        .disabled(missing)
                         .help("왼쪽은 보정 전, 오른쪽은 보정 후 (Y). 선을 끌어 옮깁니다.")
                 }
                 Button(model.actualSize ? "화면 맞춤" : (model.selectionUsesSmartPreview ? "미리보기 확대" : "100%")) { model.toggleActualSize() }
                     .tint(model.actualSize ? Palette.accent : Palette.inactive)
+                    .disabled(missing)
                     .help(model.actualSize ? "화면에 맞춰 보기 (Z)" : "100%로 보기 (Z). 사진을 누른 곳이 가운데 옵니다")
                 Button(model.isOriginal ? "보정 보기" : "원본 보기") { model.toggleOriginal() }
                     .tint(model.isOriginal ? Palette.accent : Palette.inactive)
+                    .disabled(missing)
                     .help("보정 전 원본과 번갈아 봅니다 (\\)")
             }
             // 단추 글자는 줄바꿈하지 않고, 좁으면 파일 이름·기준 이름·촬영 정보가 먼저 줄어든다.
@@ -1286,14 +1298,14 @@ private struct PhotoTile: View {
                 .frame(height: imageHeight)
                 HStack {
                     Text(photo.displayName).lineLimit(1).font(.system(size: 12, weight: .medium))
-                    if active { Text("기준").font(.caption2.weight(.bold)).foregroundStyle(Palette.accent) }
+                    if active { Text("현재").font(.caption2.weight(.bold)).foregroundStyle(Palette.accent) }
                 }
                 HStack(spacing: 6) {
                     RatingStars(rating: photo.rating)
                     Spacer()
-                    // 오른쪽 위는 다중 선택 단추 자리라, 선택·제외 표시는 별점 줄에 둔다.
+                    // 오른쪽 위는 다중 선택 단추 자리라, 채택·제외 표시는 별점 줄에 둔다.
                     if photo.flag != .none {
-                        Label(photo.flag == .pick ? "선택" : "제외",
+                        Label(photo.flag == .pick ? "채택" : "제외",
                               systemImage: photo.flag == .pick ? "flag.fill" : "xmark.circle.fill")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(photo.flag == .pick ? Palette.accent : .red)
@@ -1315,7 +1327,7 @@ private struct PhotoTile: View {
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction { model.focusPhoto(photo) }
             .accessibilityAction(named: Text("선택 토글")) { model.togglePhotoSelection(photo) }
-            .accessibilityAction(named: Text("기준 사진으로 보기")) { model.focusPhoto(photo); model.setMode(.edit) }
+            .accessibilityAction(named: Text("사진 보기에서 열기")) { model.focusPhoto(photo); model.setMode(.edit) }
             Button { model.togglePhotoSelection(photo) } label: {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.title3).foregroundStyle(selected ? Palette.accent : .white)
@@ -1349,9 +1361,9 @@ private struct PhotoTile: View {
     }
 
     private var accessibilityText: String {
-        let state = active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨"
+        let state = active ? "현재 사진" : selected ? "선택됨" : "선택 안 됨"
         let label = photo.colorLabel.map { ", \($0.title) 라벨" } ?? ""
-        let flag = photo.flag == .pick ? ", 선택 표시" : photo.flag == .reject ? ", 제외 표시" : ""
+        let flag = photo.flag == .pick ? ", 채택 표시" : photo.flag == .reject ? ", 제외 표시" : ""
         return "\(photo.displayName), 별점 \(photo.rating), \(state)" + flag + label + burstAccessibility
     }
 
@@ -1377,7 +1389,7 @@ private struct FilmstripTile: View {
                 } else {
                     Rectangle().fill(.white.opacity(0.06)).overlay(Image(systemName: "photo").foregroundStyle(Palette.muted))
                 }
-                // 오른쪽 위는 다중 선택 단추, 왼쪽 아래는 "기준" 자리라 선택·제외 표시는 왼쪽 위에 둔다.
+                // 오른쪽 위는 다중 선택 단추, 왼쪽 아래는 "현재" 자리라 채택·제외 표시는 왼쪽 위에 둔다.
                 if photo.flag != .none {
                     VStack {
                         HStack {
@@ -1390,7 +1402,7 @@ private struct FilmstripTile: View {
                     }
                     .padding(4)
                 }
-                if active { Text("기준").font(.system(size: 9, weight: .bold)).padding(3).background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 3)).padding(4) }
+                if active { Text("현재").font(.system(size: 9, weight: .bold)).padding(3).background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 3)).padding(4) }
                 if let label = photo.colorLabel {
                     VStack { Spacer(); Rectangle().fill(label.color).frame(height: 4) }
                 }
@@ -1402,7 +1414,7 @@ private struct FilmstripTile: View {
             .onTapGesture { tileClicked(model, photo) }
             .contextMenu { PhotoContextMenu(photo: photo) }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(photo.displayName), \(active ? "기준 사진" : selected ? "선택됨" : "선택 안 됨")")
+            .accessibilityLabel("\(photo.displayName), \(active ? "현재 사진" : selected ? "선택됨" : "선택 안 됨")")
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .accessibilityAction { model.focusPhoto(photo) }
             .accessibilityAction(named: Text("선택 토글")) { model.togglePhotoSelection(photo) }
@@ -1443,11 +1455,9 @@ private struct BurstBar: View {
                         .help("컷마다 초점 선명도, 얼굴 촬영 품질, 눈 감음을 Mac 안에서 비교합니다. 눈 감은 컷은 추천하지 않습니다")
                 }
                 Button("추천 컷 선택") { model.selectBurstRecommendations() }
-                    .accessibilityLabel("추천 컷만 선택")
                     .disabled(model.isAnalyzingBursts || model.burstRecommendations.isEmpty)
-                Button("추천 P · 나머지 X 표시") { model.markBurstRecommendations() }
-                    .accessibilityLabel("추천 컷은 선택, 나머지는 제외로 표시")
-                    .help("표시가 없는 사진에만 적용하고 한 번에 실행 취소됩니다")
+                Button("추천 채택 · 나머지 제외") { model.markBurstRecommendations() }
+                    .help("추천 컷은 채택(P), 나머지는 제외(X)로 표시합니다. 표시가 없는 사진에만 적용하고 한 번에 실행 취소됩니다")
                     .disabled(model.isAnalyzingBursts || model.burstRecommendations.isEmpty)
                 Spacer()
             }
@@ -1498,7 +1508,7 @@ extension WorkspaceMode {
     }
 }
 
-/// 여러 장 보기: 선택한 사진을 화면을 나눠 크게 놓는다. 누르면 기준 사진이 되어 별점·표시 키가 그 사진에 붙고,
+/// 여러 장 보기: 선택한 사진을 화면을 나눠 크게 놓는다. 누르면 현재 사진이 되어 별점·표시 키가 그 사진에 붙고,
 /// ×는 그 사진을 선택에서 빼 비교에서 뺀다. 두 번 누르면 사진 보기로 연다.
 private struct SurveyView: View {
     @EnvironmentObject private var model: LibraryModel
@@ -1606,7 +1616,7 @@ private struct SurveyCell: View {
         .onTapGesture { model.focusPhoto(photo) }
         .contextMenu { PhotoContextMenu(photo: photo) }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(photo.displayName), 별점 \(photo.rating)\(active ? ", 기준 사진" : "")")
+        .accessibilityLabel("\(photo.displayName), 별점 \(photo.rating)\(active ? ", 현재 사진" : "")")
         .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
     }
 }

@@ -39,7 +39,7 @@ struct PresetSheet: View {
                 Spacer()
                 Button("취소") { dismiss() }
                 Button(isRename ? "이름 변경" : "저장") { commit() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.borderedProminent).tint(Palette.accent)
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty ||
                               (!isRename && !includesGlobal && !includesLUT && !includesGeometry))
             }

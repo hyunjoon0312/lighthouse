@@ -2,7 +2,7 @@ import SwiftUI
 import LighthouseCore
 
 /// 사진 칸의 오른쪽 클릭 메뉴. 고른 사진 중 하나를 누르면 고른 사진 모두에(그리드), 고르지 않은 사진을 누르면
-/// 그 사진만 골라 적용한다. 사진·비교·여러 장 보기에서는 누른 사진을 기준 사진으로 삼는다.
+/// 그 사진만 골라 적용한다. 사진·비교·여러 장 보기에서는 누른 사진을 현재 사진으로 삼는다.
 struct PhotoContextMenu: View {
     @EnvironmentObject private var model: LibraryModel
     let photo: PhotoAsset
@@ -14,7 +14,7 @@ struct PhotoContextMenu: View {
             }
         }
         Menu("표시") {
-            Button("선택") { act { model.setFlag(.pick) } }
+            Button("채택") { act { model.setFlag(.pick) } }
             Button("제외") { act { model.setFlag(.reject) } }
             Button("표시 해제") { act { model.setFlag(.none) } }
         }
@@ -49,7 +49,7 @@ struct PhotoContextMenu: View {
         action()
     }
 
-    /// 한 장에만 하는 일은 누른 사진을 기준 사진으로 삼는다.
+    /// 한 장에만 하는 일은 누른 사진을 현재 사진으로 삼는다.
     private func focusOnly(_ action: () -> Void) {
         if photo.id != model.selectedID { model.focusPhoto(photo) }
         action()

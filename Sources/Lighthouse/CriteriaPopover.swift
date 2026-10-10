@@ -25,7 +25,7 @@ struct CriteriaPopover: View {
                     Text("표시")
                     Picker("표시", selection: $model.criteria.flag) {
                         Text("모두").tag(PhotoFlag?.none)
-                        Text("선택됨").tag(PhotoFlag?.some(.pick))
+                        Text("채택됨").tag(PhotoFlag?.some(.pick))
                         Text("제외됨").tag(PhotoFlag?.some(.reject))
                         Text("표시 없음").tag(PhotoFlag?.some(PhotoFlag.none))
                     }

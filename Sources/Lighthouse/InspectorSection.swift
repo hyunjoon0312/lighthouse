@@ -35,7 +35,8 @@ struct InspectorSection<Accessory: View, Content: View>: View {
                             .foregroundStyle(Palette.muted)
                             .rotationEffect(.degrees(expanded ? 90 : 0))
                             .frame(width: 10)
-                        Text(title).font(.caption.weight(.semibold))
+                        // 묶음 제목은 안의 슬라이더 이름(caption)보다 한 단계 크게 해 위계를 둔다.
+                        Text(title).font(.subheadline.weight(.semibold))
                             .foregroundStyle(expanded ? Color.primary : Palette.inactive)
                         if modified {
                             Circle().fill(Palette.accent).frame(width: 5, height: 5)

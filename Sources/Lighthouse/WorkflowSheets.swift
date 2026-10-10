@@ -31,7 +31,7 @@ struct RangeMaskSheet: View {
                 Spacer()
                 Button("취소") { model.cancelWorkflow(); dismiss() }
                 Button("적용") { model.applyRangeMask(request, selection: normalized) }
-                    .buttonStyle(.borderedProminent).disabled(model.isRunningWorkflow || value.lower > value.upper)
+                    .buttonStyle(.borderedProminent).tint(Palette.accent).disabled(model.isRunningWorkflow || value.lower > value.upper)
             }
         }
         .padding(24).frame(width: 440)
@@ -53,7 +53,7 @@ struct RangeMaskSheet: View {
     }
 
     private func slider(_ title: String, _ value: Binding<Double>) -> some View {
-        HStack { Text(title).frame(width: 110, alignment: .leading); Slider(value: value, in: 0...1); Text("\(Int(value.wrappedValue * 100))%").monospacedDigit().frame(width: 42) }
+        HStack { Text(title).frame(width: 110, alignment: .leading); Slider(value: value, in: 0...1).tint(Palette.accent); Text("\(Int(value.wrappedValue * 100))%").monospacedDigit().frame(width: 42) }
     }
 }
 
@@ -98,7 +98,7 @@ struct SimilarPhotosSheet: View {
                     }
                 }
             } else {
-                Button("분석 시작") { model.findSimilarPhotos() }.buttonStyle(.borderedProminent)
+                Button("분석 시작") { model.findSimilarPhotos() }.buttonStyle(.borderedProminent).tint(Palette.accent)
             }
             if let message = model.workflowMessage { Text(message).font(.caption).foregroundStyle(.red) }
         }.padding(24).frame(width: 700, height: 520)
@@ -132,7 +132,7 @@ struct SmartPreviewSheet: View {
                     .disabled(model.isRunningWorkflow)
                 Spacer()
                 Button("만들기") { model.createSmartPreviews(for: Set(targets.map(\.id))) }
-                    .buttonStyle(.borderedProminent).disabled(model.isRunningWorkflow || targets.isEmpty)
+                    .buttonStyle(.borderedProminent).tint(Palette.accent).disabled(model.isRunningWorkflow || targets.isEmpty)
             }
         }.padding(24).frame(width: 520, height: 420)
             .interactiveDismissDisabled(model.isRunningWorkflow)

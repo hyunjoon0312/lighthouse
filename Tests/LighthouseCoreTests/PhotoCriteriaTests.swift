@@ -85,7 +85,7 @@ final class PhotoCriteriaTests: XCTestCase {
         criteria.flag = .pick
         criteria.firstDay = day("2026-09-20")
         XCTAssertEqual(criteria.summary(calendar: calendar),
-                       ["선택됨", "Panasonic DC-S9", "20–35.5mm", "ISO ~800", "2026-09-20~"])
+                       ["채택됨", "Panasonic DC-S9", "20–35.5mm", "ISO ~800", "2026-09-20~"])
         XCTAssertEqual(try JSONDecoder().decode(PhotoCriteria.self, from: Data("{}".utf8)), PhotoCriteria())
         XCTAssertEqual(try JSONDecoder().decode(PhotoCriteria.self, from: JSONEncoder().encode(criteria)), criteria)
     }

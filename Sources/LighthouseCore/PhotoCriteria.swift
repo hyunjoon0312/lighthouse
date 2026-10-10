@@ -60,7 +60,7 @@ public struct PhotoCriteria: Codable, Equatable, Sendable {
         if !text.isEmpty { parts.append("‘\(text)’") }
         if minimumRating > 0 { parts.append("\(minimumRating)★ 이상") }
         switch flag {
-        case .pick?: parts.append("선택됨")
+        case .pick?: parts.append("채택됨")
         case .reject?: parts.append("제외됨")
         case PhotoFlag.none?: parts.append("표시 없음")
         case nil: break

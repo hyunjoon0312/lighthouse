@@ -367,4 +367,35 @@ final class UIEventTests: XCTestCase {
             model.selectedPhotoIDs == [photos[2].id, photos[1].id]
         }
     }
+
+    /// 단추와 사이드바 줄은 그림이 없는 빈 곳을 눌러도 동작한다. 보이는 모양 전체가 누름 영역이다.
+    func testButtonsAndSidebarRowsAcceptClicksAcrossTheirShape() async throws {
+        guard ProcessInfo.processInfo.environment["LIGHTHOUSE_UI_EVENTS"] != nil else {
+            throw XCTSkip("LIGHTHOUSE_UI_EVENTS를 주면 창을 띄워 누름 영역을 확인한다.")
+        }
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 2)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
+                              backing: .buffered, defer: false)
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil); window.contentView = nil }
+        model.select(model.visiblePhotos[0])
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        // 1440×900 창의 사진 보기 단추(34×28, 가운데 x 424) 왼쪽 안쪽 3pt. 아이콘 밖이다.
+        try await click(window, CGPoint(x: 410, y: 26))
+        try await TestSupport.wait("mode button edge", timeout: 5) { model.mode == .edit }
+        model.setMode(.grid)
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        // 사이드바 "채택됨" 줄(가운데 y 146)의 위쪽 여백과, 글자와 개수 사이 빈 곳.
+        try await click(window, CGPoint(x: 150, y: 134))
+        try await TestSupport.wait("row padding", timeout: 5) { model.filter == .picks }
+        model.filter = .all
+        try await Task.sleep(nanoseconds: 300_000_000)
+        try await click(window, CGPoint(x: 150, y: 146))
+        try await TestSupport.wait("row spacer", timeout: 5) { model.filter == .picks }
+    }
 }
