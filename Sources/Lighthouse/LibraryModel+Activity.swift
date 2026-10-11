@@ -74,7 +74,7 @@ extension LibraryModel {
         }
         if isAnalyzingBursts {
             items.append(BackgroundActivity(kind: .bursts, title: "베스트 컷 분석", detail: Self.percent(burstAnalysisProgress),
-                                            progress: burstAnalysisProgress, canCancel: true, isCancelling: false))
+                                            progress: burstAnalysisProgress, canCancel: true, isCancelling: isCancellingBursts))
         }
         if isAnalyzingFlicker {
             items.append(BackgroundActivity(kind: .flicker, title: "LED 띠 분석", detail: nil, progress: nil,
@@ -84,7 +84,8 @@ extension LibraryModel {
             let reports = workflowKind?.reportsProgress == true
             items.append(BackgroundActivity(kind: .workflow, title: workflowKind?.title ?? "작업",
                                             detail: reports ? Self.percent(workflowProgress) : nil,
-                                            progress: reports ? workflowProgress : nil, canCancel: true, isCancelling: false))
+                                            progress: reports ? workflowProgress : nil, canCancel: true,
+                                            isCancelling: isCancellingWorkflow))
         }
         if sidecarWritesInFlight > 0 {
             items.append(BackgroundActivity(kind: .sidecars, title: "XMP 사이드카 쓰기", detail: "\(sidecarWritesInFlight)장",

@@ -106,6 +106,13 @@ extension LibraryModel {
     /// 지금 분석 중인 한 장은 끝까지 하고 나머지를 건너뛴다. 이미 분석한 결과는 남긴다.
     func cancelBurstAnalysis() {
         burstCancellation?.cancel()
+        // 중지 표시는 플래그에서 읽으므로 화면에 바뀐 것을 알린다.
+        objectWillChange.send()
+    }
+
+    /// 중지를 눌렀지만 분석 중인 한 장이 아직 끝나지 않았다. 분석이 끝나면 새 플래그가 생기므로 저절로 풀린다.
+    var isCancellingBursts: Bool {
+        isAnalyzingBursts && burstCancellation?.isCancelled == true
     }
 
     private func burstSummary(_ groups: [BurstGroup], failed: Int, cancelled: Bool) -> String {

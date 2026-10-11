@@ -68,7 +68,7 @@ struct SimilarPhotosSheet: View {
                 .font(.caption).foregroundStyle(.secondary)
             if model.isRunningWorkflow {
                 ProgressView(value: model.workflowProgress)
-                HStack { Text("기기에서 사진을 비교하는 중…"); Spacer(); Button("취소") { model.cancelWorkflow() } }.font(.caption)
+                HStack { Text("기기에서 사진을 비교하는 중…"); Spacer(); Button(model.isCancellingWorkflow ? "취소하는 중…" : "취소") { model.cancelWorkflow() }.disabled(model.isCancellingWorkflow) }.font(.caption)
             } else if let result = model.similarPhotoResult {
                 List(result.groups) { group in
                     HStack {
@@ -116,7 +116,7 @@ struct SmartPreviewSheet: View {
             HStack { Text("스마트 미리보기").font(.title2.weight(.semibold)); Spacer(); Button("닫기") { dismiss() }.disabled(model.isRunningWorkflow) }
             Text("선택한 \(targets.count)장의 사진에 원본이 연결되지 않았을 때 쓸 고해상도 미리보기를 로컬에 보관합니다.")
                 .font(.caption).foregroundStyle(.secondary)
-            if model.isRunningWorkflow { ProgressView(value: model.workflowProgress); Button("취소") { model.cancelWorkflow() } }
+            if model.isRunningWorkflow { ProgressView(value: model.workflowProgress); Button(model.isCancellingWorkflow ? "취소하는 중…" : "취소") { model.cancelWorkflow() }.disabled(model.isCancellingWorkflow) }
             ScrollView { VStack(alignment: .leading) { ForEach(targets) { photo in
                 Label(photo.filename, systemImage: model.smartPreviewRecords[photo.id] == nil ? "circle" : "checkmark.circle.fill")
             } } }
@@ -154,7 +154,7 @@ struct LibraryArchiveSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(mode == .backup ? "라이브러리 백업" : "라이브러리 복원").font(.title2.weight(.semibold))
             if mode == .backup { backupBody } else { restoreBody }
-            if model.isRunningWorkflow { ProgressView(value: model.workflowProgress); Button("취소") { model.cancelWorkflow() } }
+            if model.isRunningWorkflow { ProgressView(value: model.workflowProgress); Button(model.isCancellingWorkflow ? "취소하는 중…" : "취소") { model.cancelWorkflow() }.disabled(model.isCancellingWorkflow) }
             if let message = model.workflowMessage { Text(message).font(.caption).foregroundStyle(.secondary) }
             HStack { Spacer(); Button("닫기") { dismiss() }.disabled(model.isRunningWorkflow) }
         }.padding(24).frame(width: 560)

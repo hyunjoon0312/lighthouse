@@ -142,4 +142,38 @@ final class BackgroundActivityTests: XCTestCase {
         XCTAssertEqual(activity.progress, 0.5)
         XCTAssertTrue(activity.canCancel)
     }
+
+    /// 베스트 컷 분석은 지금 분석 중인 한 장을 끝내야 멈추므로, 그동안 멈추는 중으로 보인다.
+    func testStoppedBurstAnalysisShowsStoppingUntilItEnds() async throws {
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 0)
+        model.isAnalyzingBursts = true
+        model.burstCancellation = CancellationFlag()
+        defer { model.isAnalyzingBursts = false; model.burstCancellation = nil }
+        XCTAssertEqual(model.backgroundActivities.first { $0.kind == .bursts }?.isCancelling, false)
+
+        model.cancelBackgroundActivity(.bursts)
+        XCTAssertTrue(model.isCancellingBursts)
+        XCTAssertEqual(model.backgroundActivities.first { $0.kind == .bursts }?.isCancelling, true, "멈추는 중으로 보인다")
+    }
+
+    /// 여러 장에 하는 작업도 하던 한 장을 끝내야 멈춘다. 멈추는 동안 그렇게 보이고, 다음 작업은 처음부터 멈추지 않은 상태다.
+    func testStoppedWorkflowShowsStoppingUntilItEnds() async throws {
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 2)
+        try await TestSupport.wait("idle") { !model.hasConflictingWorkflow }
+        let gate = DispatchSemaphore(value: 0)
+        model.batchQueue.async { gate.wait() }
+
+        model.createSmartPreviews(for: Set(model.photos.map(\.id)))
+        XCTAssertEqual(model.backgroundActivities.first { $0.kind == .workflow }?.isCancelling, false)
+        model.cancelBackgroundActivity(.workflow)
+        XCTAssertTrue(model.isCancellingWorkflow)
+        XCTAssertEqual(model.backgroundActivities.first { $0.kind == .workflow }?.isCancelling, true, "멈추는 중으로 보인다")
+
+        gate.signal()
+        try await TestSupport.wait("previews stopped") { !model.isRunningWorkflow }
+        XCTAssertFalse(model.isCancellingWorkflow)
+        model.findSimilarPhotos()
+        XCTAssertEqual(model.backgroundActivities.first { $0.kind == .workflow }?.isCancelling, false)
+        try await TestSupport.wait("similar") { !model.isRunningWorkflow }
+    }
 }

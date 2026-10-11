@@ -97,9 +97,10 @@ struct BatchEditSheet: View {
                 }
                 HStack {
                     Spacer()
-                    Button(model.isRunningWorkflow ? "처리 취소" : "취소") {
+                    Button(model.isCancellingWorkflow ? "취소하는 중…" : model.isRunningWorkflow ? "처리 취소" : "취소") {
                         if model.isRunningWorkflow { model.cancelWorkflow() } else { dismiss() }
                     }
+                    .disabled(model.isCancellingWorkflow)
                     Button("선택한 \(snapshot.targets.count)장에 적용") {
                         model.applyBatchEditsWithAutomaticMasks(source: snapshot.edits,
                                                                 to: snapshot.targets.map(\.id), components: components,

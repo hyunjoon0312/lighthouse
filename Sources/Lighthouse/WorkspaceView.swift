@@ -1546,7 +1546,8 @@ private struct BurstBar: View {
                     .font(.caption.weight(.semibold)).foregroundStyle(Palette.accent)
                 if model.isAnalyzingBursts {
                     ProgressView(value: model.burstAnalysisProgress).frame(width: 120)
-                    Button("중지") { model.cancelBurstAnalysis() }
+                    Button(model.isCancellingBursts ? "중지하는 중…" : "중지") { model.cancelBurstAnalysis() }
+                        .disabled(model.isCancellingBursts)
                         .accessibilityLabel("연속 촬영 분석 중지")
                 } else {
                     Button("베스트 컷 분석") { model.analyzeBursts() }

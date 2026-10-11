@@ -424,7 +424,12 @@ extension LibraryModel {
 
     func cancelWorkflow() {
         workflowCancellation?.cancel()
-        if !isRunningWorkflow { workflowMessage = "작업을 취소했습니다." }
+        if !isRunningWorkflow { workflowMessage = "작업을 취소했습니다." } else { objectWillChange.send() }
+    }
+
+    /// 취소를 눌렀지만 하던 한 장이 아직 끝나지 않았다. 작업마다 새 플래그를 만들므로 다음 작업에는 남지 않는다.
+    var isCancellingWorkflow: Bool {
+        isRunningWorkflow && workflowCancellation?.isCancelled == true
     }
 
     func cancelWorkflowAndWait() async {
