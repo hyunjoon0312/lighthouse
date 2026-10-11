@@ -151,9 +151,35 @@ final class BackgroundActivityTests: XCTestCase {
         defer { model.isAnalyzingBursts = false; model.burstCancellation = nil }
         XCTAssertEqual(model.backgroundActivities.first { $0.kind == .bursts }?.isCancelling, false)
 
+        XCTAssertEqual(model.backgroundActivities.first { $0.kind == .bursts }?.statusText, "베스트 컷 분석 0%")
         model.cancelBackgroundActivity(.bursts)
         XCTAssertTrue(model.isCancellingBursts)
-        XCTAssertEqual(model.backgroundActivities.first { $0.kind == .bursts }?.isCancelling, true, "멈추는 중으로 보인다")
+        let stopping = try XCTUnwrap(model.backgroundActivities.first { $0.kind == .bursts })
+        XCTAssertTrue(stopping.isCancelling, "멈추는 중으로 보인다")
+        XCTAssertEqual(stopping.statusText, "베스트 컷 분석 중지하는 중…", "아래 상태 줄도 멈추는 중으로 보인다")
+        XCTAssertEqual(stopping.stopButtonTitle, "중지하는 중…")
+    }
+
+    /// 목록의 단추는 그 작업의 창·안내와 같은 낱말을 쓴다. 해 둔 것을 버리는 작업은 "취소", 끝난 만큼 남기는 작업은 "중지"다.
+    func testListUsesTheSameStopWordAsTheJobsOwnWindow() async throws {
+        let (model, _, _) = try await TestSupport.startedModel(self, photos: 0)
+        model.isAnalyzingBursts = true
+        model.isRunningWorkflow = true
+        model.workflowKind = .smartPreviews
+        model.workflowCancellation = CancellationFlag()
+        defer {
+            model.isAnalyzingBursts = false
+            model.isRunningWorkflow = false
+            model.workflowKind = nil
+            model.workflowCancellation = nil
+        }
+        XCTAssertEqual(model.backgroundActivities.first { $0.kind == .bursts }?.stopButtonTitle, "중지")
+        XCTAssertEqual(model.backgroundActivities.first { $0.kind == .workflow }?.stopButtonTitle, "취소")
+
+        model.cancelWorkflow()
+        let stopping = try XCTUnwrap(model.backgroundActivities.first { $0.kind == .workflow })
+        XCTAssertEqual(stopping.stopButtonTitle, "취소하는 중…", "스마트 미리보기 창의 단추와 같다")
+        XCTAssertEqual(stopping.statusText, "스마트 미리보기 만들기 취소하는 중…")
     }
 
     /// 여러 장에 하는 작업도 하던 한 장을 끝내야 멈춘다. 멈추는 동안 그렇게 보이고, 다음 작업은 처음부터 멈추지 않은 상태다.

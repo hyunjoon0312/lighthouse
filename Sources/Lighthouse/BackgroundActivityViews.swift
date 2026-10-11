@@ -16,7 +16,7 @@ struct BackgroundActivityRow: View {
             if visible, !activities.isEmpty {
                 HStack(spacing: 8) {
                     indicator(activities)
-                    Text(activities.map(Self.describe).joined(separator: " · "))
+                    Text(activities.map(\.statusText).joined(separator: " · "))
                         .font(.caption.monospacedDigit()).foregroundStyle(Palette.muted).lineLimit(1)
                     Spacer(minLength: 8)
                     Button("작업 보기") { showsList.toggle() }
@@ -40,10 +40,6 @@ struct BackgroundActivityRow: View {
             do { try await Task.sleep(for: .milliseconds(800)) } catch { return }
             visible = true
         }
-    }
-
-    private static func describe(_ activity: BackgroundActivity) -> String {
-        [activity.title, activity.detail].compactMap { $0 }.joined(separator: " ")
     }
 
     /// 작업이 하나이고 진행을 알면 차오르는 원을, 아니면 도는 표시를 보인다.
@@ -83,7 +79,7 @@ struct BackgroundActivityList: View {
                 }
                 Spacer(minLength: 8)
                 if activity.canCancel {
-                    let title = activity.isCancelling ? "중지하는 중…" : "중지"
+                    let title = activity.stopButtonTitle
                     Button(title) { model.cancelBackgroundActivity(activity.kind) }
                         .controlSize(.small)
                         .disabled(activity.isCancelling)

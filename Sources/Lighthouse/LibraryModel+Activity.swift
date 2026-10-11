@@ -41,6 +41,21 @@ struct BackgroundActivity: Identifiable, Equatable {
     let isCancelling: Bool
 
     var id: Kind { kind }
+
+    /// 그 작업의 창·안내와 같은 낱말. 멈추면 해 둔 것을 버리는 작업은 "취소", 끝난 만큼 남기는 작업은 "중지"다.
+    var stopWord: String {
+        switch kind {
+        case .workflow, .flicker, .presetImport: "취소"
+        default: "중지"
+        }
+    }
+
+    var stopButtonTitle: String { isCancelling ? "\(stopWord)하는 중…" : stopWord }
+
+    /// 사진 아래 상태 줄에 쓰는 한 줄. 멈추는 중이면 진행 대신 그렇게 알린다.
+    var statusText: String {
+        isCancelling ? "\(title) \(stopWord)하는 중…" : [title, detail].compactMap { $0 }.joined(separator: " ")
+    }
 }
 
 @MainActor
