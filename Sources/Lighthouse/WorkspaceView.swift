@@ -1155,7 +1155,7 @@ struct WorkspaceView: View {
                         Button(model.isCancellingImport ? "중지하는 중…" : "중지") { model.cancelImport() }
                             .disabled(model.isCancellingImport)
                             .controlSize(.small)
-                            .accessibilityLabel("가져오기 중지")
+                            .accessibilityLabel(model.isCancellingImport ? "가져오기 중지하는 중…" : "가져오기 중지")
                             .help("현재 파일은 끝까지 처리하고, 완료된 가져오기 항목은 유지한 뒤 나머지를 중지합니다.")
                     }
                 }
@@ -1548,7 +1548,7 @@ private struct BurstBar: View {
                     ProgressView(value: model.burstAnalysisProgress).frame(width: 120)
                     Button(model.isCancellingBursts ? "중지하는 중…" : "중지") { model.cancelBurstAnalysis() }
                         .disabled(model.isCancellingBursts)
-                        .accessibilityLabel("연속 촬영 분석 중지")
+                        .accessibilityLabel(model.isCancellingBursts ? "연속 촬영 분석 중지하는 중…" : "연속 촬영 분석 중지")
                 } else {
                     Button("베스트 컷 분석") { model.analyzeBursts() }
                         .accessibilityLabel("연속 촬영 베스트 컷 분석")

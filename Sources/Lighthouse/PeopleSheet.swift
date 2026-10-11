@@ -111,7 +111,7 @@ struct PeopleSheet: View {
                 HStack {
                     ProgressView(value: Double(model.faceAnalysisCompleted), total: Double(max(1, model.faceAnalysisTotal)))
                     Text("\(model.faceAnalysisCompleted)/\(model.faceAnalysisTotal)").monospacedDigit().font(.caption)
-                    Button(model.isCancellingFaces ? "중지 중…" : "중지") { model.cancelFaceAnalysis() }
+                    Button(model.isCancellingFaces ? "중지하는 중…" : "중지") { model.cancelFaceAnalysis() }
                         .disabled(model.isCancellingFaces)
                 }
             }

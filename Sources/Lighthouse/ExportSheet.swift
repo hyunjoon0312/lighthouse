@@ -145,7 +145,7 @@ struct ExportSheet: View {
                     ProgressView(value: model.operationProgress)
                     Button(model.isCancellingExport ? "중지하는 중…" : "중지") { model.cancelExport() }
                         .disabled(model.isCancellingExport)
-                        .accessibilityLabel("내보내기 중지")
+                        .accessibilityLabel(model.isCancellingExport ? "내보내기 중지하는 중…" : "내보내기 중지")
                 }
             }
             if let report = model.exportReport {
