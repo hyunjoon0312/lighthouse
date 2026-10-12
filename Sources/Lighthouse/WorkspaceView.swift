@@ -203,6 +203,9 @@ struct WorkspaceView: View {
                     if model.mode != .grid { filmstrip }
                 }
             }
+            // 남은 너비를 정해 준다. 정하지 않으면 가로 줄이 값이 바뀔 때마다 가운데 열 전체를 여러 번 재 보느라
+            // 한 번에 100ms 넘게 걸려, 결과를 자주 알리는 분석 동안 화면이 멈춘 듯 보였다.
+            .frame(width: max(0, total - sidebarShown - inspectorShown - Double((showsSidebar ? 1 : 0) + (showsInspector ? 1 : 0))))
             if showsInspector {
                 panelResizeHandle("보정 패널", width: $inspectorWidth, shown: inspectorShown, range: PanelLayout.inspectorRange,
                                   defaultWidth: PanelLayout.inspectorDefault, grows: -1, total: total, other: sidebarShown)
