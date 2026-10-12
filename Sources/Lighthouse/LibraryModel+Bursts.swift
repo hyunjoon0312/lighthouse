@@ -78,22 +78,41 @@ extension LibraryModel {
         burstQueue.async { [pipeline] in
             var failed = 0
             var cancelled = false
+            // 결과는 모아서 0.25초에 한 번만 넘긴다. 넘길 때마다 작업 화면 전체를 다시 계산하므로(보정 패널이 열려 있으면
+            // 약 40ms) 컷마다 넘기면 빨리 끝나는 컷이 이어질 때 화면이 버벅인다. 첫 컷은 바로 넘겨 진행이 시작된 것을 보인다.
+            var pending: [(id: UUID, quality: PhotoQuality?)] = []
+            var progress = 0.0
+            var lastReport: DispatchTime?
+            func report() {
+                let batch = pending, reached = progress
+                pending = []
+                lastReport = .now()
+                DispatchQueue.main.async {
+                    guard self.burstCancellation === cancellation else { return }
+                    var qualities = self.burstQualities, failedIDs = self.burstFailedIDs
+                    for (id, quality) in batch {
+                        if let quality {
+                            qualities[id] = quality
+                            failedIDs.remove(id)
+                        } else {
+                            failedIDs.insert(id)
+                        }
+                    }
+                    self.burstQualities = qualities
+                    self.burstFailedIDs = failedIDs
+                    self.burstAnalysisProgress = reached
+                }
+            }
             for (index, target) in targets.enumerated() {
                 if cancellation.isCancelled { cancelled = true; break }
                 let quality = try? PhotoQualityAnalyzer.analyze(url: target.url, pipeline: pipeline)
                 if quality == nil { failed += 1 }
-                let progress = Double(index + 1) / Double(targets.count)
-                DispatchQueue.main.async {
-                    guard self.burstCancellation === cancellation else { return }
-                    if let quality {
-                        self.burstQualities[target.id] = quality
-                        self.burstFailedIDs.remove(target.id)
-                    } else {
-                        self.burstFailedIDs.insert(target.id)
-                    }
-                    self.burstAnalysisProgress = progress
-                }
+                pending.append((target.id, quality))
+                progress = Double(index + 1) / Double(targets.count)
+                if let lastReport, DispatchTime.now().uptimeNanoseconds - lastReport.uptimeNanoseconds < 250_000_000 { continue }
+                report()
             }
+            if !pending.isEmpty { report() }
             DispatchQueue.main.async {
                 guard self.burstCancellation === cancellation else { return }
                 self.burstCancellation = nil
