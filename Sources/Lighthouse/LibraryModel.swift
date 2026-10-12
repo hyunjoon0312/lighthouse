@@ -606,6 +606,18 @@ final class LibraryModel {
             cropSource != nil || catalogRemoval != nil || showSimilarPhotos || showSmartPreviews || showLibraryBackup || showLibraryRestore || rangeMaskRequest != nil ||
             showColorLabelNames || showHelp
     }
+    /// `hasModalPresentation`에 든 창을 모두 닫는다. 창에 시트가 붙어 있으면 macOS가 종료 요청을 무시하므로 ⌘Q가 먼저 부른다.
+    /// 시트 안에서 도는 작업은 멈추지 않는다.
+    func closePresentations() {
+        showBatchEdit = false; showExport = false; showCardImport = false; showShortcuts = false; showPeople = false
+        presetSheet = nil; lightroomPresetSheet = nil; referenceMatchSource = nil; folderSheetRequest = nil
+        cropSource = nil; catalogRemoval = nil; showSimilarPhotos = false; showSmartPreviews = false
+        showLibraryBackup = false; showLibraryRestore = false; rangeMaskRequest = nil
+        showColorLabelNames = false; showHelp = false
+        presentationsClosed &+= 1
+    }
+    /// `closePresentations`가 부를 때마다 오른다. 화면이 자기 상태로 띄운 경고창(폴더 이름 바꾸기 등)도 함께 닫게 한다.
+    private(set) var presentationsClosed = 0
     var selectedLocal: LocalAdjustment? { selection?.edits.localAdjustments.first { $0.id == selectedLocalID } }
     var canDrawLocal: Bool {
         adjustmentPanel == .local && isLocalEditing && selectedLocal != nil &&

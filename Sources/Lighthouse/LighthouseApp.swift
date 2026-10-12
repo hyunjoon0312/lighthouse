@@ -177,6 +177,12 @@ struct LighthouseApp: App {
                 Button("RAW의 XMP 사이드카 모두 다시 쓰기") { library.writeAllSidecars() }
                     .disabled(!library.writesXMPSidecars || !library.catalogLoaded)
             }
+            CommandGroup(replacing: .appTermination) {
+                Button("\(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Lighthouse") 종료") {
+                    delegate.quit { session.errorMessage = nil; library.closePresentations() }
+                }
+                .keyboardShortcut("q", modifiers: .command)
+            }
             CommandGroup(replacing: .undoRedo) {
                 Button("실행 취소") { library.undo() }
                     .keyboardShortcut("z", modifiers: .command)
@@ -207,6 +213,8 @@ struct LighthouseApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var library: LibraryModel?
     private var terminationPending = false
+    /// ⌘Q가 열린 창을 닫기 전에 이미 "작업 취소하고 종료"를 골랐다. 같은 경고를 두 번 묻지 않는다.
+    private var quitDuringWorkConfirmed = false
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
@@ -220,16 +228,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
     }
 
+    /// 파일 메뉴의 종료(⌘Q). 창에 시트가 붙어 있으면 macOS가 종료 요청을 무시하고 `applicationShouldTerminate`도 부르지 않는다.
+    /// 그래서 진행 중인 작업이 있으면 먼저 묻고, 열린 창을 닫은 뒤 종료한다. Dock의 종료와 로그아웃은 이 길을 거치지 않는다.
+    @MainActor
+    func quit(closingPresentations close: () -> Void) {
+        guard NSApp.windows.contains(where: { $0.attachedSheet != nil }) else { NSApp.terminate(nil); return }
+        if let library, isWorking(library) {
+            guard confirmsQuitDuringWork() else { return }
+            quitDuringWorkConfirmed = true
+        }
+        close()
+        Task { @MainActor [weak self] in
+            // 시트가 내려가는 데 잠깐 걸린다. 2초 안에 닫히지 않는 창이 있으면 그대로 요청해 macOS 동작을 따른다.
+            var waited = 0
+            while NSApp.windows.contains(where: { $0.attachedSheet != nil }) && waited < 40 {
+                try? await Task.sleep(for: .milliseconds(50))
+                waited += 1
+            }
+            NSApp.terminate(nil)
+            self?.quitDuringWorkConfirmed = false
+        }
+    }
+
+    @MainActor
+    private func isWorking(_ library: LibraryModel) -> Bool {
+        library.driveUpload.isBusy || library.isExporting || library.isImporting || library.isPresetImporting ||
+            library.isAnalyzingFaces || library.isRunningWorkflow || library.isAnalyzingFlicker
+    }
+
+    @MainActor
+    private func confirmsQuitDuringWork() -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "가져오기·내보내기 또는 얼굴 분석이 진행 중입니다"
+        alert.informativeText = "지금 종료하면 진행 중인 작업을 중지하고 정리를 마친 뒤 종료합니다. 완료된 가져오기·얼굴 분석 결과와 카탈로그 항목은 유지되며, Drive로 전송 중이던 파일은 도착했을 수 있습니다."
+        alert.addButton(withTitle: "앱으로 돌아가기")
+        alert.addButton(withTitle: "작업 취소하고 종료")
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if terminationPending { return .terminateLater }
-        if let library, library.driveUpload.isBusy || library.isExporting || library.isImporting || library.isPresetImporting || library.isAnalyzingFaces || library.isRunningWorkflow || library.isAnalyzingFlicker {
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = "가져오기·내보내기 또는 얼굴 분석이 진행 중입니다"
-            alert.informativeText = "지금 종료하면 진행 중인 작업을 중지하고 정리를 마친 뒤 종료합니다. 완료된 가져오기·얼굴 분석 결과와 카탈로그 항목은 유지되며, Drive로 전송 중이던 파일은 도착했을 수 있습니다."
-            alert.addButton(withTitle: "앱으로 돌아가기")
-            alert.addButton(withTitle: "작업 취소하고 종료")
-            guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
+        let confirmed = quitDuringWorkConfirmed
+        quitDuringWorkConfirmed = false
+        if let library, isWorking(library) {
+            guard confirmed || confirmsQuitDuringWork() else { return .terminateCancel }
             library.cancelExport()
             library.cancelImport()
             library.cancelPresetImport()

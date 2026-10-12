@@ -115,6 +115,8 @@ struct WorkspaceView: View {
         } message: {
             Text("폴더만 삭제하며 사진과 보정은 보관됩니다.")
         }
+        // ⌘Q가 열린 창을 닫을 때 이 화면이 띄운 경고창도 닫는다.
+        .onChange(of: model.presentationsClosed) { _, _ in smartRenameTarget = nil; folderToDelete = nil }
         // 시트는 위 강조색 범위 밖이라 그대로 두면 macOS 파란색을 쓴다. 보조 단추가 많아 중립색을 기본으로 두고,
         // 주요 단추·세그먼트·0에서 차오르는 슬라이더만 각 시트에서 강조색을 준다(본 창의 보정 패널과 같은 규칙).
         .tint(Palette.inactive)
