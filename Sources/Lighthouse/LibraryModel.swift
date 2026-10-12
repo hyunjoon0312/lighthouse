@@ -2,6 +2,7 @@ import AppKit
 import CoreTransferable
 import Foundation
 import LighthouseCore
+import Observation
 import UniformTypeIdentifiers
 
 enum WorkspaceMode: String, CaseIterable {
@@ -172,79 +173,80 @@ final class CancellationFlag: @unchecked Sendable {
 }
 
 @MainActor
-final class LibraryModel: ObservableObject {
-    @Published var photos: [PhotoAsset] = [] { didSet { invalidateLibraryCaches() } }
-    @Published var photoSelection = PhotoSelectionState()
-    @Published var photoFolders: [PhotoFolder] = [] { didSet { visibleCache = nil; countsCache = nil } }
-    @Published var foldersLoaded = false
-    @Published var folderLoadError: String?
-    @Published var folderSheetRequest: PhotoFolderSheetRequest?
-    @Published var filter: LibraryFilter = .all { didSet { visibleCache = nil } }
-    @Published var search = "" { didSet { visibleCache = nil } }
-    @Published var minimumRating = 0 { didSet { visibleCache = nil } }
+@Observable
+final class LibraryModel {
+    var photos: [PhotoAsset] = [] { didSet { invalidateLibraryCaches() } }
+    var photoSelection = PhotoSelectionState()
+    var photoFolders: [PhotoFolder] = [] { didSet { visibleCache = nil; countsCache = nil } }
+    var foldersLoaded = false
+    var folderLoadError: String?
+    var folderSheetRequest: PhotoFolderSheetRequest?
+    var filter: LibraryFilter = .all { didSet { visibleCache = nil } }
+    var search = "" { didSet { visibleCache = nil } }
+    var minimumRating = 0 { didSet { visibleCache = nil } }
     /// 조건 창에서 거는 촬영 정보 조건. 어떤 목록을 보든 그 위에 더해진다. 저장하지 않는다.
-    @Published var criteria = PhotoCriteria() { didSet { visibleCache = nil } }
-    @Published var smartFolders: [SmartFolder] = [] { didSet { visibleCache = nil; countsCache = nil } }
-    @Published var smartFolderLoadError: String?
-    @Published var mode: WorkspaceMode = .grid
-    @Published var isOriginal = false
-    @Published var actualSize = false
-    @Published var rendered: NSImage?
-    @Published var pinnedImage: NSImage?
-    @Published var rendering = false
-    @Published var imageError: String?
-    @Published var pinnedError: String?
-    @Published var pinnedID: UUID?
-    @Published var loadError: String?
-    @Published var catalogLoaded = false
+    var criteria = PhotoCriteria() { didSet { visibleCache = nil } }
+    var smartFolders: [SmartFolder] = [] { didSet { visibleCache = nil; countsCache = nil } }
+    var smartFolderLoadError: String?
+    var mode: WorkspaceMode = .grid
+    var isOriginal = false
+    var actualSize = false
+    var rendered: NSImage?
+    var pinnedImage: NSImage?
+    var rendering = false
+    var imageError: String?
+    var pinnedError: String?
+    var pinnedID: UUID?
+    var loadError: String?
+    var catalogLoaded = false
     /// 새 안내가 오면 가져오는 중 몇 번째 파일인지 보이던 문구를 지운다. 둘 중 나중에 온 것이 상태 줄에 보인다.
-    @Published var operationMessage: String? { didSet { jobProgress.operationStep = nil } }
-    /// 진행값은 모델 전체를 지켜보는 화면이 다시 계산되지 않게 따로 둔다(`JobProgress`). 아래 이름들은 그 값을 그대로 읽고 쓴다.
+    var operationMessage: String? { didSet { jobProgress.operationStep = nil } }
+    /// 진행값은 자주 바뀌므로 진행 막대와 작업 목록만 지켜보게 따로 둔다(`JobProgress`). 아래 이름들은 그 값을 그대로 읽고 쓴다.
     let jobProgress = JobProgress()
     var operationProgress: Double {
         get { jobProgress.operation }
         set { jobProgress.operation = newValue }
     }
-    @Published var isImporting = false
-    @Published var isExporting = false
-    @Published var isCancellingExport = false
-    @Published var showExport = false
-    @Published var showBatchEdit = false
-    @Published var showCardImport = false
-    @Published var showShortcuts = false
+    var isImporting = false
+    var isExporting = false
+    var isCancellingExport = false
+    var showExport = false
+    var showBatchEdit = false
+    var showCardImport = false
+    var showShortcuts = false
     /// 앱 안 도움말 창(도움말 › Lighthouse 도움말).
-    @Published var showHelp = false
-    @Published var showPeople = false
-    @Published var showSimilarPhotos = false
-    @Published var showSmartPreviews = false
-    @Published var showLibraryBackup = false
-    @Published var showLibraryRestore = false
-    @Published var rangeMaskRequest: RangeMaskSheetRequest?
-    @Published var isAnalyzingFlicker = false
-    @Published var flickerAnalysisMessage: String?
+    var showHelp = false
+    var showPeople = false
+    var showSimilarPhotos = false
+    var showSmartPreviews = false
+    var showLibraryBackup = false
+    var showLibraryRestore = false
+    var rangeMaskRequest: RangeMaskSheetRequest?
+    var isAnalyzingFlicker = false
+    var flickerAnalysisMessage: String?
     var workflowProgress: Double {
         get { jobProgress.workflow }
         set { jobProgress.workflow = newValue }
     }
-    @Published var isRunningWorkflow = false
+    var isRunningWorkflow = false
     /// 지금 도는 묶음 작업의 종류. 뒤에서 도는 작업 표시에 이름을 보인다.
-    @Published var workflowKind: WorkflowKind?
-    @Published var workflowMessage: String?
-    @Published var similarPhotoResult: SimilarPhotoResult?
-    @Published var smartPreviewRecords: [UUID: SmartPreviewRecord] = [:]
-    @Published var smartPreviewURLs: [UUID: URL] = [:]
-    @Published var smartPreviewFailures: [WorkflowFileFailure] = []
-    @Published var batchWorkflowReport: BatchWorkflowReport?
-    @Published var archiveSummary: LibraryArchiveSummary?
-    @Published var restoredLibraryDirectory: URL?
-    @Published var peopleCatalog = PeopleCatalog() {
+    var workflowKind: WorkflowKind?
+    var workflowMessage: String?
+    var similarPhotoResult: SimilarPhotoResult?
+    var smartPreviewRecords: [UUID: SmartPreviewRecord] = [:]
+    var smartPreviewURLs: [UUID: URL] = [:]
+    var smartPreviewFailures: [WorkflowFileFailure] = []
+    var batchWorkflowReport: BatchWorkflowReport?
+    var archiveSummary: LibraryArchiveSummary?
+    var restoredLibraryDirectory: URL?
+    var peopleCatalog = PeopleCatalog() {
         didSet { visibleCache = nil; countsCache = nil }
     }
-    @Published var peopleLoaded = false
-    @Published var peopleLoadError: String?
-    @Published var peopleMessage: String?
-    @Published var peopleSaveError: String?
-    @Published var isAnalyzingFaces = false
+    var peopleLoaded = false
+    var peopleLoadError: String?
+    var peopleMessage: String?
+    var peopleSaveError: String?
+    var isAnalyzingFaces = false
     var faceAnalysisCompleted: Int {
         get { jobProgress.facesCompleted }
         set { jobProgress.facesCompleted = newValue }
@@ -253,80 +255,80 @@ final class LibraryModel: ObservableObject {
         get { jobProgress.facesTotal }
         set { jobProgress.facesTotal = newValue }
     }
-    @Published var isCancellingFaces = false
-    @Published var isClearingPeople = false
-    @Published var presets: [EditPreset] = []
-    @Published var presetLoadError: String?
-    @Published var presetSheet: PresetSheetRequest?
-    @Published var lightroomPresetSheet: LightroomPresetSheetRequest?
-    @Published var isPresetImporting = false
-    @Published var importPresetID: UUID? = UserDefaults.standard.string(forKey: "importPresetID").flatMap(UUID.init) {
+    var isCancellingFaces = false
+    var isClearingPeople = false
+    var presets: [EditPreset] = []
+    var presetLoadError: String?
+    var presetSheet: PresetSheetRequest?
+    var lightroomPresetSheet: LightroomPresetSheetRequest?
+    var isPresetImporting = false
+    var importPresetID: UUID? = UserDefaults.standard.string(forKey: "importPresetID").flatMap(UUID.init) {
         didSet { UserDefaults.standard.set(importPresetID?.uuidString, forKey: "importPresetID") }
     }
-    @Published var isCancellingImport = false
-    @Published var referenceMatchSource: PhotoAsset?
-    @Published var cropSource: PhotoAsset?
-    @Published var exportReport: String?
+    var isCancellingImport = false
+    var referenceMatchSource: PhotoAsset?
+    var cropSource: PhotoAsset?
+    var exportReport: String?
     /// 마지막 내보내기에서 쓴 파일. 결과 안내 옆의 Finder에서 보기에 쓴다.
-    @Published var lastExportedFiles: [URL] = []
-    @Published var clipboard: EditSettings?
-    @Published var isLUTImporting = false
-    @Published var lutError: String?
-    @Published var savedLUTs: [LUTLibraryItem] = []
-    @Published var isLUTLibraryLoading = false
-    @Published var lutLibraryError: String?
-    @Published var adjustmentPanel: AdjustmentPanel = .global
-    @Published var selectedLocalID: UUID?
-    @Published var brushTool: BrushTool = .brush
-    @Published var brushRadius = 0.04
-    @Published var showsMask = true
-    @Published var isLocalEditing = false
-    @Published var maskImage: NSImage?
-    @Published var maskError: String?
-    @Published var isAutoMasking = false
-    @Published var autoMaskError: String?
-    @Published var retouchMode: RetouchMode = .heal
-    @Published var retouchRadius = 0.02
-    @Published var isPickingCloneSource = false
-    @Published var cloneSource: MaskPoint?
-    @Published var isFindingHealSource = false
-    @Published var retouchError: String?
-    @Published var rawCapabilities: RAWCapabilities?
-    @Published var histogram: ImageHistogram?
-    @Published var showsClipping = false { didSet { refreshClippingOverlay() } }
-    @Published var isAutoAdjusting = false
+    var lastExportedFiles: [URL] = []
+    var clipboard: EditSettings?
+    var isLUTImporting = false
+    var lutError: String?
+    var savedLUTs: [LUTLibraryItem] = []
+    var isLUTLibraryLoading = false
+    var lutLibraryError: String?
+    var adjustmentPanel: AdjustmentPanel = .global
+    var selectedLocalID: UUID?
+    var brushTool: BrushTool = .brush
+    var brushRadius = 0.04
+    var showsMask = true
+    var isLocalEditing = false
+    var maskImage: NSImage?
+    var maskError: String?
+    var isAutoMasking = false
+    var autoMaskError: String?
+    var retouchMode: RetouchMode = .heal
+    var retouchRadius = 0.02
+    var isPickingCloneSource = false
+    var cloneSource: MaskPoint?
+    var isFindingHealSource = false
+    var retouchError: String?
+    var rawCapabilities: RAWCapabilities?
+    var histogram: ImageHistogram?
+    var showsClipping = false { didSet { refreshClippingOverlay() } }
+    var isAutoAdjusting = false
     /// 흰색 기준 찍기 중이다. 사진을 누르면 그곳이 회색이 되게 색온도·틴트를 맞춘다.
-    @Published var isPickingWhiteBalance = false
+    var isPickingWhiteBalance = false
     /// 여러 장 보기에서 사진마다 그린 모습과 그때의 보정.
-    @Published var surveyImages: [UUID: NSImage] = [:]
-    @Published var surveyErrors: [UUID: String] = [:]
-    @Published var surveyLoadingIDs = Set<UUID>()
-    var surveyRenderedEdits: [UUID: EditSettings] = [:]
-    var surveyRenderedPaths: [UUID: String] = [:]
-    var surveyRequests: [UUID: SurveyRequestKey] = [:]
-    var surveyFailedRequests: [UUID: SurveyRequestKey] = [:]
-    var surveyState: [SurveyRequestKey] = []
-    var surveyGeneration = 0
+    var surveyImages: [UUID: NSImage] = [:]
+    var surveyErrors: [UUID: String] = [:]
+    var surveyLoadingIDs = Set<UUID>()
+    @ObservationIgnored var surveyRenderedEdits: [UUID: EditSettings] = [:]
+    @ObservationIgnored var surveyRenderedPaths: [UUID: String] = [:]
+    @ObservationIgnored var surveyRequests: [UUID: SurveyRequestKey] = [:]
+    @ObservationIgnored var surveyFailedRequests: [UUID: SurveyRequestKey] = [:]
+    @ObservationIgnored var surveyState: [SurveyRequestKey] = []
+    @ObservationIgnored var surveyGeneration = 0
     /// 사진만 크게 보는 보기(F). 패널을 숨기며, 그리드로 돌아가면 끝난다.
-    @Published var isFocusView = false
-    @Published var clippingOverlay: NSImage?
-    @Published var zoomAnchor = CGPoint(x: 0.5, y: 0.5)
+    var isFocusView = false
+    var clippingOverlay: NSImage?
+    var zoomAnchor = CGPoint(x: 0.5, y: 0.5)
     /// 사진 보기에서 보정 전(왼쪽)과 보정 후(오른쪽)를 한 장에 나눠 보인다(Y).
-    @Published var showsSplit = false
+    var showsSplit = false
     /// 나누는 선의 위치(사진 너비에 대한 비율).
-    @Published var splitPosition = 0.5
+    var splitPosition = 0.5
     /// 구도(회전·크롭·수평)만 적용한 보정 전 모습. 보정 후 사진과 같은 크기로 겹친다.
-    @Published var splitBefore: NSImage?
-    var splitBeforeState: (id: UUID, edits: EditSettings)?
+    var splitBefore: NSImage?
+    @ObservationIgnored var splitBeforeState: (id: UUID, edits: EditSettings)?
     /// 비교 모드의 기준 사진을 보정한 모습으로 보인다. 끄면 보정 전 원본이다.
-    @Published var compareShowsPinnedEdits = UserDefaults.standard.object(forKey: "comparePinnedEdits") as? Bool ?? true {
+    var compareShowsPinnedEdits = UserDefaults.standard.object(forKey: "comparePinnedEdits") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(compareShowsPinnedEdits, forKey: "comparePinnedEdits")
             requestRender()
         }
     }
     /// RAW+JPEG로 찍은 사진은 RAW만 보인다. JPEG는 카탈로그에 남고 끄면 다시 보인다.
-    @Published var collapsesRAWJPEGPairs = UserDefaults.standard.object(forKey: "collapseRAWJPEGPairs") as? Bool ?? true {
+    var collapsesRAWJPEGPairs = UserDefaults.standard.object(forKey: "collapseRAWJPEGPairs") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(collapsesRAWJPEGPairs, forKey: "collapseRAWJPEGPairs")
             visibleCache = nil
@@ -334,17 +336,17 @@ final class LibraryModel: ObservableObject {
             ensureSelectionVisible()
         }
     }
-    @Published var sortOrder = PhotoSortOrder(rawValue: UserDefaults.standard.string(forKey: "photoSortOrder") ?? "") ?? .captureTime {
+    var sortOrder = PhotoSortOrder(rawValue: UserDefaults.standard.string(forKey: "photoSortOrder") ?? "") ?? .captureTime {
         didSet {
             UserDefaults.standard.set(sortOrder.rawValue, forKey: "photoSortOrder")
             visibleCache = nil
         }
     }
-    @Published var autoAdvance = UserDefaults.standard.bool(forKey: "autoAdvanceAfterMark") {
+    var autoAdvance = UserDefaults.standard.bool(forKey: "autoAdvanceAfterMark") {
         didSet { UserDefaults.standard.set(autoAdvance, forKey: "autoAdvanceAfterMark") }
     }
     /// 색상 라벨마다 사용자가 붙인 쓰임 이름(빨강 → 블로그). 없으면 색 이름을 쓴다. Lightroom 라벨 세트처럼 Mac 환경설정에 둔다.
-    @Published private(set) var colorLabelNames: [PhotoColorLabel: String] = Dictionary(uniqueKeysWithValues:
+    private(set) var colorLabelNames: [PhotoColorLabel: String] = Dictionary(uniqueKeysWithValues:
         (UserDefaults.standard.dictionary(forKey: "colorLabelNames") as? [String: String] ?? [:])
             .compactMap { key, name in PhotoColorLabel(rawValue: key).map { ($0, name) } }) {
         didSet {
@@ -352,23 +354,23 @@ final class LibraryModel: ObservableObject {
                                       forKey: "colorLabelNames")
         }
     }
-    @Published var showColorLabelNames = false
+    var showColorLabelNames = false
     /// 사진 보기 오른쪽에 얼굴 확대 줄을 보인다(얼굴이 있는 사진만). Mac 환경설정에 둔다.
-    @Published var showsFaceCloseups = UserDefaults.standard.object(forKey: "showsFaceCloseups") as? Bool ?? true {
+    var showsFaceCloseups = UserDefaults.standard.object(forKey: "showsFaceCloseups") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(showsFaceCloseups, forKey: "showsFaceCloseups")
             refreshFaceCloseups()
         }
     }
     /// 지금 사진의 얼굴 확대 결과. 다른 사진으로 바뀌면 다시 분석하거나 기억해 둔 결과를 쓴다.
-    @Published var faceCloseups: FaceCloseupResult?
+    var faceCloseups: FaceCloseupResult?
     /// 100% 보기에서 보이는 자리를 `zoomAnchor`로 옮기라는 요청(얼굴 확대에서 얼굴을 누름).
-    @Published var zoomRequest = 0
-    var faceCloseupCache: [String: FaceCloseupResult] = [:]
-    var faceCloseupCacheOrder: [String] = []
+    var zoomRequest = 0
+    @ObservationIgnored var faceCloseupCache: [String: FaceCloseupResult] = [:]
+    @ObservationIgnored var faceCloseupCacheOrder: [String] = []
     var faceCloseupCancellation: CancellationFlag?
     /// 별점·라벨·키워드·설명을 원본 옆 XMP 사이드카로 쓴다. 켜면 지금 사진 전체를 한 번 쓴다.
-    @Published var writesXMPSidecars = UserDefaults.standard.bool(forKey: "writesXMPSidecars") {
+    var writesXMPSidecars = UserDefaults.standard.bool(forKey: "writesXMPSidecars") {
         didSet {
             UserDefaults.standard.set(writesXMPSidecars, forKey: "writesXMPSidecars")
             guard writesXMPSidecars != oldValue else { return }
@@ -376,9 +378,9 @@ final class LibraryModel: ObservableObject {
         }
     }
     /// 지금 쓰고 있는 XMP 사이드카 장수. 뒤에서 도는 작업 표시에 쓴다.
-    @Published var sidecarWritesInFlight = 0
+    var sidecarWritesInFlight = 0
     let canvas = CanvasStrokeState()
-    var gridColumnCount = 1
+    @ObservationIgnored var gridColumnCount = 1
 
     var draftPoints: [MaskPoint] {
         get { canvas.draftPoints }
@@ -412,7 +414,7 @@ final class LibraryModel: ObservableObject {
     let smartPreviewStore: SmartPreviewStore
     let faceAnalyzer = FaceAnalyzer()
     let facePipeline: ImagePipeline
-    var backupFailureReported = false
+    @ObservationIgnored var backupFailureReported = false
     let previewQueue = DispatchQueue(label: "com.rian.lighthouse.preview", qos: .userInitiated)
     let thumbnailQueue = DispatchQueue(label: "com.rian.lighthouse.thumbnails", qos: .utility)
     let placeholderQueue = DispatchQueue(label: "com.rian.lighthouse.placeholder", qos: .userInitiated)
@@ -429,113 +431,121 @@ final class LibraryModel: ObservableObject {
     let autoAdjustQueue = DispatchQueue(label: "com.rian.lighthouse.auto", qos: .userInitiated)
     let sidecarQueue = DispatchQueue(label: "com.rian.lighthouse.sidecar", qos: .utility)
     let faceQueue = DispatchQueue(label: "com.rian.lighthouse.faces", qos: .utility)
-    var thumbnailGeneration = 0
-    var pendingSidecarIDs = Set<UUID>()
-    var dirtySidecarIDs = Set<UUID>()
-    var sidecarVersions: [UUID: UInt64] = [:]
-    var sidecarDelay: DispatchWorkItem?
-    var saveDelay: DispatchWorkItem?
-    var peopleSaveDelay: DispatchWorkItem?
-    var peopleSaveScheduled = false
-    var peopleSaveInFlight = false
-    var peopleSaveDirty = false
-    var peopleSaveUrgent = false
-    var peopleSaveRevision: UInt64 = 0
-    var renderDelay: DispatchWorkItem?
-    var generation = 0
-    var renderedSource: String?
-    var pinnedSource: String?
-    var pinnedRenderedEdits: EditSettings?
-    var retouchGeneration = 0
-    var renderJob: DispatchWorkItem?
-    var displayedToken = 0
+    @ObservationIgnored var thumbnailGeneration = 0
+    @ObservationIgnored var pendingSidecarIDs = Set<UUID>()
+    @ObservationIgnored var dirtySidecarIDs = Set<UUID>()
+    @ObservationIgnored var sidecarVersions: [UUID: UInt64] = [:]
+    @ObservationIgnored var sidecarDelay: DispatchWorkItem?
+    @ObservationIgnored var saveDelay: DispatchWorkItem?
+    @ObservationIgnored var peopleSaveDelay: DispatchWorkItem?
+    @ObservationIgnored var peopleSaveScheduled = false
+    @ObservationIgnored var peopleSaveInFlight = false
+    @ObservationIgnored var peopleSaveDirty = false
+    @ObservationIgnored var peopleSaveUrgent = false
+    @ObservationIgnored var peopleSaveRevision: UInt64 = 0
+    @ObservationIgnored var renderDelay: DispatchWorkItem?
+    @ObservationIgnored var generation = 0
+    @ObservationIgnored var renderedSource: String?
+    @ObservationIgnored var pinnedSource: String?
+    @ObservationIgnored var pinnedRenderedEdits: EditSettings?
+    @ObservationIgnored var retouchGeneration = 0
+    @ObservationIgnored var renderJob: DispatchWorkItem?
+    @ObservationIgnored var displayedToken = 0
     /// 슬라이더를 끄는 동안에는 RAW 노출·색온도·틴트를 근사로 그린다. 끝나면 정확히 다시 그린다.
-    var editDragActive = false
-    var showingApproximation = false
-    var requestedApproximation = false
-    var exactRenderFollowUp: DispatchWorkItem?
-    var lastRenderDispatch = Date.distantPast
-    var recentRenders: [(key: String, edits: EditSettings, image: NSImage, histogram: ImageHistogram?)] = []
-    var overlayToken = 0
-    var prefetching = Set<String>()
-    var moveDirection = 1
-    private var pendingCollapse: DispatchWorkItem?
+    @ObservationIgnored var editDragActive = false
+    @ObservationIgnored var showingApproximation = false
+    @ObservationIgnored var requestedApproximation = false
+    @ObservationIgnored var exactRenderFollowUp: DispatchWorkItem?
+    @ObservationIgnored var lastRenderDispatch = Date.distantPast
+    @ObservationIgnored var recentRenders: [(key: String, edits: EditSettings, image: NSImage, histogram: ImageHistogram?)] = []
+    @ObservationIgnored var overlayToken = 0
+    @ObservationIgnored var prefetching = Set<String>()
+    @ObservationIgnored var moveDirection = 1
+    @ObservationIgnored private var pendingCollapse: DispatchWorkItem?
     var exportCancellation: CancellationFlag?
-    var exportCompletionWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored var exportCompletionWaiters: [CheckedContinuation<Void, Never>] = []
     /// 다시 내보낼 때 이전 파일을 휴지통으로 옮긴다. 테스트는 임시 폴더로 옮기도록 바꾼다.
-    var moveToTrash: @Sendable (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
+    @ObservationIgnored var moveToTrash: @Sendable (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
     /// Finder에서 파일을 선택해 보여 준다. 테스트는 부른 파일만 기록하도록 바꾼다.
-    var revealInFinder: ([URL]) -> Void = { NSWorkspace.shared.activateFileViewerSelecting($0) }
+    @ObservationIgnored var revealInFinder: ([URL]) -> Void = { NSWorkspace.shared.activateFileViewerSelecting($0) }
     var importCancellation: CancellationFlag?
-    var importCompletionWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored var importCompletionWaiters: [CheckedContinuation<Void, Never>] = []
     var faceCancellation: CancellationFlag?
-    var faceCompletionWaiters: [CheckedContinuation<Void, Never>] = []
-    var faceBatchGeneration = 0
+    @ObservationIgnored var faceCompletionWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored var faceBatchGeneration = 0
     var workflowCancellation: CancellationFlag?
-    var workflowGeneration = 0
-    var presetImportTask: Task<Void, Never>?
-    var presetImportGeneration = 0
-    var previewRefreshGeneration = 0
-    var workflowCompletionWaiters: [CheckedContinuation<Void, Never>] = []
-    var flickerGeneration = 0
-    var rangeMaskGeneration = 0
-    var faceAnalyzeOverride: (@Sendable (URL) throws -> [DetectedFace])?
-    private(set) var visibleCache: [PhotoAsset]?
-    private(set) var indexCache: [UUID: Int]?
-    private(set) var countsCache: LibraryCounts?
-    private(set) var foldersCache: [String]?
-    var burstCache: (signature: Int, index: BurstIndex)?
+    @ObservationIgnored var workflowGeneration = 0
+    @ObservationIgnored var presetImportTask: Task<Void, Never>?
+    @ObservationIgnored var presetImportGeneration = 0
+    @ObservationIgnored var previewRefreshGeneration = 0
+    @ObservationIgnored var workflowCompletionWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored var flickerGeneration = 0
+    @ObservationIgnored var rangeMaskGeneration = 0
+    @ObservationIgnored var faceAnalyzeOverride: (@Sendable (URL) throws -> [DetectedFace])?
+    /// 아래 캐시는 추적하지 않는다(화면을 그리는 도중에 채우므로). 대신 캐시를 비울 때마다 이 번호를 올리고,
+    /// 캐시에서 꺼내는 계산 속성이 번호를 읽는다. 캐시가 맞았을 때도 입력이 바뀌면 그 값을 쓰는 화면이 다시 계산된다.
+    private(set) var visibleRevision = 0
+    private(set) var countsRevision = 0
+    @ObservationIgnored private(set) var visibleCache: [PhotoAsset]? { didSet { if visibleCache == nil { visibleRevision &+= 1 } } }
+    @ObservationIgnored private(set) var indexCache: [UUID: Int]?
+    @ObservationIgnored private(set) var countsCache: LibraryCounts? { didSet { if countsCache == nil { countsRevision &+= 1 } } }
+    @ObservationIgnored private(set) var foldersCache: [String]?
+    @ObservationIgnored var burstCache: (signature: Int, index: BurstIndex)?
     /// 사진 목록의 ID·경로·촬영 정보만 본 서명. 보정·별점만 바뀌면 같아서 묶음·짝 계산을 다시 하지 않는다.
-    private var structureSignatureCache: Int?
-    private var pairCache: (signature: Int, companions: [UUID: [UUID]], pairedRAWs: Set<UUID>)?
-    var burstRecommendationCache: [UUID: BurstRecommendation]?
+    @ObservationIgnored private var structureSignatureCache: Int?
+    @ObservationIgnored private var pairCache: (signature: Int, companions: [UUID: [UUID]], pairedRAWs: Set<UUID>)?
+    @ObservationIgnored var burstRecommendationCache: [UUID: BurstRecommendation]?
+    /// 중지 깃발(`CancellationFlag`)은 추적되지 않으므로 중지를 누를 때마다 올린다. "중지하는 중" 표시가 이 값을 읽는다.
+    var cancellationRevision = 0
+    /// 썸네일 캐시(`NSCache`)는 추적되지 않으므로 썸네일을 넣을 때마다 올린다. 썸네일을 읽는 칸이 이 값을 읽는다.
+    var thumbnailRevision = 0
     var burstCancellation: CancellationFlag?
     let burstQueue = DispatchQueue(label: "com.rian.lighthouse.burst", qos: .utility)
     /// 이번 실행에서 분석한 원본 품질. 앱을 다시 열면 다시 분석한다.
-    @Published var burstQualities: [UUID: PhotoQuality] = [:] { didSet { burstRecommendationCache = nil } }
+    var burstQualities: [UUID: PhotoQuality] = [:] { didSet { burstRecommendationCache = nil } }
     /// 분석하려 했지만 읽지 못한 파일. 이 컷은 추천에서 빼고 표시도 바꾸지 않는다.
-    @Published var burstFailedIDs = Set<UUID>() { didSet { burstRecommendationCache = nil } }
-    @Published var isAnalyzingBursts = false
+    var burstFailedIDs = Set<UUID>() { didSet { burstRecommendationCache = nil } }
+    var isAnalyzingBursts = false
     var burstAnalysisProgress: Double {
         get { jobProgress.bursts }
         set { jobProgress.bursts = newValue }
     }
-    @Published var burstMessage: String?
+    var burstMessage: String?
     /// 삭제를 확인받는 중인 가상 사본.
-    @Published var catalogRemoval: CatalogRemoval?
-    var rawCapabilitiesPath: String?
-    var rawCapabilitiesByPath: [String: RAWCapabilities?] = [:]
+    var catalogRemoval: CatalogRemoval?
+    @ObservationIgnored var rawCapabilitiesPath: String?
+    @ObservationIgnored var rawCapabilitiesByPath: [String: RAWCapabilities?] = [:]
     static let renderInterval = 0.1
     static let recentRenderLimit = 6
-    var maskGeneration = 0
-    var selectionGeneration = 0
-    var autoMaskGeneration = 0
-    var lutLibraryGeneration = 0
-    var maskSource: String?
+    @ObservationIgnored var maskGeneration = 0
+    @ObservationIgnored var selectionGeneration = 0
+    @ObservationIgnored var autoMaskGeneration = 0
+    @ObservationIgnored var lutLibraryGeneration = 0
+    @ObservationIgnored var maskSource: String?
     /// 화면의 마스크가 어떤 모양·구도로 그려졌는지. 같으면 효과 값만 바뀐 것이므로 다시 그리지 않는다.
-    var displayedMaskKey: MaskRequestKey?
+    @ObservationIgnored var displayedMaskKey: MaskRequestKey?
     /// 마스크는 한 번에 하나만 그리고, 그리는 동안 들어온 요청은 가장 마지막 것만 남긴다.
-    var maskInFlight = false
-    var pendingMaskJob: (() -> Void)?
-    var draftPhotoID: UUID?
-    var draftLocalID: UUID?
-    private var started = false
+    @ObservationIgnored var maskInFlight = false
+    @ObservationIgnored var pendingMaskJob: (() -> Void)?
+    @ObservationIgnored var draftPhotoID: UUID?
+    @ObservationIgnored var draftLocalID: UUID?
+    @ObservationIgnored private var started = false
     private let allowsLaunchImport: Bool
     /// 마지막 확인에서 파일을 찾지 못한 원본 경로. 앱으로 돌아오거나 볼륨을 연결·해제하면 다시 확인한다.
-    @Published var missingPaths: Set<String> = [] {
+    var missingPaths: Set<String> = [] {
         didSet { visibleCache = nil; countsCache = nil; missingOriginalsDidChange(previous: oldValue) }
     }
     /// 원본이 없고 보관한 썸네일도 없는 사진. 원본이 돌아올 때까지 다시 찾지 않는다.
-    var unavailableThumbnails = Set<UUID>()
+    @ObservationIgnored var unavailableThumbnails = Set<UUID>()
     /// 마지막 썸네일로 대신 보여 주는 사진. 원본이 돌아오거나 다시 연결되면 새로 만든다.
-    var fallbackThumbnailIDs = Set<UUID>()
-    var missingScanRunning = false
-    var missingScanAgain = false
-    var fileObservers: [NSObjectProtocol] = []
+    @ObservationIgnored var fallbackThumbnailIDs = Set<UUID>()
+    @ObservationIgnored var missingScanRunning = false
+    @ObservationIgnored var missingScanAgain = false
+    @ObservationIgnored var fileObservers: [NSObjectProtocol] = []
     let fileCheckQueue = DispatchQueue(label: "com.rian.lighthouse.files", qos: .utility)
     var editHistory = EditHistory(limit: 100)
     let thumbnailCache = NSCache<NSString, ThumbnailEntry>()
-    var loadingThumbnails = Set<String>()
+    @ObservationIgnored var loadingThumbnails = Set<String>()
     static let thumbnailPixels = 360
     private static let pasteComponents: EditComponents = [.global, .lut]
 
@@ -616,6 +626,8 @@ final class LibraryModel: ObservableObject {
     }
 
     var folders: [String] {
+        // 캐시가 맞아도 사진 목록을 읽어, 사진이 바뀌면 이 값을 쓰는 화면이 다시 계산되게 한다.
+        let photos = self.photos
         if let foldersCache { return foldersCache }
         let computed = Array(Set(photos.map { ($0.path as NSString).deletingLastPathComponent })).sorted()
         foldersCache = computed
@@ -624,6 +636,7 @@ final class LibraryModel: ObservableObject {
 
     /// 화면을 다시 그릴 때마다 여러 번 읽히므로 사진 목록이 바뀔 때만 다시 계산한다.
     var counts: LibraryCounts {
+        _ = countsRevision
         if let countsCache { return countsCache }
         var computed = LibraryCounts()
         // 사진마다 속한 목록(전체·채택·제외·보정·연속 촬영)을 비트로 한 번만 구한다. JPEG 짝은 RAW와 같은 목록에서 뺀다.
@@ -673,6 +686,8 @@ final class LibraryModel: ObservableObject {
     }
 
     func photo(withID id: UUID) -> PhotoAsset? {
+        // 찾지 못했을 때도 사진 목록을 읽어, 나중에 그 사진이 생기면 이 값을 쓰는 화면이 다시 계산되게 한다.
+        let photos = self.photos
         if indexCache == nil {
             indexCache = Dictionary(photos.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
         }
@@ -688,6 +703,7 @@ final class LibraryModel: ObservableObject {
     }
 
     var structureSignature: Int {
+        let photos = self.photos
         if let structureSignatureCache { return structureSignatureCache }
         var hasher = Hasher()
         for photo in photos {
@@ -844,6 +860,7 @@ final class LibraryModel: ObservableObject {
     }
 
     var visiblePhotos: [PhotoAsset] {
+        _ = visibleRevision
         if let visibleCache { return visibleCache }
         var members: Set<UUID>?
         if case .collection(let id) = filter {
@@ -1039,7 +1056,7 @@ final class LibraryModel: ObservableObject {
     func selectionDidChange(previousActive: UUID?, clearFocus: Bool = true, requestRender shouldRender: Bool = true) {
         if clearFocus { NSApp.keyWindow?.makeFirstResponder(nil) }
         cancelDraft()
-        guard previousActive != selectedID else { objectWillChange.send(); return }
+        guard previousActive != selectedID else { return }
         selectionGeneration += 1
         editDragActive = false
         cancelAutoMask()
@@ -1165,7 +1182,6 @@ final class LibraryModel: ObservableObject {
         editDragActive = false
         // 근사로 그리는 중이던 결과가 아직 도착하지 않았어도 정확한 렌더를 바로 시작한다.
         if showingApproximation || (rendering && requestedApproximation) { requestRender() }
-        objectWillChange.send()
     }
 
     func undo() {
@@ -1188,7 +1204,6 @@ final class LibraryModel: ObservableObject {
             applyEditChanges(changes, useAfter: useAfter, record: false)
         case .marks(let changes):
             for change in changes { applyMarks(useAfter ? change.after : change.before, to: change.id) }
-            objectWillChange.send()
         case .removal(let removed):
             if useAfter { performRemoval(Set(removed.map(\.photo.id))) } else { restoreRemoved(removed) }
         }

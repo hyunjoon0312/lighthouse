@@ -16,7 +16,7 @@ final class ThumbnailRefillTests: XCTestCase {
         }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720), styleMask: [.titled],
                               backing: .buffered, defer: false)
-        let host = NSHostingView(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        let host = NSHostingView(rootView: AnyView(WorkspaceView().environment(model)))
         window.contentView = host
         addTeardownBlock { @MainActor in window.contentView = nil }
         try await TestSupport.wait("first thumbnails", timeout: 20) { Self.shown(host, model) == 4 }
@@ -38,8 +38,8 @@ final class ThumbnailRefillTests: XCTestCase {
     func testGridRefillsAfterTheSystemEvictsThumbnails() async throws {
         let (model, host) = try await hostedModel(mode: .grid)
         model.thumbnailCache.removeAllObjects()
-        // 시스템이 비울 때는 알림이 없다. 다음에 화면이 다시 그려질 때(다른 변경이 있을 때) 채운다.
-        model.objectWillChange.send()
+        // 시스템이 비울 때는 알림이 없다. 칸이 다시 그려질 때(다른 썸네일이 들어올 때) 채운다.
+        model.thumbnailRevision += 1
         try await TestSupport.wait("refill", timeout: 20) { Self.shown(host, model) == 4 }
     }
 

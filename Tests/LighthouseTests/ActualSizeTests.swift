@@ -77,7 +77,7 @@ final class CompareZoomSyncTests: XCTestCase {
         let size = CGSize(width: 1440, height: 900)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
                               backing: .buffered, defer: false)
-        let host = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+        let host = NSHostingView(rootView: WorkspaceView().environment(model))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         defer { window.contentView = nil }

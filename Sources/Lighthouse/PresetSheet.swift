@@ -2,7 +2,7 @@ import SwiftUI
 import LighthouseCore
 
 struct PresetSheet: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let request: PresetSheetRequest
     @State private var name: String

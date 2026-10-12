@@ -3,7 +3,7 @@ import SwiftUI
 import LighthouseCore
 
 struct RangeMaskSheet: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let request: RangeMaskSheetRequest
     @State private var value: RangeSelection
@@ -58,7 +58,7 @@ struct RangeMaskSheet: View {
 }
 
 struct SimilarPhotosSheet: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -107,7 +107,7 @@ struct SimilarPhotosSheet: View {
 }
 
 struct SmartPreviewSheet: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     private var targets: [PhotoAsset] { model.selectedPhotos.isEmpty ? Array(model.visiblePhotos.prefix(1)) : model.selectedPhotos }
 
@@ -142,7 +142,7 @@ struct SmartPreviewSheet: View {
 
 struct LibraryArchiveSheet: View {
     enum Mode { case backup, restore }
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @EnvironmentObject private var session: LibrarySession
     @Environment(\.dismiss) private var dismiss
     let mode: Mode

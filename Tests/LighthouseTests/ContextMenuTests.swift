@@ -46,7 +46,7 @@ final class ContextMenuTests: XCTestCase {
         model.revealInFinder = { revealed = $0 }
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                               backing: .buffered, defer: false)
-        let host = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+        let host = NSHostingView(rootView: WorkspaceView().environment(model))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         defer { window.contentView = nil }
@@ -94,7 +94,7 @@ final class ContextMenuTests: XCTestCase {
         model.setColorLabelNames([.red: "블로그"])
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                               backing: .buffered, defer: false)
-        let host = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+        let host = NSHostingView(rootView: WorkspaceView().environment(model))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         defer { window.contentView = nil }
@@ -117,7 +117,7 @@ final class ContextMenuTests: XCTestCase {
         let (model, _, _) = try await TestSupport.startedModel(self, photos: 1)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                               backing: .buffered, defer: false)
-        let host = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+        let host = NSHostingView(rootView: WorkspaceView().environment(model))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         defer { window.contentView = nil }
@@ -163,7 +163,7 @@ final class ContextMenuTests: XCTestCase {
         let (model, _, _) = try await TestSupport.startedModel(self, photos: 1)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                               backing: .buffered, defer: false)
-        let host = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+        let host = NSHostingView(rootView: WorkspaceView().environment(model))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         defer { window.contentView = nil }
@@ -199,7 +199,7 @@ final class ContextMenuTests: XCTestCase {
         let (model, _, _) = try await TestSupport.startedModel(self, photos: 4)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                               backing: .buffered, defer: false)
-        let host = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+        let host = NSHostingView(rootView: WorkspaceView().environment(model))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         defer { window.contentView = nil }

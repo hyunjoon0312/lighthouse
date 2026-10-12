@@ -3,7 +3,7 @@ import LighthouseCore
 
 /// 오른쪽 패널의 스냅숏과 이번 실행의 보정 기록. 누르면 그 상태로 돌아가며 ⌘Z로 되돌릴 수 있다.
 struct EditHistoryPanel: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let photo: PhotoAsset
     @State private var snapshotName = ""
 

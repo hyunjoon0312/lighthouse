@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import ImageIO
+import Observation
 @testable import Lighthouse
 import UniformTypeIdentifiers
 import XCTest
@@ -113,6 +114,28 @@ enum TestSupport {
         for key in ["autoAdvanceAfterMark", "collapseRAWJPEGPairs", "comparePinnedEdits", "importPresetID", "photoSortOrder",
                     "writesXMPSidecars", "colorLabelNames", "showsFaceCloseups"] {
             UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+}
+
+/// `read`가 읽은 모델 값 가운데 하나가 바뀔 때마다 센다. 화면과 메뉴도 몸체에서 읽은 값이 바뀔 때만 다시 계산되므로,
+/// 같은 값을 읽게 하면 그 화면이 다시 계산되는 횟수를 볼 수 있다. 바뀐 직후 다시 지켜보기 전의 변경은 세지 않는다.
+@MainActor
+final class ObservationCounter {
+    private(set) var count = 0
+    private let read: @MainActor () -> Void
+
+    init(_ read: @escaping @MainActor () -> Void) {
+        self.read = read
+        watch()
+    }
+
+    func reset() { count = 0 }
+
+    private func watch() {
+        withObservationTracking { read() } onChange: { [weak self] in
+            MainActor.assumeIsolated { self?.count += 1 }
+            DispatchQueue.main.async { self?.watch() }
         }
     }
 }

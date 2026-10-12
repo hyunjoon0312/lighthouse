@@ -1,8 +1,9 @@
 import AppKit
-import Combine
 import Foundation
 import LighthouseCore
 
+/// 지금 열린 라이브러리. 라이브러리를 바꿀 때만 알린다. 라이브러리 안의 값은 `@Observable`이라
+/// 메뉴와 화면이 읽은 값이 바뀔 때 저절로 다시 계산된다.
 @MainActor
 final class LibrarySession: ObservableObject {
     @Published private(set) var library: LibraryModel
@@ -10,12 +11,10 @@ final class LibrarySession: ObservableObject {
     @Published var errorMessage: String?
 
     private let usesEnvironmentRoot: Bool
-    private var libraryObservation: AnyCancellable?
 
     init(initialDirectory: URL? = nil) {
         usesEnvironmentRoot = ProcessInfo.processInfo.environment["LIGHTHOUSE_DATA_DIR"]?.isEmpty == false
         library = LibraryModel(dataDirectory: initialDirectory, allowsLaunchImport: true)
-        observeLibraryChanges()
     }
 
     @discardableResult
@@ -50,7 +49,6 @@ final class LibrarySession: ObservableObject {
             try library.flushSave()
             let next = LibraryModel(dataDirectory: target, allowsLaunchImport: false)
             library = next
-            observeLibraryChanges()
             if !usesEnvironmentRoot { UserDefaults.standard.set(target.path, forKey: "activeLibraryDirectory") }
             next.start()
             errorMessage = nil
@@ -58,13 +56,6 @@ final class LibrarySession: ObservableObject {
         } catch {
             errorMessage = "라이브러리를 열 수 없습니다: \(error.localizedDescription)"
             return false
-        }
-    }
-
-    private func observeLibraryChanges() {
-        libraryObservation?.cancel()
-        libraryObservation = library.objectWillChange.sink { [weak self] _ in
-            self?.objectWillChange.send()
         }
     }
 

@@ -9,8 +9,8 @@ import XCTest
 @MainActor
 final class WorkspaceUpdateCostTests: XCTestCase {
     func testOneModelChangeDoesNotRemeasureTheWholeCenterColumn() async throws {
-        // 보정 패널 자체를 다시 배치하는 비용은 빼고 가운데 열만 본다.
-        let perChange = try await costPerChange(inspector: false) { model, _ in model.burstQualities = [:] }
+        // 보정 패널 자체를 다시 배치하는 비용은 빼고 가운데 열만 본다. 가운데 열 아래 상태 줄의 안내를 바꾼다.
+        let perChange = try await costPerChange(inspector: false) { model, value in model.operationMessage = "안내 \(value)" }
         XCTAssertLessThan(perChange, 60, "값 하나가 바뀔 때 다시 배치하는 데 약 \(Int(perChange))ms")
     }
 
@@ -19,6 +19,13 @@ final class WorkspaceUpdateCostTests: XCTestCase {
     func testProgressChangeDoesNotRecomputeTheWorkspace() async throws {
         let perChange = try await costPerChange(inspector: true) { model, value in model.burstAnalysisProgress = value }
         XCTAssertLessThan(perChange, 10, "진행값 하나가 바뀔 때 약 \(Int(perChange))ms")
+    }
+
+    /// 모델은 화면이 실제로 읽은 값이 바뀔 때만 그 화면을 다시 계산한다(`@Observable`). 모델 전체를 지켜볼 때는
+    /// 보정 패널이 읽지 않는 값이 바뀌어도 두 패널을 모두 켜면 한 번에 debug 150ms 넘게 들었다.
+    func testUnrelatedModelChangeDoesNotRecomputeTheWorkspace() async throws {
+        let perChange = try await costPerChange(inspector: true) { model, value in model.burstMessage = "\(value)" }
+        XCTAssertLessThan(perChange, 10, "보정 패널이 읽지 않는 값 하나가 바뀔 때 약 \(Int(perChange))ms")
     }
 
     /// 사진 20장인 작업 화면을 1400×900 창에 띄우고 0.1초마다 30번 `change`를 부른다.
@@ -33,7 +40,7 @@ final class WorkspaceUpdateCostTests: XCTestCase {
         }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900), styleMask: [.titled],
                               backing: .buffered, defer: false)
-        window.contentView = NSHostingView(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        window.contentView = NSHostingView(rootView: AnyView(WorkspaceView().environment(model)))
         addTeardownBlock { @MainActor in window.contentView = nil }
         try await Task.sleep(nanoseconds: 2_000_000_000)
 

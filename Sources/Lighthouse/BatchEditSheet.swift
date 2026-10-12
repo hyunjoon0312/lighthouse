@@ -13,7 +13,7 @@ private struct BatchSnapshot {
 }
 
 struct BatchEditSheet: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var snapshot: BatchSnapshot?
     @State private var copyGlobal = true

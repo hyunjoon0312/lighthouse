@@ -4,7 +4,7 @@ import LighthouseCore
 /// 사진 칸의 오른쪽 클릭 메뉴. 고른 사진 중 하나를 누르면 고른 사진 모두에(그리드), 고르지 않은 사진을 누르면
 /// 그 사진만 골라 적용한다. 사진·비교·여러 장 보기에서는 누른 사진을 현재 사진으로 삼는다.
 struct PhotoContextMenu: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let photo: PhotoAsset
 
     var body: some View {

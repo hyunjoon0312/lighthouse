@@ -3,7 +3,7 @@ import SwiftUI
 import LighthouseCore
 
 struct WorkspaceView: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @State private var keyMonitor: Any?
     @State private var pinchMonitor: Any?
     /// 사진 보기 칸들의 창 안 위치(왼쪽 위 기준). 키는 확대할 수 있는 현재 사진 칸인지다. 트랙패드 핀치를 받을 곳이다.
@@ -53,16 +53,16 @@ struct WorkspaceView: View {
             if fullScreen.didExit(focused: model.isFocusView) { model.isFocusView = false }
             syncFullScreen()
         }
-        .sheet(isPresented: $model.showExport) { ExportSheet(lutDirectory: model.lutStore.directory).id(model.dataDirectory) }
-        .sheet(isPresented: $model.showBatchEdit) { BatchEditSheet() }
-        .sheet(isPresented: $model.showCardImport) { CardImportSheet() }
-        .sheet(isPresented: $model.showShortcuts) { ShortcutHelpSheet() }
-        .sheet(isPresented: $model.showHelp) { HelpSheet() }
-        .sheet(isPresented: $model.showColorLabelNames) { ColorLabelNamesSheet() }
-        .sheet(isPresented: $model.showPeople) { PeopleSheet() }
-        .sheet(item: $model.presetSheet) { request in PresetSheet(request: request) }
-        .sheet(item: $model.lightroomPresetSheet) { request in LightroomPresetImportSheet(request: request) }
-        .sheet(item: $model.cropSource) { source in
+        .sheet(isPresented: Bindable(model).showExport) { ExportSheet(lutDirectory: model.lutStore.directory).id(model.dataDirectory) }
+        .sheet(isPresented: Bindable(model).showBatchEdit) { BatchEditSheet() }
+        .sheet(isPresented: Bindable(model).showCardImport) { CardImportSheet() }
+        .sheet(isPresented: Bindable(model).showShortcuts) { ShortcutHelpSheet() }
+        .sheet(isPresented: Bindable(model).showHelp) { HelpSheet() }
+        .sheet(isPresented: Bindable(model).showColorLabelNames) { ColorLabelNamesSheet() }
+        .sheet(isPresented: Bindable(model).showPeople) { PeopleSheet() }
+        .sheet(item: Bindable(model).presetSheet) { request in PresetSheet(request: request) }
+        .sheet(item: Bindable(model).lightroomPresetSheet) { request in LightroomPresetImportSheet(request: request) }
+        .sheet(item: Bindable(model).cropSource) { source in
             let proxy = model.validatedPreviewSource(for: source)
             CropSheet(source: source, lutDirectory: model.lutStore.directory,
                       renderURL: proxy?.url, renderEdits: proxy?.edits)
@@ -79,17 +79,17 @@ struct WorkspaceView: View {
         } message: {
             Text(removalMessage)
         }
-        .sheet(item: $model.referenceMatchSource) { source in
+        .sheet(item: Bindable(model).referenceMatchSource) { source in
             ReferenceMatchSheet(source: source, lutDirectory: model.lutStore.directory) { adjustment, apply in
                 model.finishReferenceMatch(adjustment, apply: apply, source: source)
             }
         }
-        .sheet(item: $model.folderSheetRequest) { request in PhotoFolderSheet(request: request) }
-        .sheet(item: $model.rangeMaskRequest) { request in RangeMaskSheet(request: request) }
-        .sheet(isPresented: $model.showSimilarPhotos) { SimilarPhotosSheet() }
-        .sheet(isPresented: $model.showSmartPreviews) { SmartPreviewSheet() }
-        .sheet(isPresented: $model.showLibraryBackup) { LibraryArchiveSheet(mode: .backup) }
-        .sheet(isPresented: $model.showLibraryRestore) { LibraryArchiveSheet(mode: .restore) }
+        .sheet(item: Bindable(model).folderSheetRequest) { request in PhotoFolderSheet(request: request) }
+        .sheet(item: Bindable(model).rangeMaskRequest) { request in RangeMaskSheet(request: request) }
+        .sheet(isPresented: Bindable(model).showSimilarPhotos) { SimilarPhotosSheet() }
+        .sheet(isPresented: Bindable(model).showSmartPreviews) { SmartPreviewSheet() }
+        .sheet(isPresented: Bindable(model).showLibraryBackup) { LibraryArchiveSheet(mode: .backup) }
+        .sheet(isPresented: Bindable(model).showLibraryRestore) { LibraryArchiveSheet(mode: .restore) }
         .alert("스마트 폴더 이름", isPresented: Binding(
             get: { smartRenameTarget != nil },
             set: { if !$0 { smartRenameTarget = nil } }
@@ -456,12 +456,12 @@ struct WorkspaceView: View {
             }
             .padding(3).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
             // 좁은 창에서는 안내 글자가 잘리지 않게 줄인다. 음성 안내 이름은 같다.
-            TextField(compact ? "검색" : "파일명·키워드 검색", text: $model.search)
+            TextField(compact ? "검색" : "파일명·키워드 검색", text: Bindable(model).search)
                 .textFieldStyle(.roundedBorder).frame(width: compact ? 104 : 165)
                 .accessibilityLabel("파일명·키워드 검색")
             if compact {
                 Menu {
-                    Picker("별점", selection: $model.minimumRating) { ratingChoices }.pickerStyle(.inline)
+                    Picker("별점", selection: Bindable(model).minimumRating) { ratingChoices }.pickerStyle(.inline)
                 } label: {
                     Image(systemName: model.minimumRating > 0 ? "star.fill" : "star")
                         .foregroundStyle(model.minimumRating > 0 ? Palette.accent : Palette.inactive)
@@ -471,7 +471,7 @@ struct WorkspaceView: View {
                 .help(model.minimumRating > 0 ? "\(model.minimumRating)★ 이상만 보기" : "별점으로 거르기")
                 .accessibilityLabel("별점으로 거르기")
             } else {
-                Picker("별점", selection: $model.minimumRating) { ratingChoices }
+                Picker("별점", selection: Bindable(model).minimumRating) { ratingChoices }
                     .labelsHidden().frame(width: 112)
             }
             Button { showsCriteria.toggle() } label: {
@@ -486,18 +486,18 @@ struct WorkspaceView: View {
             .accessibilityLabel(model.criteria.isEmpty ? "조건으로 거르기" : "조건으로 거르기, 조건 걸림")
             .popover(isPresented: $showsCriteria, arrowEdge: .bottom) {
                 // 팝오버는 본 창의 강조색 범위 안이라 보조 단추까지 주황이 되지 않게 중립색을 준다.
-                CriteriaPopover().environmentObject(model).tint(Palette.inactive)
+                CriteriaPopover().environment(model).tint(Palette.inactive)
             }
             if compact {
                 Menu {
-                    Picker("정렬", selection: $model.sortOrder) { sortChoices }.pickerStyle(.inline)
+                    Picker("정렬", selection: Bindable(model).sortOrder) { sortChoices }.pickerStyle(.inline)
                 } label: { Image(systemName: "arrow.up.arrow.down") }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                     .tint(Palette.inactive)
                     .help("정렬: \(model.sortOrder.title)")
                     .accessibilityLabel("정렬")
             } else {
-                Picker("정렬", selection: $model.sortOrder) { sortChoices }
+                Picker("정렬", selection: Bindable(model).sortOrder) { sortChoices }
                     .labelsHidden().frame(width: 118)
                     .help("보이는 목록의 순서. 같은 값끼리는 촬영 시각 순입니다.")
             }
@@ -703,8 +703,8 @@ struct WorkspaceView: View {
             }
             if collapsesOptions {
                 Menu {
-                    Toggle("RAW+JPEG 한 장으로", isOn: $model.collapsesRAWJPEGPairs)
-                    Toggle("표시 후 다음 사진", isOn: $model.autoAdvance)
+                    Toggle("RAW+JPEG 한 장으로", isOn: Bindable(model).collapsesRAWJPEGPairs)
+                    Toggle("표시 후 다음 사진", isOn: Bindable(model).autoAdvance)
                 } label: {
                     Text("옵션").foregroundStyle(Palette.inactive)
                 }
@@ -712,10 +712,10 @@ struct WorkspaceView: View {
                 .help("RAW+JPEG 한 장으로 · 표시 후 다음 사진")
                 .accessibilityLabel("보기 옵션")
             } else {
-                Toggle("RAW+JPEG 한 장으로", isOn: $model.collapsesRAWJPEGPairs)
+                Toggle("RAW+JPEG 한 장으로", isOn: Bindable(model).collapsesRAWJPEGPairs)
                     .toggleStyle(.checkbox)
                     .help("RAW와 함께 찍힌 JPEG를 숨기고 RAW만 보여 줍니다. JPEG는 카탈로그에 남아 있으며 끄면 다시 보입니다.")
-                Toggle("표시 후 다음 사진", isOn: $model.autoAdvance)
+                Toggle("표시 후 다음 사진", isOn: Bindable(model).autoAdvance)
                     .toggleStyle(.checkbox)
                     .help("P·X·U·0–5 키로 표시하면 다음 사진으로 넘어갑니다")
             }
@@ -1036,7 +1036,7 @@ struct WorkspaceView: View {
                         if splitting {
                             if let before = model.splitBefore {
                                 SplitBeforeOverlay(before: before, imageSize: image.size, available: geometry.size,
-                                                   position: $model.splitPosition)
+                                                   position: Bindable(model).splitPosition)
                             } else {
                                 ProgressView("보정 전 모습 그리는 중…").controlSize(.small)
                             }
@@ -1334,7 +1334,7 @@ private func tileClicked(_ model: LibraryModel, _ photo: PhotoAsset) {
 }
 
 private struct PhotoTile: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let photo: PhotoAsset
     let selected: Bool
     let active: Bool
@@ -1473,7 +1473,7 @@ private struct PhotoTile: View {
 }
 
 private struct FilmstripTile: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let photo: PhotoAsset
     let selected: Bool
     let active: Bool
@@ -1538,7 +1538,7 @@ private struct FilmstripTile: View {
 /// 사진 아래 상태 줄의 안내. 가져오는 동안에는 몇 번째 파일인지 보인다. 그 문구는 파일마다 바뀌므로
 /// 진행 객체에 두고 이 줄만 지켜본다.
 private struct OperationMessageRow: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @ObservedObject var progress: JobProgress
 
     var body: some View {
@@ -1551,7 +1551,7 @@ private struct OperationMessageRow: View {
 
 /// 연속 촬영 목록 위의 분석·추천 도구. 분석은 Mac 안에서만 하고 원본을 바꾸지 않는다.
 private struct BurstBar: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1625,7 +1625,7 @@ extension WorkspaceMode {
 /// 여러 장 보기: 선택한 사진을 화면을 나눠 크게 놓는다. 누르면 현재 사진이 되어 별점·표시 키가 그 사진에 붙고,
 /// ×는 그 사진을 선택에서 빼 비교에서 뺀다. 두 번 누르면 사진 보기로 연다.
 private struct SurveyView: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
 
     var body: some View {
         let photos = model.surveyPhotos
@@ -1668,7 +1668,7 @@ private struct SurveyView: View {
 }
 
 private struct SurveyCell: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let photo: PhotoAsset
     let active: Bool
 

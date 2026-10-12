@@ -3,7 +3,7 @@ import SwiftUI
 import LighthouseCore
 
 struct BrushCanvasView: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @ObservedObject var canvas: CanvasStrokeState
     let photo: PhotoAsset
     let imageSize: NSSize

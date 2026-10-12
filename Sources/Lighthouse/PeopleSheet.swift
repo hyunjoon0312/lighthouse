@@ -8,7 +8,7 @@ private enum PeopleTab: String, CaseIterable {
 }
 
 struct PeopleSheet: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var selectedPersonID: UUID?
     @State private var tab: PeopleTab = .confirmed

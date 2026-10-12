@@ -3,7 +3,7 @@ import SwiftUI
 import LighthouseCore
 
 struct CropSheet: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     let source: PhotoAsset
     let renderURL: URL

@@ -97,7 +97,7 @@ extension LibraryModel {
 }
 
 struct HistogramView: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     /// 포인터가 올라간 구간. 끄는 동안에는 끌기 시작한 구간을 유지한다.
     @State private var hovered: HistogramZone?
     @State private var drag: HistogramDrag?

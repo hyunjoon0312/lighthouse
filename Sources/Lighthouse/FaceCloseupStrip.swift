@@ -4,7 +4,7 @@ import LighthouseCore
 /// 사진 보기 오른쪽의 얼굴 확대 줄(Lightroom Classic의 Faces 패널·Narrative Select의 Close-ups처럼). 사진 속 얼굴을 크게 모아
 /// 감은 눈과 다른 얼굴보다 흐린 얼굴을 알리고, 누르면 그 얼굴을 100%로 본다. 판정은 참고용이라 확대 그림을 먼저 보인다.
 struct FaceCloseupStrip: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let result: FaceCloseupResult
 
     var body: some View {

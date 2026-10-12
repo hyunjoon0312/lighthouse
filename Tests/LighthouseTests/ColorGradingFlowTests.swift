@@ -161,7 +161,7 @@ final class ColorGradingFlowTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                               backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: .darkAqua)
-        let host = NSHostingView(rootView: AnyView(view.environmentObject(model).preferredColorScheme(.dark)))
+        let host = NSHostingView(rootView: AnyView(view.environment(model).preferredColorScheme(.dark)))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         snapshotWindows.append(window)

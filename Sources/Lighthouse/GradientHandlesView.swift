@@ -3,7 +3,7 @@ import LighthouseCore
 
 /// 선택한 그라데이션 영역의 안내선과 조절점. 좌표는 원본 기준으로 저장하고 화면에는 회전·크롭을 거쳐 그린다.
 struct GradientHandlesView: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let photo: PhotoAsset
     let gradient: MaskGradient
     let imageRect: CGRect

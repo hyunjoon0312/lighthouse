@@ -4,7 +4,7 @@ import SwiftUI
 /// 금방 끝나는 작업으로 줄이 깜박이지 않는다. "작업 보기"는 작업마다 진행과 중지 단추가 있는 목록을 연다.
 /// 가져오기·내보내기는 바로 위 진행 막대가 보이므로 이 줄에서는 빼고 목록에만 둔다.
 struct BackgroundActivityRow: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     /// Drive 업로드와 작업 진행은 따로 바뀌는 모델이라 직접 지켜본다.
     @ObservedObject var drive: GoogleDriveUploadModel
     @ObservedObject var jobProgress: JobProgress
@@ -26,7 +26,7 @@ struct BackgroundActivityRow: View {
                         .accessibilityLabel("진행 중인 작업 보기")
                         .popover(isPresented: $showsList, arrowEdge: .top) {
                             // 팝오버는 본 창의 강조색 범위 안이라 중지 단추가 주황이 되지 않게 중립색을 준다.
-                            BackgroundActivityList(drive: drive, jobProgress: jobProgress).environmentObject(model).tint(Palette.inactive)
+                            BackgroundActivityList(drive: drive, jobProgress: jobProgress).environment(model).tint(Palette.inactive)
                         }
                 }
                 .padding(.horizontal, 16).padding(.vertical, 5)
@@ -55,7 +55,7 @@ struct BackgroundActivityRow: View {
 
 /// 진행 중인 작업 목록. 진행을 아는 작업은 막대로, 모르는 작업은 움직이는 막대로 보이며, 멈출 수 있는 작업에는 중지 단추가 있다.
 struct BackgroundActivityList: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @ObservedObject var drive: GoogleDriveUploadModel
     @ObservedObject var jobProgress: JobProgress
 

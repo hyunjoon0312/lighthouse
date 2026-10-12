@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// 오래 도는 작업의 진행값. 파일 한 장·컷 하나마다 바뀌므로 `LibraryModel`에서 떼어 둔다.
-/// 모델 값이 바뀌면 모델 전체를 지켜보는 화면이 모두 다시 계산되는데(보정 패널이 열려 있으면 한 번에 약 40ms),
-/// 진행값은 진행 막대와 작업 목록만 지켜보면 된다. 모델의 `operationProgress` 같은 이름으로도 읽고 쓸 수 있다.
+/// 오래 도는 작업의 진행값. 파일 한 장·컷 하나마다 바뀌므로 `LibraryModel`에서 떼어 두고 진행 막대와 작업 목록만
+/// 지켜보게 한다. 모델의 `operationProgress` 같은 이름으로도 읽고 쓸 수 있다.
 @MainActor
 final class JobProgress: ObservableObject {
     /// 가져오기·내보내기. 0…1.

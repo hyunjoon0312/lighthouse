@@ -9,7 +9,7 @@ private enum ExportDestination: String, CaseIterable, Identifiable {
 }
 
 struct ExportSheet: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.displayScale) private var displayScale
     @StateObject private var previewModel: JPEGPreviewModel

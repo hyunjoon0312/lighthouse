@@ -3,7 +3,7 @@ import SwiftUI
 import LighthouseCore
 
 struct InspectorView: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let photo: PhotoAsset
     @State private var presetSearch = ""
 
@@ -405,7 +405,7 @@ struct InspectorView: View {
                     .font(.caption)
                 }
             }
-            Picker("가져올 때 적용", selection: $model.importPresetID) {
+            Picker("가져올 때 적용", selection: Bindable(model).importPresetID) {
                 Text("없음").tag(UUID?.none)
                 ForEach(model.presets) { Text($0.name).tag(Optional($0.id)) }
             }
@@ -836,7 +836,7 @@ struct InspectorView: View {
 
 /// 키워드와 설명. 입력을 시작한 사진에 적용하므로 입력 중 다른 사진을 골라도 섞이지 않는다.
 private struct DescriptionFields: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let photo: PhotoAsset
     @State private var keywordText = ""
     @State private var captionText = ""

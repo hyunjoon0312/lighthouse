@@ -129,7 +129,7 @@ final class UIEventTests: XCTestCase {
         try await TestSupport.wait("import") { !model.isImporting && model.photos.count == 1 }
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                               backing: .buffered, defer: false)
-        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environment(model)))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         window.orderFrontRegardless()
@@ -200,7 +200,7 @@ final class UIEventTests: XCTestCase {
         let (model, _, _) = try await TestSupport.startedModel(self, photos: 4)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                               backing: .buffered, defer: false)
-        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environment(model)))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         window.orderFrontRegardless()
@@ -263,7 +263,7 @@ final class UIEventTests: XCTestCase {
         defer { restoreActive() }
         let window = KeyWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                                backing: .buffered, defer: false)
-        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environment(model)))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         window.orderFrontRegardless()
@@ -303,7 +303,7 @@ final class UIEventTests: XCTestCase {
         defer { restoreActive() }
         let window = KeyWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                                backing: .buffered, defer: false)
-        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environment(model)))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         window.orderFrontRegardless()
@@ -346,7 +346,7 @@ final class UIEventTests: XCTestCase {
         defer { restoreActive() }
         let window = KeyWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                                backing: .buffered, defer: false)
-        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environment(model)))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         window.orderFrontRegardless()
@@ -378,7 +378,7 @@ final class UIEventTests: XCTestCase {
         let (model, _, _) = try await TestSupport.startedModel(self, photos: 3)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                               backing: .buffered, defer: false)
-        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environment(model)))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         window.orderFrontRegardless()
@@ -406,7 +406,7 @@ final class UIEventTests: XCTestCase {
         let (model, _, _) = try await TestSupport.startedModel(self, photos: 2)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                               backing: .buffered, defer: false)
-        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environment(model)))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         window.orderFrontRegardless()
@@ -431,7 +431,7 @@ final class UIEventTests: XCTestCase {
         let (model, _, _) = try await TestSupport.startedModel(self, photos: 2)
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .resizable],
                               backing: .buffered, defer: false)
-        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environmentObject(model)))
+        let host = FirstMouseHost(rootView: AnyView(WorkspaceView().environment(model)))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         window.orderFrontRegardless()

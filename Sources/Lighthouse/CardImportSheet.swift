@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct CardImportSheet: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @AppStorage("cardImportDestination") private var destinationPath = CardImportSheet.defaultDestination
     @AppStorage("cardImportOrganizeByDate") private var organizeByDate = true

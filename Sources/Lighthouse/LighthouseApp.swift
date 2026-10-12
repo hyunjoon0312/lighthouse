@@ -15,7 +15,7 @@ struct LighthouseApp: App {
         WindowGroup {
             ZStack {
                 WorkspaceView()
-                    .environmentObject(session.library)
+                    .environment(session.library)
                     .environmentObject(session)
                     .id(session.library.dataDirectory.path)
                     .disabled(session.isSwitching)

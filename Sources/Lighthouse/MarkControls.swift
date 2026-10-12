@@ -3,7 +3,7 @@ import LighthouseCore
 
 /// 별점 다섯 개. 고른 사진의 별점이 모두 같으면 그 값을, 다르면 빈 별을 보이고, 같은 별을 다시 누르면 뗀다.
 struct MarkRatingStars: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
 
     var body: some View {
         let rating = model.commonMarkRating
@@ -33,7 +33,7 @@ struct MarkRatingStars: View {
 
 /// 채택·제외·해제 단추. 고른 사진의 표시가 모두 같으면 그 단추를 강조색으로 보인다.
 struct MarkFlagButtons: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
 
     var body: some View {
         HStack(spacing: 8) {
@@ -59,7 +59,7 @@ struct MarkFlagButtons: View {
 /// 사진·비교·여러 장 보기에서는 보고 있는 한 장에 채택·제외·별점·라벨을 붙이며 P·X·U·1–5·6–9 키와 같다.
 /// 오른쪽 패널은 보정과 키워드·설명에 쓴다.
 struct CullingBar: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
 
     var body: some View {
         // 좁은 창에서는 오른쪽 안내 글을 먼저 뺀다.

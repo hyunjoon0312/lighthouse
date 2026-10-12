@@ -3,7 +3,7 @@ import LighthouseCore
 
 /// JPEG·HEIC와 현상된 RAW에 공통으로 적용되는 노이즈 감소.
 struct NoiseReductionControls: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let edits: EditSettings
 
     private var settings: NoiseReductionSettings { edits.noiseReduction }

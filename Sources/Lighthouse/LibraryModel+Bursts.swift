@@ -23,6 +23,9 @@ extension LibraryModel {
 
     /// 모든 컷을 분석했거나 읽지 못한 묶음만 추천한다. 분석을 중간에 멈춘 묶음은 일부 컷만 보고 고르지 않는다.
     var burstRecommendations: [UUID: BurstRecommendation] {
+        // 캐시가 맞아도 입력을 읽어, 묶음이나 분석 결과가 바뀌면 이 값을 쓰는 화면이 다시 계산되게 한다.
+        // 묶음을 먼저 읽어야 사진 구성이 바뀌었을 때 지난 추천을 비운 뒤 캐시를 본다.
+        _ = (burstIndex, burstQualities, burstFailedIDs)
         if let burstRecommendationCache { return burstRecommendationCache }
         var computed: [UUID: BurstRecommendation] = [:]
         if !burstQualities.isEmpty {
@@ -78,8 +81,8 @@ extension LibraryModel {
         burstQueue.async { [pipeline] in
             var failed = 0
             var cancelled = false
-            // 결과는 모아서 0.25초에 한 번만 넘긴다. 넘길 때마다 작업 화면 전체를 다시 계산하므로(보정 패널이 열려 있으면
-            // 약 40ms) 컷마다 넘기면 빨리 끝나는 컷이 이어질 때 화면이 버벅인다. 첫 컷은 바로 넘겨 진행이 시작된 것을 보인다.
+            // 결과는 모아서 0.25초에 한 번만 넘긴다. 넘길 때마다 배지·추천을 읽는 칸이 다시 계산되므로, 컷마다 넘기면
+            // 빨리 끝나는 컷이 이어질 때 화면이 버벅인다. 첫 컷은 바로 넘겨 진행이 시작된 것을 보인다.
             var pending: [(id: UUID, quality: PhotoQuality?)] = []
             var progress = 0.0
             var lastReport: DispatchTime?
@@ -125,13 +128,13 @@ extension LibraryModel {
     /// 지금 분석 중인 한 장은 끝까지 하고 나머지를 건너뛴다. 이미 분석한 결과는 남긴다.
     func cancelBurstAnalysis() {
         burstCancellation?.cancel()
-        // 중지 표시는 플래그에서 읽으므로 화면에 바뀐 것을 알린다.
-        objectWillChange.send()
+        cancellationRevision &+= 1
     }
 
     /// 중지를 눌렀지만 분석 중인 한 장이 아직 끝나지 않았다. 분석이 끝나면 새 플래그가 생기므로 저절로 풀린다.
     var isCancellingBursts: Bool {
-        isAnalyzingBursts && burstCancellation?.isCancelled == true
+        _ = cancellationRevision
+        return isAnalyzingBursts && burstCancellation?.isCancelled == true
     }
 
     private func burstSummary(_ groups: [BurstGroup], failed: Int, cancelled: Bool) -> String {

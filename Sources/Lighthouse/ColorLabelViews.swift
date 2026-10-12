@@ -59,7 +59,7 @@ struct ColorLabelRow: View {
 
 /// 색상 라벨마다 쓰임 이름을 붙이는 창(빨강 → 블로그, 초록 → 인화). 비우면 색 이름으로 돌아간다.
 struct ColorLabelNamesSheet: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var draft: [PhotoColorLabel: String] = [:]
 

@@ -3,7 +3,7 @@ import LighthouseCore
 
 /// 톤 곡선: 채널을 골라 점을 끌어 바꾼다. 빈 곳을 누르면 점이 생긴다.
 struct ToneCurveControls: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let edits: EditSettings
     @State private var channel: CurveChannel = .master
     @State private var selectedPoint: Int?
@@ -74,7 +74,7 @@ struct ToneCurveControls: View {
 
 /// 색상 범위 HSL: 색 하나를 골라 색조·채도·명도를 바꾼다. 바꾼 색에는 점을 붙인다.
 struct HSLControls: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let edits: EditSettings
     @State private var band: ColorBand = .red
 
@@ -140,7 +140,7 @@ struct HSLControls: View {
 
 /// 필름 입자. 원본 해상도에서만 의미가 있어 스마트 미리보기에서는 끈다.
 struct GrainControls: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let edits: EditSettings
     var allowsFullResolutionEffects = true
 

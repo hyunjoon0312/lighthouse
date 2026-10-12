@@ -59,7 +59,7 @@ final class HelpGuideTests: XCTestCase {
         let (model, _, _) = try await TestSupport.startedModel(self, photos: 1)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720), styleMask: [.titled],
                               backing: .buffered, defer: false)
-        window.contentView = NSHostingView(rootView: WorkspaceView().environmentObject(model))
+        window.contentView = NSHostingView(rootView: WorkspaceView().environment(model))
         defer { window.contentView = nil }
         try await Task.sleep(nanoseconds: 500_000_000)
 

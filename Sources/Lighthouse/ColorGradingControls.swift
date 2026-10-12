@@ -3,7 +3,7 @@ import LighthouseCore
 
 /// 컬러 그레이딩: 영역 하나를 골라 색상 바퀴와 슬라이더로 조절한다. 혼합·균형은 모든 영역에 공통이다.
 struct ColorGradingControls: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let edits: EditSettings
     @State private var region: ColorGradeRegion = .shadows
 

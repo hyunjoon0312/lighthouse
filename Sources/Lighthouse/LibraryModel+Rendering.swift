@@ -6,7 +6,8 @@ import LighthouseCore
 @MainActor
 extension LibraryModel {
     func thumbnail(for photo: PhotoAsset) -> NSImage? {
-        thumbnailCache.object(forKey: photo.id.uuidString as NSString)?.image
+        _ = thumbnailRevision
+        return thumbnailCache.object(forKey: photo.id.uuidString as NSString)?.image
     }
 
     /// 보정한 사진은 보정 결과로 썸네일을 만든다. 편집 화면의 사진은 미리보기 렌더가 썸네일을 갱신한다.
@@ -82,7 +83,7 @@ extension LibraryModel {
         let entry = ThumbnailEntry(image: NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height)),
                                    edits: edits, isFallback: isFallback)
         thumbnailCache.setObject(entry, forKey: id.uuidString as NSString, cost: image.width * image.height * 4)
-        objectWillChange.send()
+        thumbnailRevision &+= 1
     }
 
     /// HDR을 표시할 수 있는 화면이 있는지. 없으면 HDR 하이라이트를 쓴 사진도 SDR로 그려 시간을 아낀다.

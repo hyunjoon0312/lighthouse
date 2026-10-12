@@ -2,7 +2,7 @@ import SwiftUI
 import LighthouseCore
 
 struct RetouchControls: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let photo: PhotoAsset
 
     var body: some View {
@@ -24,7 +24,7 @@ struct RetouchControls: View {
                     Spacer()
                     Text("\(Int(model.retouchRadius * 200))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
-                Slider(value: $model.retouchRadius, in: 0.002...0.15)
+                Slider(value: Bindable(model).retouchRadius, in: 0.002...0.15)
                     .accessibilityLabel("복구 브러시 크기")
             }
             if model.retouchMode == .clone {

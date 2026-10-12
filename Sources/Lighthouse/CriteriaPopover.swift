@@ -3,7 +3,7 @@ import LighthouseCore
 
 /// 표시·카메라·렌즈·초점거리·ISO·촬영일 조건. 바꾸는 즉시 목록에 걸리며, 검색어·별점과 함께 스마트 폴더로 저장할 수 있다.
 struct CriteriaPopover: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     @State private var name = ""
     @State private var saveError: String?
     @State private var minimumFocalLengthIsValid = true
@@ -23,7 +23,7 @@ struct CriteriaPopover: View {
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
                 GridRow {
                     Text("표시")
-                    Picker("표시", selection: $model.criteria.flag) {
+                    Picker("표시", selection: Bindable(model).criteria.flag) {
                         Text("모두").tag(PhotoFlag?.none)
                         Text("채택됨").tag(PhotoFlag?.some(.pick))
                         Text("제외됨").tag(PhotoFlag?.some(.reject))
@@ -33,7 +33,7 @@ struct CriteriaPopover: View {
                 }
                 GridRow {
                     Text("라벨")
-                    Picker("라벨", selection: $model.criteria.colorLabel) {
+                    Picker("라벨", selection: Bindable(model).criteria.colorLabel) {
                         Text("모두").tag(PhotoColorLabel?.none)
                         ForEach(PhotoColorLabel.allCases, id: \.self) { Text(model.labelMenuTitle($0)).tag(PhotoColorLabel?.some($0)) }
                     }
@@ -41,7 +41,7 @@ struct CriteriaPopover: View {
                 }
                 GridRow {
                     Text("카메라")
-                    Picker("카메라", selection: $model.criteria.camera) {
+                    Picker("카메라", selection: Bindable(model).criteria.camera) {
                         Text("모두").tag(String?.none)
                         ForEach(model.cameraChoices, id: \.self) { Text($0).tag(String?.some($0)) }
                     }
@@ -49,7 +49,7 @@ struct CriteriaPopover: View {
                 }
                 GridRow {
                     Text("렌즈")
-                    Picker("렌즈", selection: $model.criteria.lens) {
+                    Picker("렌즈", selection: Bindable(model).criteria.lens) {
                         Text("모두").tag(String?.none)
                         ForEach(model.lensChoices, id: \.self) { Text($0).tag(String?.some($0)) }
                     }
@@ -59,11 +59,11 @@ struct CriteriaPopover: View {
                     Text("초점거리")
                     HStack(alignment: .top) {
                         CriteriaNumberField("최소", accessibilityLabel: "최소 초점거리",
-                                            value: $model.criteria.minimumFocalLength,
+                                            value: Bindable(model).criteria.minimumFocalLength,
                                             isValid: $minimumFocalLengthIsValid, resetID: numericResetID)
                         Text("–")
                         CriteriaNumberField("최대", accessibilityLabel: "최대 초점거리",
-                                            value: $model.criteria.maximumFocalLength,
+                                            value: Bindable(model).criteria.maximumFocalLength,
                                             isValid: $maximumFocalLengthIsValid, resetID: numericResetID)
                         Text("mm").foregroundStyle(.secondary).fixedSize()
                     }
@@ -73,11 +73,11 @@ struct CriteriaPopover: View {
                     Text("ISO")
                     HStack(alignment: .top) {
                         CriteriaNumberField("최소", accessibilityLabel: "최소 ISO",
-                                            value: $model.criteria.minimumISO,
+                                            value: Bindable(model).criteria.minimumISO,
                                             isValid: $minimumISOIsValid, resetID: numericResetID)
                         Text("–")
                         CriteriaNumberField("최대", accessibilityLabel: "최대 ISO",
-                                            value: $model.criteria.maximumISO,
+                                            value: Bindable(model).criteria.maximumISO,
                                             isValid: $maximumISOIsValid, resetID: numericResetID)
                     }
                     .fixedSize(horizontal: true, vertical: false)

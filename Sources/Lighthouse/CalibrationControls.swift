@@ -3,7 +3,7 @@ import LighthouseCore
 
 /// Lightroom 캘리브레이션: 그림자 틴트와 빨강·초록·파랑 원색의 색조·채도(-100…100).
 struct CalibrationControls: View {
-    @EnvironmentObject private var model: LibraryModel
+    @Environment(LibraryModel.self) private var model
     let edits: EditSettings
 
     private static let rows: [(String, WritableKeyPath<CalibrationSettings, Double>)] = [
