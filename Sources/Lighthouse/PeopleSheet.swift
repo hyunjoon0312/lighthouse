@@ -109,8 +109,7 @@ struct PeopleSheet: View {
             }
             if model.isAnalyzingFaces {
                 HStack {
-                    ProgressView(value: Double(model.faceAnalysisCompleted), total: Double(max(1, model.faceAnalysisTotal)))
-                    Text("\(model.faceAnalysisCompleted)/\(model.faceAnalysisTotal)").monospacedDigit().font(.caption)
+                    FaceAnalysisProgress(progress: model.jobProgress)
                     Button(model.isCancellingFaces ? "중지하는 중…" : "중지") { model.cancelFaceAnalysis() }
                         .disabled(model.isCancellingFaces)
                 }
@@ -301,5 +300,15 @@ struct PeopleSheet: View {
 
     private func empty(_ title: String, detail: String) -> some View {
         ContentUnavailableView(title, systemImage: "person.crop.square", description: Text(detail))
+    }
+}
+
+/// 얼굴 찾기 진행. 진행만 지켜보므로 한 장씩 늘어도 인물 창 전체는 다시 계산되지 않는다.
+private struct FaceAnalysisProgress: View {
+    @ObservedObject var progress: JobProgress
+
+    var body: some View {
+        ProgressView(value: Double(progress.facesCompleted), total: Double(max(1, progress.facesTotal)))
+        Text("\(progress.facesCompleted)/\(progress.facesTotal)").monospacedDigit().font(.caption)
     }
 }

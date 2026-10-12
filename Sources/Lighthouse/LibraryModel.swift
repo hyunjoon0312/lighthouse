@@ -197,8 +197,14 @@ final class LibraryModel: ObservableObject {
     @Published var pinnedID: UUID?
     @Published var loadError: String?
     @Published var catalogLoaded = false
-    @Published var operationMessage: String?
-    @Published var operationProgress: Double = 0
+    /// 새 안내가 오면 가져오는 중 몇 번째 파일인지 보이던 문구를 지운다. 둘 중 나중에 온 것이 상태 줄에 보인다.
+    @Published var operationMessage: String? { didSet { jobProgress.operationStep = nil } }
+    /// 진행값은 모델 전체를 지켜보는 화면이 다시 계산되지 않게 따로 둔다(`JobProgress`). 아래 이름들은 그 값을 그대로 읽고 쓴다.
+    let jobProgress = JobProgress()
+    var operationProgress: Double {
+        get { jobProgress.operation }
+        set { jobProgress.operation = newValue }
+    }
     @Published var isImporting = false
     @Published var isExporting = false
     @Published var isCancellingExport = false
@@ -216,7 +222,10 @@ final class LibraryModel: ObservableObject {
     @Published var rangeMaskRequest: RangeMaskSheetRequest?
     @Published var isAnalyzingFlicker = false
     @Published var flickerAnalysisMessage: String?
-    @Published var workflowProgress = 0.0
+    var workflowProgress: Double {
+        get { jobProgress.workflow }
+        set { jobProgress.workflow = newValue }
+    }
     @Published var isRunningWorkflow = false
     /// 지금 도는 묶음 작업의 종류. 뒤에서 도는 작업 표시에 이름을 보인다.
     @Published var workflowKind: WorkflowKind?
@@ -236,8 +245,14 @@ final class LibraryModel: ObservableObject {
     @Published var peopleMessage: String?
     @Published var peopleSaveError: String?
     @Published var isAnalyzingFaces = false
-    @Published var faceAnalysisCompleted = 0
-    @Published var faceAnalysisTotal = 0
+    var faceAnalysisCompleted: Int {
+        get { jobProgress.facesCompleted }
+        set { jobProgress.facesCompleted = newValue }
+    }
+    var faceAnalysisTotal: Int {
+        get { jobProgress.facesTotal }
+        set { jobProgress.facesTotal = newValue }
+    }
     @Published var isCancellingFaces = false
     @Published var isClearingPeople = false
     @Published var presets: [EditPreset] = []
@@ -481,7 +496,10 @@ final class LibraryModel: ObservableObject {
     /// 분석하려 했지만 읽지 못한 파일. 이 컷은 추천에서 빼고 표시도 바꾸지 않는다.
     @Published var burstFailedIDs = Set<UUID>() { didSet { burstRecommendationCache = nil } }
     @Published var isAnalyzingBursts = false
-    @Published var burstAnalysisProgress = 0.0
+    var burstAnalysisProgress: Double {
+        get { jobProgress.bursts }
+        set { jobProgress.bursts = newValue }
+    }
     @Published var burstMessage: String?
     /// 삭제를 확인받는 중인 가상 사본.
     @Published var catalogRemoval: CatalogRemoval?

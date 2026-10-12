@@ -142,7 +142,7 @@ struct ExportSheet: View {
             }
             if model.isExporting {
                 HStack {
-                    ProgressView(value: model.operationProgress)
+                    JobProgressBar(progress: model.jobProgress, value: \.operation)
                     Button(model.isCancellingExport ? "중지하는 중…" : "중지") { model.cancelExport() }
                         .disabled(model.isCancellingExport)
                         .accessibilityLabel(model.isCancellingExport ? "내보내기 중지하는 중…" : "내보내기 중지")

@@ -22,7 +22,7 @@ final class BurstProgressBatchingTests: XCTestCase {
         XCTAssertEqual(model.burstIndex.groups.count, 1)
 
         var reports = 0
-        let watch = model.$burstAnalysisProgress.dropFirst().sink { _ in reports += 1 }
+        let watch = model.jobProgress.$bursts.dropFirst().sink { _ in reports += 1 }
         defer { watch.cancel() }
         let began = Date()
         model.analyzeBursts()

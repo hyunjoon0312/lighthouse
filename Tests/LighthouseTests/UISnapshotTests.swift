@@ -80,7 +80,7 @@ final class UISnapshotTests: XCTestCase {
         model.faceAnalysisTotal = 120
         model.sidecarWritesInFlight = 2
         try await render(WorkspaceView(), model, narrow, "grid-activity", settle: 2)
-        try await render(BackgroundActivityList(drive: model.driveUpload), model, CGSize(width: 320, height: 190),
+        try await render(BackgroundActivityList(drive: model.driveUpload, jobProgress: model.jobProgress), model, CGSize(width: 320, height: 190),
                          "activity-list")
         model.isAnalyzingFaces = false
         model.sidecarWritesInFlight = 0

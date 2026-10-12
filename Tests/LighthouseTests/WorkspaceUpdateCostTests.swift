@@ -9,11 +9,25 @@ import XCTest
 @MainActor
 final class WorkspaceUpdateCostTests: XCTestCase {
     func testOneModelChangeDoesNotRemeasureTheWholeCenterColumn() async throws {
+        // 보정 패널 자체를 다시 배치하는 비용은 빼고 가운데 열만 본다.
+        let perChange = try await costPerChange(inspector: false) { model, _ in model.burstQualities = [:] }
+        XCTAssertLessThan(perChange, 60, "값 하나가 바뀔 때 다시 배치하는 데 약 \(Int(perChange))ms")
+    }
+
+    /// 진행값은 모델에서 떼어 두어(`JobProgress`) 바뀌어도 진행 막대만 다시 그린다. 모델에 있을 때는 두 패널을 모두 켜면
+    /// 한 번에 debug 150ms 넘게, release 약 58ms가 들었다.
+    func testProgressChangeDoesNotRecomputeTheWorkspace() async throws {
+        let perChange = try await costPerChange(inspector: true) { model, value in model.burstAnalysisProgress = value }
+        XCTAssertLessThan(perChange, 10, "진행값 하나가 바뀔 때 약 \(Int(perChange))ms")
+    }
+
+    /// 사진 20장인 작업 화면을 1400×900 창에 띄우고 0.1초마다 30번 `change`를 부른다.
+    /// 10ms마다 깨어나는 박동이 빠진 만큼을 메인 스레드가 바빴던 시간으로 보고 한 번당 ms로 돌려준다.
+    private func costPerChange(inspector: Bool, _ change: (LibraryModel, Double) -> Void) async throws -> Double {
         let (model, _, _) = try await TestSupport.startedModel(self, photos: 20)
         try await TestSupport.wait("idle") { !model.hasConflictingWorkflow }
-        // 보정 패널 자체를 다시 배치하는 비용은 빼고 가운데 열만 본다.
         UserDefaults.standard.set(true, forKey: "showsSidebar")
-        UserDefaults.standard.set(false, forKey: "showsInspector")
+        UserDefaults.standard.set(inspector, forKey: "showsInspector")
         addTeardownBlock {
             for key in ["showsSidebar", "showsInspector"] { UserDefaults.standard.removeObject(forKey: key) }
         }
@@ -23,19 +37,17 @@ final class WorkspaceUpdateCostTests: XCTestCase {
         addTeardownBlock { @MainActor in window.contentView = nil }
         try await Task.sleep(nanoseconds: 2_000_000_000)
 
-        // 10ms마다 깨어나는 박동이 빠진 만큼을 메인 스레드가 바빴던 시간으로 본다.
         var beats = 0
         let timer = Timer(timeInterval: 0.01, repeats: true) { _ in beats += 1 }
         RunLoop.main.add(timer, forMode: .common)
         let changes = 30
         let start = CFAbsoluteTimeGetCurrent()
-        for change in 0..<changes {
-            model.burstAnalysisProgress = Double(change) / Double(changes)
+        for index in 0..<changes {
+            change(model, Double(index) / Double(changes))
             try await Task.sleep(nanoseconds: 100_000_000)
         }
         let elapsed = CFAbsoluteTimeGetCurrent() - start
         timer.invalidate()
-        let perChange = max(0, elapsed - Double(beats) * 0.01) / Double(changes) * 1000
-        XCTAssertLessThan(perChange, 60, "값 하나가 바뀔 때 다시 배치하는 데 약 \(Int(perChange))ms")
+        return max(0, elapsed - Double(beats) * 0.01) / Double(changes) * 1000
     }
 }

@@ -1153,7 +1153,7 @@ struct WorkspaceView: View {
         VStack(spacing: 0) {
             if model.isImporting || model.isExporting {
                 HStack {
-                    ProgressView(value: model.operationProgress).tint(Palette.accent)
+                    JobProgressBar(progress: model.jobProgress, value: \.operation).tint(Palette.accent)
                     if model.isImporting && model.canCancelImport {
                         Button(model.isCancellingImport ? "중지하는 중…" : "중지") { model.cancelImport() }
                             .disabled(model.isCancellingImport)
@@ -1165,11 +1165,8 @@ struct WorkspaceView: View {
                 .padding(.horizontal, 16).padding(.top, 4)
             }
             // 얼굴 찾기·XMP 쓰기처럼 뒤에서 도는 작업. 가져오기·내보내기는 위 줄이 보인다.
-            BackgroundActivityRow(drive: model.driveUpload)
-            if let message = model.operationMessage {
-                HStack { Text(message).lineLimit(2); Spacer(); Button { model.operationMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("안내 닫기") }
-                    .font(.caption).foregroundStyle(Palette.muted).padding(.horizontal, 16).padding(.vertical, 6)
-            }
+            BackgroundActivityRow(drive: model.driveUpload, jobProgress: model.jobProgress)
+            OperationMessageRow(progress: model.jobProgress)
         }
         .frame(maxWidth: .infinity)
         .background(Palette.panel)
@@ -1538,6 +1535,20 @@ private struct FilmstripTile: View {
     }
 }
 
+/// 사진 아래 상태 줄의 안내. 가져오는 동안에는 몇 번째 파일인지 보인다. 그 문구는 파일마다 바뀌므로
+/// 진행 객체에 두고 이 줄만 지켜본다.
+private struct OperationMessageRow: View {
+    @EnvironmentObject private var model: LibraryModel
+    @ObservedObject var progress: JobProgress
+
+    var body: some View {
+        if let message = progress.operationStep ?? model.operationMessage {
+            HStack { Text(message).lineLimit(2); Spacer(); Button { model.operationMessage = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("안내 닫기") }
+                .font(.caption).foregroundStyle(Palette.muted).padding(.horizontal, 16).padding(.vertical, 6)
+        }
+    }
+}
+
 /// 연속 촬영 목록 위의 분석·추천 도구. 분석은 Mac 안에서만 하고 원본을 바꾸지 않는다.
 private struct BurstBar: View {
     @EnvironmentObject private var model: LibraryModel
@@ -1548,7 +1559,7 @@ private struct BurstBar: View {
                 Text("연속 촬영 \(model.burstIndex.groups.count)묶음")
                     .font(.caption.weight(.semibold)).foregroundStyle(Palette.accent)
                 if model.isAnalyzingBursts {
-                    ProgressView(value: model.burstAnalysisProgress).frame(width: 120)
+                    JobProgressBar(progress: model.jobProgress, value: \.bursts).frame(width: 120)
                     Button(model.isCancellingBursts ? "중지하는 중…" : "중지") { model.cancelBurstAnalysis() }
                         .disabled(model.isCancellingBursts)
                         .accessibilityLabel(model.isCancellingBursts ? "연속 촬영 분석 중지하는 중…" : "연속 촬영 분석 중지")

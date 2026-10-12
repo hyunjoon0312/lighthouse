@@ -71,7 +71,10 @@ extension LibraryModel {
                     failed.append("\(url.lastPathComponent): \(error.localizedDescription)")
                 }
                 let progress = Double(index + 1) / Double(max(1, candidates.count))
-                DispatchQueue.main.async { self.operationProgress = progress; self.operationMessage = "가져오는 중 \(index + 1)/\(candidates.count)" }
+                DispatchQueue.main.async {
+                    self.operationProgress = progress
+                    self.jobProgress.operationStep = "가져오는 중 \(index + 1)/\(candidates.count)"
+                }
             }
             DispatchQueue.main.async {
                 let onExternalVolume = added.contains { $0.path.hasPrefix("/Volumes/") }
@@ -218,7 +221,7 @@ extension LibraryModel {
                 let progress = Double(index + 1) / Double(max(1, files.count))
                 DispatchQueue.main.async {
                     self.operationProgress = progress
-                    self.operationMessage = "복사하는 중 \(index + 1)/\(files.count)"
+                    self.jobProgress.operationStep = "복사하는 중 \(index + 1)/\(files.count)"
                 }
             }
             DispatchQueue.main.async {

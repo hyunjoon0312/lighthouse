@@ -77,7 +77,7 @@ struct BatchEditSheet: View {
                 Text("원본 파일, 별점과 채택·제외 표시는 바뀌지 않습니다.")
                     .font(.caption2).foregroundStyle(.secondary)
                 if model.isRunningWorkflow {
-                    ProgressView(value: model.workflowProgress)
+                    JobProgressBar(progress: model.jobProgress, value: \.workflow)
                 }
                 if let report = model.batchWorkflowReport {
                     Text("변경 \(report.changed)장 · 건너뜀 \(report.skipped)장 · 실패 \(report.failures.count)장")
